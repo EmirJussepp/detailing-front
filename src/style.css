@@ -1,0 +1,21 @@
+html, body, #app {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100% !important;
+  min-height: 100vh !important;
+  background: #06040b !important;
+  overflow-x: hidden;
+}
+
+/* Importantísimo: NO centrar el body */
+body {
+  display: block !important;
+}
+
+/* Importantísimo: NUNCA limitar el #app */
+#app {
+  max-width: none !important;
+}
+
+
+
