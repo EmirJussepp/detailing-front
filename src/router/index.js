@@ -2,26 +2,32 @@ import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '../layouts/MainLayout.vue'
 import AuthLayout from '../layouts/AuthLayout.vue'
 
-import HomeView from '../views/HomeView.vue'
 import LoginView from '../views/LoginView.vue'
+import DashboardView from '../views/HomeView.vue'
+
+import CajaView from '../views/CajaView.vue'
+import ClientesView from '../views/ClientesView.vue'
+import ProductosView from '../views/ProductosView.vue'
+import VentasView from '../views/VentasView.vue'
+import ProveedoresView from '../views/ProveedoresView.vue'
 
 const routes = [
-  // Public (sin login)
   {
     path: '/login',
     component: AuthLayout,
-    children: [
-      { path: '', name: 'login', component: LoginView }
-    ]
+    children: [{ path: '', name: 'login', component: LoginView }]
   },
-
-  // Private (requiere login)
   {
     path: '/',
     component: MainLayout,
     children: [
-      { path: '', name: 'home', component: HomeView }
-      // acá después agregás /clientes, /turnos, /servicios, etc.
+      { path: '', redirect: '/dashboard' },
+      { path: 'dashboard', name: 'dashboard', component: DashboardView },
+      { path: 'caja', name: 'caja', component: CajaView },
+      { path: 'clientes', name: 'clientes', component: ClientesView },
+      { path: 'productos', name: 'productos', component: ProductosView },
+      { path: 'ventas', name: 'ventas', component: VentasView },
+      { path: 'proveedores', name: 'proveedores', component: ProveedoresView }
     ]
   }
 ]
@@ -31,20 +37,12 @@ const router = createRouter({
   routes
 })
 
-// ✅ GUARD: si no hay token -> login
 router.beforeEach((to) => {
   const token = localStorage.getItem('token')
   const isAuthRoute = to.path.startsWith('/login')
 
-  if (!token && !isAuthRoute) {
-    return { name: 'login' }
-  }
-
-  // Si ya está logueado y va a /login, mandalo a home
-  if (token && isAuthRoute) {
-    return { name: 'home' }
-  }
-
+  if (!token && !isAuthRoute) return { name: 'login' }
+  if (token && isAuthRoute) return { name: 'dashboard' }
   return true
 })
 

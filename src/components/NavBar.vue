@@ -1,9 +1,6 @@
 <script setup>
-import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-
 const router = useRouter()
-const isLogged = computed(() => !!localStorage.getItem('token'))
 
 function logout() {
   localStorage.removeItem('token')
@@ -12,26 +9,29 @@ function logout() {
 </script>
 
 <template>
-  <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark border-bottom">
     <div class="container-fluid">
-      <router-link class="navbar-brand" to="/">Detailing</router-link>
+      <RouterLink class="navbar-brand fw-bold" to="/dashboard">
+        GestionaTuNegocio
+      </RouterLink>
 
-      <div class="collapse navbar-collapse">
-        <ul class="navbar-nav ms-auto">
-          <li class="nav-item" v-if="isLogged">
-            <router-link class="nav-link" to="/">Home</router-link>
-          </li>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
 
-          <li class="nav-item" v-if="!isLogged">
-            <router-link class="nav-link" to="/login">Login</router-link>
-          </li>
-
-          <li class="nav-item" v-if="isLogged">
-            <button class="btn btn-outline-light btn-sm" @click="logout">
-              Salir
-            </button>
-          </li>
+      <div class="collapse navbar-collapse" id="nav">
+        <ul class="navbar-nav me-auto">
+          <li class="nav-item"><RouterLink class="nav-link" to="/dashboard">Dashboard</RouterLink></li>
+          <li class="nav-item"><RouterLink class="nav-link" to="/clientes">Clientes</RouterLink></li>
+          <li class="nav-item"><RouterLink class="nav-link" to="/productos">Productos</RouterLink></li>
+          <li class="nav-item"><RouterLink class="nav-link" to="/ventas">Ventas</RouterLink></li>
+          <li class="nav-item"><RouterLink class="nav-link" to="/caja">Caja</RouterLink></li>
+          <li class="nav-item"><RouterLink class="nav-link" to="/proveedores">Proveedores</RouterLink></li>
         </ul>
+
+        <div class="d-flex gap-2">
+          <button class="btn btn-outline-light btn-sm" @click="logout">Cerrar sesión</button>
+        </div>
       </div>
     </div>
   </nav>

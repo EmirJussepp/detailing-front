@@ -1,6 +1,8 @@
 <script setup>
 import { reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import logo3byte from '../assets/img/logo3byte.png'
+
 
 const router = useRouter()
 
@@ -35,13 +37,13 @@ async function onSubmit() {
 
   try {
     loading.value = true
-    await new Promise((r) => setTimeout(r, 600))
+    await new Promise((r) => setTimeout(r, 500))
 
     if (form.remember) localStorage.setItem('remember_email', form.email)
     else localStorage.removeItem('remember_email')
 
     localStorage.setItem('token', 'mock-token')
-    router.push({ name: 'home' })
+    router.push({ name: 'dashboard' })
   } catch (e) {
     errorMsg.value = 'Error al iniciar sesión'
   } finally {
@@ -52,23 +54,20 @@ async function onSubmit() {
 
 <template>
   <div class="login-bg">
-    <div class="glow glow-1"></div>
-    <div class="glow glow-2"></div>
-
     <div class="login-container">
       <div class="login-card">
         <!-- Brand -->
         <div class="brand">
-          <div class="brand-mark" aria-hidden="true">3B</div>
+          <img class="brand-logo" :src="logo3byte" alt="3Byte" />
           <div class="brand-text">
             <div class="product-name">GestionaTuNegocio</div>
-            <div class="product-sub">by <span class="brand-3byte">3Byte</span></div>
+            <div class="product-sub">Powered by <span class="brand-3byte">3Byte</span></div>
           </div>
         </div>
 
         <div class="title">
           <h1>Iniciar sesión</h1>
-          <p>Ingresá para acceder al panel.</p>
+          <p>Accedé al panel de gestión.</p>
         </div>
 
         <div v-if="errorMsg" class="alert-dark" role="alert">
@@ -96,11 +95,7 @@ async function onSubmit() {
                 placeholder="••••••••"
                 autocomplete="current-password"
               />
-              <button
-                type="button"
-                class="toggle"
-                @click="showPassword = !showPassword"
-              >
+              <button type="button" class="toggle" @click="showPassword = !showPassword">
                 {{ showPassword ? 'Ocultar' : 'Ver' }}
               </button>
             </div>
@@ -123,69 +118,34 @@ async function onSubmit() {
           </button>
         </form>
 
-        <div class="footer">
-          <span class="chip">v1</span>
-          <span class="muted">UI Dark Purple</span>
-        </div>
+        
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* Full-bleed: evita bordes blancos */
+/* Fondo empresarial, sin “glows” enormes */
 .login-bg {
   position: fixed;
   inset: 0;
-  width: 100vw;
+  width: 100%;
   min-height: 100vh;
   margin: 0;
   padding: 24px;
-  overflow: hidden;
-
 
   display: grid;
   place-items: center;
 
-  overflow: auto; /* por si en móvil necesita scroll */
+  overflow: hidden; /* ✅ sin barras */
   background:
-  radial-gradient(900px 500px at 20% 10%, rgba(120, 92, 255, 0.18), transparent 60%),
-  radial-gradient(900px 500px at 85% 80%, rgba(38, 208, 255, 0.10), transparent 62%),
-  linear-gradient(180deg, #0b0f1a 0%, #070a12 45%, #06040b 100%);
-
-  color: #f2eefe;
+    radial-gradient(900px 520px at 15% 10%, rgba(120, 92, 255, 0.12), transparent 60%),
+    radial-gradient(900px 520px at 90% 85%, rgba(120, 92, 255, 0.08), transparent 62%),
+    linear-gradient(180deg, #0b0f1a 0%, #070a12 55%, #06040b 100%);
+  color: rgba(255, 255, 255, 0.92);
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 }
-.login-container {
-  width: 100%;
-  max-width: 420px;
-}
 
-
-
-/* Glows */
-.glow {
-  position: absolute;
-  filter: blur(60px);
-  opacity: 0.35;
-  pointer-events: none;
-}
-.glow-1 {
-  width: 520px;
-  height: 520px;
-  left: -140px;
-  top: -140px;
-  background: #9b51e0;
-}
-.glow-2 {
-  width: 560px;
-  height: 560px;
-  right: -160px;
-  bottom: -160px;
-  background: #5f4dff;
-}
-
-/* Container responsive */
 .login-container {
   width: 100%;
   max-width: 420px;
@@ -193,46 +153,48 @@ async function onSubmit() {
   z-index: 1;
 }
 
-/* Card */
+/* Card más sobria */
 .login-card {
   width: 100%;
   border-radius: 16px;
   padding: 22px 20px;
-  background: rgba(12, 9, 20, 0.72);
-  border: 1px solid rgba(155, 81, 224, 0.18);
-  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.55);
+  background: rgba(12, 14, 24, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(10px);
 }
 
-/* Brand */
+/* Brand con logo real */
 .brand {
   display: flex;
   align-items: center;
   gap: 12px;
   margin-bottom: 14px;
 }
-.brand-mark {
-  width: 44px;
-  height: 44px;
+
+.brand-logo {
+  width: 46px;
+  height: 46px;
   border-radius: 12px;
-  display: grid;
-  place-items: center;
-  font-weight: 800;
-  letter-spacing: 0.6px;
-  background: linear-gradient(135deg, rgba(155, 81, 224, 0.95), rgba(95, 77, 255, 0.92));
-  box-shadow: 0 10px 24px rgba(155, 81, 224, 0.22);
+  object-fit: contain;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 6px;
 }
+
 .product-name {
   font-weight: 800;
   letter-spacing: 0.2px;
   font-size: 1.05rem;
 }
+
 .product-sub {
   font-size: 0.85rem;
-  color: rgba(242, 238, 254, 0.62);
+  color: rgba(255, 255, 255, 0.55);
 }
+
 .brand-3byte {
-  color: rgba(202, 168, 255, 0.95);
+  color: rgba(170, 150, 255, 0.95); /* morado sutil */
   font-weight: 700;
 }
 
@@ -242,9 +204,10 @@ async function onSubmit() {
   font-size: 1.25rem;
   font-weight: 800;
 }
+
 .title p {
   margin: 0 0 12px;
-  color: rgba(242, 238, 254, 0.6);
+  color: rgba(255, 255, 255, 0.55);
   font-size: 0.95rem;
 }
 
@@ -263,33 +226,37 @@ async function onSubmit() {
   display: grid;
   gap: 12px;
 }
+
 .field label {
   display: block;
   margin-bottom: 6px;
   font-size: 0.8rem;
-  color: rgba(242, 238, 254, 0.68);
+  color: rgba(255, 255, 255, 0.62);
 }
+
 .field input {
   width: 100%;
   height: 44px;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.10);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(242, 238, 254, 0.95);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.92);
   padding: 0 12px;
 }
+
 .field input::placeholder {
-  color: rgba(242, 238, 254, 0.35);
-}
-.field input:focus {
-  outline: none;
-  border-color: rgba(155, 81, 224, 0.55);
-  box-shadow: 0 0 0 4px rgba(155, 81, 224, 0.14);
+  color: rgba(255, 255, 255, 0.35);
 }
 
-.password-wrap {
-  position: relative;
+.field input:focus {
+  outline: none;
+  border-color: rgba(170, 150, 255, 0.55); /* morado sutil */
+  box-shadow: 0 0 0 4px rgba(170, 150, 255, 0.12);
 }
+
+/* Password */
+.password-wrap { position: relative; }
+
 .toggle {
   position: absolute;
   right: 10px;
@@ -297,14 +264,14 @@ async function onSubmit() {
   transform: translateY(-50%);
   border: none;
   background: transparent;
-  color: rgba(202, 168, 255, 0.95);
+  color: rgba(170, 150, 255, 0.95);
   font-weight: 700;
   font-size: 0.8rem;
   cursor: pointer;
+  padding: 4px 6px;
 }
-.toggle:hover {
-  color: rgba(155, 81, 224, 1);
-}
+
+.toggle:hover { opacity: 0.85; }
 
 .row-options {
   display: flex;
@@ -313,35 +280,39 @@ async function onSubmit() {
   gap: 12px;
   margin-top: 2px;
 }
+
 .remember {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 0.85rem;
-  color: rgba(242, 238, 254, 0.70);
+  color: rgba(255, 255, 255, 0.62);
 }
-.remember input {
-  accent-color: #9b51e0;
-}
+.remember input { accent-color: rgba(170, 150, 255, 0.95); }
+
 .linkish {
   border: none;
   background: transparent;
-  color: rgba(242, 238, 254, 0.35);
+  color: rgba(255, 255, 255, 0.35);
   font-size: 0.85rem;
   cursor: not-allowed;
 }
 
-/* Button */
+/* Button más sobrio */
 .btn-primary {
   height: 44px;
   border-radius: 12px;
-  border: 1px solid rgba(120, 92, 255, 0.35);
-  background: linear-gradient(135deg, rgba(120, 92, 255, 0.92), rgba(85, 77, 190, 0.92));
-  color: white;
+  border: 1px solid rgba(170, 150, 255, 0.35);
+  background: rgba(170, 150, 255, 0.14);
+  color: rgba(255, 255, 255, 0.92);
   font-weight: 800;
   letter-spacing: 0.2px;
   cursor: pointer;
   margin-top: 6px;
+}
+
+.btn-primary:hover {
+  background: rgba(170, 150, 255, 0.20);
 }
 
 .btn-primary:disabled {
@@ -349,13 +320,13 @@ async function onSubmit() {
   cursor: not-allowed;
 }
 
-/* Spinner simple */
+/* Spinner */
 .spinner {
   display: inline-block;
   width: 14px;
   height: 14px;
-  border: 2px solid rgba(255,255,255,0.35);
-  border-top-color: rgba(255,255,255,0.95);
+  border: 2px solid rgba(255,255,255,0.25);
+  border-top-color: rgba(255,255,255,0.85);
   border-radius: 999px;
   margin-right: 8px;
   vertical-align: -2px;
@@ -370,7 +341,7 @@ async function onSubmit() {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: rgba(242, 238, 254, 0.45);
+  color: rgba(255, 255, 255, 0.45);
   font-size: 0.85rem;
 }
 .chip {
@@ -380,7 +351,6 @@ async function onSubmit() {
   background: rgba(255, 255, 255, 0.05);
 }
 
-/* Responsive: en pantallas chicas se ajusta solo */
 @media (max-width: 420px) {
   .login-bg { padding: 16px; }
   .login-card { padding: 18px 16px; }
