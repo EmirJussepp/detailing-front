@@ -1,9 +1,14 @@
 <script setup>
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { clearSession, getSession } from '../auth/session'
+
 const router = useRouter()
 
+const session = computed(() => getSession())
+
 function logout() {
-  localStorage.removeItem('token')
+  clearSession()
   router.push({ name: 'login' })
 }
 </script>
@@ -29,7 +34,10 @@ function logout() {
           <li class="nav-item"><RouterLink class="nav-link" to="/proveedores">Proveedores</RouterLink></li>
         </ul>
 
-        <div class="d-flex gap-2">
+        <div class="d-flex align-items-center gap-2">
+          <span class="badge text-bg-dark border" v-if="session">
+            {{ session.role }}<span v-if="session.role !== 'ADMIN'"> • {{ session.shift }}</span>
+          </span>
           <button class="btn btn-outline-light btn-sm" @click="logout">Cerrar sesión</button>
         </div>
       </div>

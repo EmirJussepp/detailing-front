@@ -3,13 +3,14 @@ import MainLayout from '../layouts/MainLayout.vue'
 import AuthLayout from '../layouts/AuthLayout.vue'
 
 import LoginView from '../views/LoginView.vue'
-import DashboardView from '../views/HomeView.vue'
-
+import HomeView from '../views/HomeView.vue'
 import CajaView from '../views/CajaView.vue'
 import ClientesView from '../views/ClientesView.vue'
 import ProductosView from '../views/ProductosView.vue'
 import VentasView from '../views/VentasView.vue'
 import ProveedoresView from '../views/ProveedoresView.vue'
+
+import { getSession } from '../auth/session'
 
 const routes = [
   {
@@ -22,7 +23,7 @@ const routes = [
     component: MainLayout,
     children: [
       { path: '', redirect: '/dashboard' },
-      { path: 'dashboard', name: 'dashboard', component: DashboardView },
+      { path: 'dashboard', name: 'dashboard', component: HomeView },
       { path: 'caja', name: 'caja', component: CajaView },
       { path: 'clientes', name: 'clientes', component: ClientesView },
       { path: 'productos', name: 'productos', component: ProductosView },
@@ -38,11 +39,11 @@ const router = createRouter({
 })
 
 router.beforeEach((to) => {
-  const token = localStorage.getItem('token')
+  const session = getSession()
   const isAuthRoute = to.path.startsWith('/login')
 
-  if (!token && !isAuthRoute) return { name: 'login' }
-  if (token && isAuthRoute) return { name: 'dashboard' }
+  if (!session && !isAuthRoute) return { name: 'login' }
+  if (session && isAuthRoute) return { name: 'dashboard' }
   return true
 })
 

@@ -1,15 +1,15 @@
 <script setup>
 import { computed, ref } from 'vue'
+import { getSession, isAdmin, getShift } from '../auth/session'
 
-/**
- * Storage
- * Guardamos todas las cajas en un objeto:
- * cajas["YYYY-MM-DD|MAÑANA"] = { ... }
- * cajas["YYYY-MM-DD|TARDE"] = { ... }
- */
-const STORAGE_KEY = 'cajas_v1'
+const session = getSession()
 
-const turnoSel = ref('MAÑANA')
+const admin = computed(() => isAdmin())
+const userId = session?.userId ?? 'anon'
+
+// ✅ aislado por usuario
+const STORAGE_KEY = `cajas_v1:${userId}`
+
 const errorMsg = ref('')
 const abrirMontoInicial = ref('')
 const cerrarMontoFinal = ref('')
@@ -18,6 +18,9 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10)
 }
 const fecha = ref(todayISO())
+
+// ✅ turno fijo para CASHIER, libre para ADMIN
+const turnoSel = ref(admin.value ? 'MAÑANA' : (getShift() ?? 'MAÑANA'))
 
 function makeKey(fechaStr, turno) {
   return `${fechaStr}|${turno}`
@@ -43,10 +46,7 @@ function getCaja(turno) {
 }
 
 function setCaja(turno, data) {
-  cajas.value = {
-    ...cajas.value,
-    [makeKey(fecha.value, turno)]: data
-  }
+  cajas.value = { ...cajas.value, [makeKey(fecha.value, turno)]: data }
   saveCajas(cajas.value)
 }
 
@@ -54,14 +54,12 @@ function ensureUUID() {
   return (crypto?.randomUUID?.() ?? String(Date.now() + Math.random()))
 }
 
-/** Calcula el "saldo" de una caja (mock) */
 function calcSaldo(caja) {
   if (!caja) return 0
   const inicial = Number(caja.montoInicial ?? 0)
   const ventas = Number(caja.ventasTotal ?? 0)
   const ingresos = Number(caja.ingresos ?? 0)
   const egresos = Number(caja.egresos ?? 0)
-  // saldo teórico (sin contar "montoFinal")
   return inicial + ventas + ingresos - egresos
 }
 
@@ -71,9 +69,10 @@ const cajaTarde = computed(() => getCaja('TARDE'))
 const saldoManiana = computed(() => calcSaldo(cajaManiana.value))
 const saldoTarde = computed(() => calcSaldo(cajaTarde.value))
 
-const generalDelDia = computed(() => {
-  return saldoManiana.value + saldoTarde.value
-})
+const generalDelDia = computed(() => saldoManiana.value + saldoTarde.value)
+
+const cajaTurnoActual = computed(() => getCaja(turnoSel.value))
+const saldoTurnoActual = computed(() => calcSaldo(cajaTurnoActual.value))
 
 function abrirCaja() {
   errorMsg.value = ''
@@ -97,12 +96,9 @@ function abrirCaja() {
     estado: 'ABIERTA',
     montoInicial: monto,
     montoFinal: null,
-
-    // mock de totales (ventas luego)
     ventasTotal: existente?.ventasTotal ?? 0,
     ingresos: existente?.ingresos ?? 0,
     egresos: existente?.egresos ?? 0,
-
     createdAt: new Date().toISOString(),
     closedAt: null
   }
@@ -137,8 +133,8 @@ function cerrarCaja() {
   cerrarMontoFinal.value = ''
 }
 
-/** Utilidad para resetear el día (solo mock/dev) */
-function resetDia() {
+function resetDiaAdmin() {
+  if (!admin.value) return
   const obj = { ...cajas.value }
   delete obj[makeKey(fecha.value, 'MAÑANA')]
   delete obj[makeKey(fecha.value, 'TARDE')]
@@ -167,13 +163,14 @@ function formatMoney(n) {
       <div>
         <h1 class="h4 mb-1">Caja</h1>
         <div class="text-secondary">
-          Gestión por turno (MAÑANA / TARDE) + General del día.
+          <span v-if="admin">Vista ADMIN: ver ambos turnos + general.</span>
+          <span v-else>Vista CAJERO: solo tu turno ({{ turnoSel }}).</span>
         </div>
       </div>
 
-      <div class="d-flex gap-2">
-        <button class="btn btn-sm btn-outline-light" @click="resetDia">
-          Reset día (mock)
+      <div class="d-flex gap-2" v-if="admin">
+        <button class="btn btn-sm btn-outline-light" @click="resetDiaAdmin">
+          Reset día (admin)
         </button>
       </div>
     </div>
@@ -186,10 +183,10 @@ function formatMoney(n) {
         <div class="row g-3 align-items-end">
           <div class="col-12 col-md-3">
             <label class="form-label text-secondary">Fecha</label>
-            <input v-model="fecha" type="date" class="form-control bg-dark text-white border-secondary" />
+            <input v-model="fecha" type="date" class="form-control bg-dark text-white border-secondary" :disabled="!admin" />
           </div>
 
-          <div class="col-12 col-md-3">
+          <div class="col-12 col-md-3" v-if="admin">
             <label class="form-label text-secondary">Turno</label>
             <select v-model="turnoSel" class="form-select bg-dark text-white border-secondary">
               <option value="MAÑANA">MAÑANA</option>
@@ -197,26 +194,27 @@ function formatMoney(n) {
             </select>
           </div>
 
+          <div class="col-12 col-md-3" v-else>
+            <label class="form-label text-secondary">Turno</label>
+            <input class="form-control bg-dark text-white border-secondary" :value="turnoSel" disabled />
+          </div>
+
           <div class="col-12 col-md-6">
             <div class="d-flex flex-wrap gap-2 justify-content-md-end">
-              <button class="btn btn-primary btn-accent" @click="abrirCaja">
-                Abrir caja
-              </button>
-              <button class="btn btn-outline-light" @click="cerrarCaja">
-                Cerrar caja
-              </button>
+              <button class="btn btn-primary btn-accent" @click="abrirCaja">Abrir caja</button>
+              <button class="btn btn-outline-light" @click="cerrarCaja">Cerrar caja</button>
             </div>
           </div>
         </div>
 
         <div class="small text-secondary mt-3">
-          Tip: Abrís/cerrás la caja del turno seleccionado. El General del día suma ambos turnos.
+          El turno seleccionado define qué caja se abre/cierra.
         </div>
       </div>
     </div>
 
-    <!-- RESUMEN GENERAL -->
-    <div class="row g-3 mb-3">
+    <!-- ADMIN: resumen general -->
+    <div class="row g-3 mb-3" v-if="admin">
       <div class="col-12 col-lg-4">
         <div class="card bg-panel border-0 shadow-sm h-100">
           <div class="card-body">
@@ -246,18 +244,6 @@ function formatMoney(n) {
                 <div class="fw-bold">$ {{ formatMoney(saldoManiana) }}</div>
               </div>
             </div>
-
-            <hr class="my-3 border-secondary-subtle" />
-
-            <div class="d-flex flex-wrap gap-3 small">
-              <div><span class="text-secondary">Inicial:</span> $ {{ formatMoney(cajaManiana?.montoInicial) }}</div>
-              <div><span class="text-secondary">Ventas:</span> $ {{ formatMoney(cajaManiana?.ventasTotal) }}</div>
-              <div><span class="text-secondary">Ing.:</span> $ {{ formatMoney(cajaManiana?.ingresos) }}</div>
-              <div><span class="text-secondary">Egr.:</span> $ {{ formatMoney(cajaManiana?.egresos) }}</div>
-              <div v-if="cajaManiana?.montoFinal !== null">
-                <span class="text-secondary">Final:</span> $ {{ formatMoney(cajaManiana?.montoFinal) }}
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -279,24 +265,30 @@ function formatMoney(n) {
                 <div class="fw-bold">$ {{ formatMoney(saldoTarde) }}</div>
               </div>
             </div>
-
-            <hr class="my-3 border-secondary-subtle" />
-
-            <div class="d-flex flex-wrap gap-3 small">
-              <div><span class="text-secondary">Inicial:</span> $ {{ formatMoney(cajaTarde?.montoInicial) }}</div>
-              <div><span class="text-secondary">Ventas:</span> $ {{ formatMoney(cajaTarde?.ventasTotal) }}</div>
-              <div><span class="text-secondary">Ing.:</span> $ {{ formatMoney(cajaTarde?.ingresos) }}</div>
-              <div><span class="text-secondary">Egr.:</span> $ {{ formatMoney(cajaTarde?.egresos) }}</div>
-              <div v-if="cajaTarde?.montoFinal !== null">
-                <span class="text-secondary">Final:</span> $ {{ formatMoney(cajaTarde?.montoFinal) }}
-              </div>
-            </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- ACCIONES DEL TURNO SELECCIONADO -->
+    <!-- CAJERO: solo su caja -->
+    <div class="card bg-panel border-0 shadow-sm mb-3" v-else>
+      <div class="card-body">
+        <div class="text-secondary small">Tu caja ({{ turnoSel }})</div>
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-1">
+          <div class="fw-semibold">
+            <span class="badge" :class="badgeClass(cajaTurnoActual?.estado)">
+              {{ cajaTurnoActual?.estado ?? 'SIN CAJA' }}
+            </span>
+          </div>
+          <div class="text-end">
+            <div class="text-secondary small">Saldo</div>
+            <div class="fw-bold">$ {{ formatMoney(saldoTurnoActual) }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Inputs rápidos -->
     <div class="card bg-panel border-0 shadow-sm">
       <div class="card-body">
         <h2 class="h6 mb-3">Acción rápida — {{ turnoSel }}</h2>
@@ -304,27 +296,17 @@ function formatMoney(n) {
         <div class="row g-3">
           <div class="col-12 col-md-6">
             <label class="form-label text-secondary">Monto inicial (para abrir)</label>
-            <input
-              v-model="abrirMontoInicial"
-              class="form-control bg-dark text-white border-secondary"
-              placeholder="Ej: 20000"
-              inputmode="numeric"
-            />
+            <input v-model="abrirMontoInicial" class="form-control bg-dark text-white border-secondary" placeholder="Ej: 20000" inputmode="numeric" />
           </div>
 
           <div class="col-12 col-md-6">
             <label class="form-label text-secondary">Monto final (para cerrar)</label>
-            <input
-              v-model="cerrarMontoFinal"
-              class="form-control bg-dark text-white border-secondary"
-              placeholder="Ej: 35000"
-              inputmode="numeric"
-            />
+            <input v-model="cerrarMontoFinal" class="form-control bg-dark text-white border-secondary" placeholder="Ej: 35000" inputmode="numeric" />
           </div>
         </div>
 
         <div class="text-secondary small mt-3">
-          Próximo paso: conectar Ventas para que sume automáticamente en <b>ventasTotal</b> del turno.
+          Próximo paso: Ventas suma automáticamente en <b>ventasTotal</b> del turno.
         </div>
       </div>
     </div>
@@ -332,17 +314,7 @@ function formatMoney(n) {
 </template>
 
 <style scoped>
-/* Dark sobrio */
-.bg-panel{
-  background: rgba(18, 22, 32, .92);
-}
-
-/* Acento 3Byte (morado sutil) */
-.btn-accent{
-  background: #6f5cff;
-  border: none;
-}
-.btn-accent:hover{
-  background: #5f4de6;
-}
+.bg-panel{ background: rgba(18, 22, 32, .92); }
+.btn-accent{ background: #6f5cff; border: none; }
+.btn-accent:hover{ background: #5f4de6; }
 </style>

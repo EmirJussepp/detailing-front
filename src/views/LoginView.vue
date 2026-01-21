@@ -1,8 +1,8 @@
 <script setup>
 import { reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { setSession } from '../auth/session'
 import logo3byte from '../assets/img/logo3byte.png'
-
 
 const router = useRouter()
 
@@ -29,6 +29,7 @@ function validate() {
   if (!form.email.trim()) return (errorMsg.value = 'Ingresá tu email')
   if (!form.password.trim()) return (errorMsg.value = 'Ingresá tu contraseña')
   if (!form.email.includes('@')) return (errorMsg.value = 'Email inválido')
+  if (form.password.length < 6) return (errorMsg.value = 'La contraseña debe tener al menos 6 caracteres')
   return true
 }
 
@@ -37,12 +38,37 @@ async function onSubmit() {
 
   try {
     loading.value = true
+
+    // ✅ Login simulado (mock)
     await new Promise((r) => setTimeout(r, 500))
 
-    if (form.remember) localStorage.setItem('remember_email', form.email)
+    // Recordarme email
+    const email = form.email.trim().toLowerCase()
+    if (form.remember) localStorage.setItem('remember_email', email)
     else localStorage.removeItem('remember_email')
 
+    // ✅ Mock de roles/turnos para probar:
+    // - maniana@demo.com -> CASHIER MAÑANA
+    // - tarde@demo.com   -> CASHIER TARDE
+    // - admin@demo.com   -> ADMIN
+    let role = 'CASHIER'
+    let shift = 'MAÑANA'
+
+    if (email.includes('tarde')) shift = 'TARDE'
+    if (email.includes('admin')) role = 'ADMIN'
+
+    const session = {
+      token: 'mock-token',
+      role,        // CASHIER | ADMIN
+      shift,       // MAÑANA | TARDE (solo para CASHIER)
+      userId: email
+    }
+
+    setSession(session)
+
+    // (compatibilidad si te quedó código viejo revisando token)
     localStorage.setItem('token', 'mock-token')
+
     router.push({ name: 'dashboard' })
   } catch (e) {
     errorMsg.value = 'Error al iniciar sesión'
@@ -82,6 +108,7 @@ async function onSubmit() {
               type="email"
               placeholder="tu@email.com"
               autocomplete="email"
+              :disabled="loading"
             />
           </div>
 
@@ -94,8 +121,9 @@ async function onSubmit() {
                 :type="showPassword ? 'text' : 'password'"
                 placeholder="••••••••"
                 autocomplete="current-password"
+                :disabled="loading"
               />
-              <button type="button" class="toggle" @click="showPassword = !showPassword">
+              <button type="button" class="toggle" @click="showPassword = !showPassword" :disabled="loading">
                 {{ showPassword ? 'Ocultar' : 'Ver' }}
               </button>
             </div>
@@ -103,7 +131,7 @@ async function onSubmit() {
 
           <div class="row-options">
             <label class="remember">
-              <input type="checkbox" v-model="form.remember" />
+              <input type="checkbox" v-model="form.remember" :disabled="loading" />
               <span>Recordarme</span>
             </label>
 
@@ -116,16 +144,28 @@ async function onSubmit() {
             <span v-if="loading" class="spinner"></span>
             {{ loading ? 'Entrando…' : 'Entrar' }}
           </button>
+
+          <div class="demo-hint">
+            <div class="text-secondary small mb-1">Usuarios demo:</div>
+            <div class="small">
+              <span class="chip">maniana@demo.com</span>
+              <span class="chip">tarde@demo.com</span>
+              <span class="chip">admin@demo.com</span>
+            </div>
+            <div class="text-secondary small mt-1">Contraseña: cualquiera (mín. 6)</div>
+          </div>
         </form>
 
-        
+        <div class="footer">
+          <span class="chip">v1</span>
+          <span class="muted">UI Dark • 3Byte</span>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* Fondo empresarial, sin “glows” enormes */
 .login-bg {
   position: fixed;
   inset: 0;
@@ -137,11 +177,11 @@ async function onSubmit() {
   display: grid;
   place-items: center;
 
-  overflow: hidden; /* ✅ sin barras */
+  overflow: hidden;
   background:
-    radial-gradient(900px 520px at 15% 10%, rgba(120, 92, 255, 0.12), transparent 60%),
-    radial-gradient(900px 520px at 90% 85%, rgba(120, 92, 255, 0.08), transparent 62%),
-    linear-gradient(180deg, #0b0f1a 0%, #070a12 55%, #06040b 100%);
+    radial-gradient(900px 520px at 15% 10%, rgba(120, 92, 255, 0.10), transparent 60%),
+    radial-gradient(900px 520px at 90% 85%, rgba(120, 92, 255, 0.07), transparent 62%),
+    linear-gradient(180deg, #0e1117 0%, #0b0e14 100%);
   color: rgba(255, 255, 255, 0.92);
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 }
@@ -153,18 +193,17 @@ async function onSubmit() {
   z-index: 1;
 }
 
-/* Card más sobria */
 .login-card {
   width: 100%;
   border-radius: 16px;
   padding: 22px 20px;
-  background: rgba(12, 14, 24, 0.82);
+  background: rgba(15, 18, 30, 0.88);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 18px 55px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(10px);
 }
 
-/* Brand con logo real */
+/* Brand */
 .brand {
   display: flex;
   align-items: center;
@@ -194,7 +233,7 @@ async function onSubmit() {
 }
 
 .brand-3byte {
-  color: rgba(170, 150, 255, 0.95); /* morado sutil */
+  color: rgba(170, 150, 255, 0.95);
   font-weight: 700;
 }
 
@@ -250,12 +289,13 @@ async function onSubmit() {
 
 .field input:focus {
   outline: none;
-  border-color: rgba(170, 150, 255, 0.55); /* morado sutil */
+  border-color: rgba(170, 150, 255, 0.55);
   box-shadow: 0 0 0 4px rgba(170, 150, 255, 0.12);
 }
 
-/* Password */
-.password-wrap { position: relative; }
+.password-wrap {
+  position: relative;
+}
 
 .toggle {
   position: absolute;
@@ -270,8 +310,6 @@ async function onSubmit() {
   cursor: pointer;
   padding: 4px 6px;
 }
-
-.toggle:hover { opacity: 0.85; }
 
 .row-options {
   display: flex;
@@ -288,7 +326,10 @@ async function onSubmit() {
   font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.62);
 }
-.remember input { accent-color: rgba(170, 150, 255, 0.95); }
+
+.remember input {
+  accent-color: rgba(170, 150, 255, 0.95);
+}
 
 .linkish {
   border: none;
@@ -298,7 +339,6 @@ async function onSubmit() {
   cursor: not-allowed;
 }
 
-/* Button más sobrio */
 .btn-primary {
   height: 44px;
   border-radius: 12px;
@@ -320,7 +360,6 @@ async function onSubmit() {
   cursor: not-allowed;
 }
 
-/* Spinner */
 .spinner {
   display: inline-block;
   width: 14px;
@@ -334,7 +373,21 @@ async function onSubmit() {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Footer */
+.demo-hint{
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+.chip {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.05);
+  margin-right: 6px;
+  margin-top: 6px;
+}
+
 .footer {
   margin-top: 14px;
   display: flex;
@@ -344,11 +397,9 @@ async function onSubmit() {
   color: rgba(255, 255, 255, 0.45);
   font-size: 0.85rem;
 }
-.chip {
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  background: rgba(255, 255, 255, 0.05);
+
+.muted {
+  color: rgba(255,255,255,0.45);
 }
 
 @media (max-width: 420px) {
