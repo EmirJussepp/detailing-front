@@ -9,6 +9,8 @@ import ClientesView from '../views/ClientesView.vue'
 import ProductosView from '../views/ProductosView.vue'
 import VentasView from '../views/VentasView.vue'
 import ProveedoresView from '../views/ProveedoresView.vue'
+import ComprasView from '../views/ComprasView.vue'
+
 
 import { getSession } from '../auth/session'
 
@@ -28,7 +30,9 @@ const routes = [
       { path: 'clientes', name: 'clientes', component: ClientesView },
       { path: 'productos', name: 'productos', component: ProductosView },
       { path: 'ventas', name: 'ventas', component: VentasView },
-      { path: 'proveedores', name: 'proveedores', component: ProveedoresView }
+      { path: 'proveedores', name: 'proveedores', component: ProveedoresView },
+      { path: 'compras', name: 'compras', component: ComprasView }
+
     ]
   }
 ]
