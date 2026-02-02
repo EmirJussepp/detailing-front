@@ -91,10 +91,12 @@ export function registrarCompra(payload) {
   }
 
   const pagadoAhoraMethod =
-    String(payload?.pagadoAhoraMethod ?? 'TRANSFERENCIA').trim() || 'TRANSFERENCIA'
+  String(payload?.pagadoAhoraMethod ?? 'TRANSFERENCIA').trim() || 'TRANSFERENCIA'
 
-  const saldoPendiente =
-    condicion === 'CUENTA' ? Math.round((total - pagadoAhora) * 100) / 100 : 0
+// ✅ MODELO A: deuda completa
+const saldoPendiente =
+  condicion === 'CUENTA' ? Math.round(total * 100) / 100 : 0
+
 
   // 1) actualizar stock (sumar)
   const applied = []

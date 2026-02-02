@@ -1,7 +1,11 @@
 <template>
   <div>
     <h1 class="h4 mb-1">Dashboard</h1>
-    <div class="text-secondary">Bienvenido a GestionaTuNegocio</div>
+    <div class="text-secondary">
+      Bienvenido a GestionaTuNegocio
+      <span v-if="apiOk" class="text-success ms-2">● API conectada</span>
+      <span v-else class="text-danger ms-2">● API desconectada</span>
+    </div>
 
     <div class="row g-3 mt-3">
       <div class="col-12 col-md-6 col-lg-3" v-for="c in cards" :key="c.label">
@@ -18,6 +22,8 @@
       <div class="card-body">
         <div class="fw-semibold mb-2">Accesos rápidos</div>
         <div class="d-flex flex-wrap gap-2">
+          <RouterLink class="btn btn-sm btn-outline-light" to="/configuracion">⚙ Configuración</RouterLink>
+
           <RouterLink class="btn btn-sm btn-outline-light" to="/clientes">Clientes</RouterLink>
           <RouterLink class="btn btn-sm btn-outline-light" to="/productos">Productos</RouterLink>
           <RouterLink class="btn btn-sm btn-outline-light" to="/ventas">Ventas</RouterLink>
@@ -29,10 +35,25 @@
 </template>
 
 <script setup>
-const cards = [
+import { onMounted, ref } from "vue";
+import { health } from "../services/healthService";
+
+
+const apiOk = ref(false);
+
+const cards = ref([
   { label: 'Caja', value: '—' },
   { label: 'Ventas hoy', value: '0' },
   { label: 'Ingresos', value: '$0' },
   { label: 'Stock bajo', value: '0' }
-]
+]);
+
+onMounted(async () => {
+  try {
+    await health();
+    apiOk.value = true;
+  } catch (e) {
+    apiOk.value = false;
+  }
+});
 </script>

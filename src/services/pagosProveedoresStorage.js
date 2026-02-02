@@ -36,39 +36,45 @@ export function listPagosByProveedor(proveedorId) {
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
 }
 
-export function addPago(payload) {
-  const proveedorId = String(payload?.proveedorId ?? '').trim()
-  const proveedorNombre = String(payload?.proveedorNombre ?? '').trim()
-  if (!proveedorId || !proveedorNombre) throw new Error('Proveedor inválido')
+export function addPago({
+  proveedorId,
+  proveedorNombre,
+  amount,
+  method = 'TRANSFERENCIA',
+  notes = '',
+  refCompraId = null,
+  refFechaStr = null,
+  origin = 'MANUAL'
+}) {
+  if (!proveedorId) throw new Error('Proveedor inválido')
 
-  const amount = toNumberMoney(payload?.amount)
-  if (!Number.isFinite(amount) || amount <= 0) throw new Error('Monto inválido')
-
-  const method = String(payload?.method ?? 'TRANSFERENCIA').trim() || 'TRANSFERENCIA'
-  const notes = String(payload?.notes ?? '').trim()
-
-  const refCompraId = payload?.refCompraId ? String(payload.refCompraId) : null
-  const refFechaStr = payload?.refFechaStr ? String(payload.refFechaStr) : null
-  const origin = payload?.origin ? String(payload.origin) : 'MANUAL'
+  const a = toNumberMoney(amount)
+  if (!Number.isFinite(a) || a <= 0) {
+    throw new Error('Monto de pago inválido')
+  }
 
   const pago = {
     id: uid(),
     proveedorId,
-    proveedorNombre,
-    amount,
+    proveedorNombre: proveedorNombre ?? '',
+    amount: Math.round(a * 100) / 100,
     method,
-    notes,
+    notes: String(notes ?? '').trim(),
     refCompraId,
     refFechaStr,
     origin,
     createdAt: new Date().toISOString()
   }
 
-  const all = loadAll()
-  all.unshift(pago)
-  saveAll(all)
+  const prev = loadAll()
+  const next = [pago, ...prev]
+  saveAll(next)
+
   return pago
 }
+
+
+
 
 export function removePago(pagoId) {
   const all = loadAll()
@@ -76,9 +82,10 @@ export function removePago(pagoId) {
 }
 
 export function removePagosByRefCompra(refCompraId) {
-  const all = loadAll()
-  const next = all.filter(p => String(p.refCompraId || '') !== String(refCompraId))
-  saveAll(next)
-  return { removedCount: all.length - next.length }
+  const prev = load()
+  const next = prev.filter(p => p.refCompraId !== refCompraId)
+  save(next)
+  return { ok: true, removed: prev.length - next.length }
 }
+
 

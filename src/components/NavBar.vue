@@ -4,8 +4,9 @@ import { useRouter } from 'vue-router'
 import { clearSession, getSession } from '../auth/session'
 
 const router = useRouter()
-
 const session = computed(() => getSession())
+
+const isAdmin = computed(() => session.value?.role === 'ADMIN')
 
 function logout() {
   clearSession()
@@ -27,18 +28,27 @@ function logout() {
       <div class="collapse navbar-collapse" id="nav">
         <ul class="navbar-nav me-auto">
           <li class="nav-item"><RouterLink class="nav-link" to="/dashboard">Dashboard</RouterLink></li>
-          <li class="nav-item"><RouterLink class="nav-link" to="/clientes">Clientes</RouterLink></li>
+          <li class="nav-item"><RouterLink class="nav-link" to="/caja">Caja</RouterLink></li>
           <li class="nav-item"><RouterLink class="nav-link" to="/productos">Productos</RouterLink></li>
           <li class="nav-item"><RouterLink class="nav-link" to="/ventas">Ventas</RouterLink></li>
-          <li class="nav-item"><RouterLink class="nav-link" to="/caja">Caja</RouterLink></li>
+          <li class="nav-item"><RouterLink class="nav-link" to="/clientes">Clientes</RouterLink></li>
+          <li class="nav-item"><RouterLink class="nav-link" to="/compras">Compras</RouterLink></li>
           <li class="nav-item"><RouterLink class="nav-link" to="/proveedores">Proveedores</RouterLink></li>
+
+          <!-- ✅ Configuración solo ADMIN -->
+          <li class="nav-item" v-if="isAdmin">
+            <RouterLink class="nav-link" to="/configuracion">⚙ Configuración</RouterLink>
+          </li>
         </ul>
 
         <div class="d-flex align-items-center gap-2">
-          <span class="badge text-bg-dark border" v-if="session">
+          <span class="badge text-bg-dark border" v-if="session?.role">
             {{ session.role }}<span v-if="session.role !== 'ADMIN'"> • {{ session.shift }}</span>
           </span>
-          <button class="btn btn-outline-light btn-sm" @click="logout">Cerrar sesión</button>
+
+          <button class="btn btn-outline-light btn-sm" @click="logout">
+            Cerrar sesión
+          </button>
         </div>
       </div>
     </div>

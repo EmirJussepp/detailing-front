@@ -1,21 +1,29 @@
 <template>
   <div class="container py-4">
+    <!-- Header -->
     <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
       <div>
         <h2 class="mb-1">Proveedores</h2>
         <div class="text-secondary small">
-          Alta/edición + activar/desactivar + cuenta corriente (saldo y pagos).
+          Alta/edición · activar/desactivar · cuenta corriente (deuda y pagos).
         </div>
       </div>
 
       <div class="d-flex gap-2 align-items-center">
         <div class="form-check form-switch m-0">
-          <input class="form-check-input" type="checkbox" id="inactive" v-model="includeInactive" />
-          <label class="form-check-label small text-secondary" for="inactive">Ver inactivos</label>
+          <input
+            class="form-check-input"
+            type="checkbox"
+            id="inactive"
+            v-model="includeInactive"
+          />
+          <label class="form-check-label small text-secondary" for="inactive">
+            Ver inactivos
+          </label>
         </div>
 
         <button
-          class="btn btn-primary"
+          class="btn btn-primary btn-accent"
           data-bs-toggle="modal"
           data-bs-target="#proveedorModal"
           @click="prepareCreate"
@@ -25,16 +33,21 @@
       </div>
     </div>
 
-    <div class="card bg-dark border-secondary mb-3">
+    <!-- Filtros -->
+    <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
         <div class="row g-2 align-items-center">
           <div class="col-12 col-md-5">
-            <input v-model="q" class="form-control" placeholder="Buscar por nombre, teléfono o email…" />
+            <input
+              v-model="q"
+              class="form-control bg-dark text-white border-secondary"
+              placeholder="Buscar por nombre/razón social, doc/CUIT, teléfono o email…"
+            />
           </div>
 
           <div class="col-12 col-md-3">
-            <select v-model="sortBy" class="form-select">
-              <option value="nombre">Orden: Nombre</option>
+            <select v-model="sortBy" class="form-select bg-dark text-white border-secondary">
+              <option value="displayName">Orden: Nombre</option>
               <option value="updatedAt">Orden: Última edición</option>
               <option value="createdAt">Orden: Creación</option>
               <option value="saldoDesc">Orden: Saldo (mayor deuda)</option>
@@ -50,17 +63,17 @@
       </div>
     </div>
 
-    <div v-if="error" class="alert alert-danger">{{ error }}</div>
-    <div v-if="success" class="alert alert-success">{{ success }}</div>
+    <div v-if="error" class="alert alert-danger py-2">{{ error }}</div>
+    <div v-if="success" class="alert alert-success py-2">{{ success }}</div>
 
-    <div class="card bg-dark border-secondary">
+    <!-- Tabla -->
+    <div class="card bg-panel border-0 shadow-sm">
       <div class="table-responsive">
         <table class="table table-dark table-hover align-middle mb-0">
           <thead>
             <tr class="text-secondary">
               <th>Proveedor</th>
-              <th>Teléfono</th>
-              <th>Email</th>
+              <th>Contacto</th>
               <th class="text-end">Saldo</th>
               <th class="text-center">Activo</th>
               <th class="text-end">Acciones</th>
@@ -69,19 +82,45 @@
 
           <tbody>
             <tr v-if="filtered.length === 0">
-              <td colspan="6" class="text-center text-secondary py-4">
+              <td colspan="5" class="text-center text-secondary py-4">
                 No hay proveedores para mostrar.
               </td>
             </tr>
 
             <tr v-for="p in filtered" :key="p.id">
               <td>
-                <div class="fw-semibold">{{ p.nombre }}</div>
-                <div class="text-secondary small" v-if="p.direccion">{{ p.direccion }}</div>
+                <div class="d-flex gap-2 align-items-start">
+                  <div class="flex-grow-1">
+                    <div class="fw-semibold d-flex gap-2 align-items-center flex-wrap">
+                      <span>{{ p.displayName || '—' }}</span>
+
+                      <span
+                        class="badge"
+                        :class="p.tipo === 'EMPRESA' ? 'text-bg-info' : 'text-bg-secondary'"
+                      >
+                        {{ p.tipo === 'EMPRESA' ? 'EMPRESA' : 'PERSONA' }}
+                      </span>
+
+                      <span class="badge" :class="docBadgeClass(p)">
+                        {{ p.documentoLabel || (p.tipo === 'EMPRESA' ? 'CUIT —' : 'DOC —') }}
+                      </span>
+                    </div>
+
+                    <div class="text-secondary small" v-if="p.direccion">
+                      {{ p.direccion }}
+                    </div>
+
+                    <div class="text-secondary small" v-if="p.notas">
+                      <span class="opacity-75">📝</span> {{ p.notas }}
+                    </div>
+                  </div>
+                </div>
               </td>
 
-              <td class="text-secondary">{{ p.telefono || '—' }}</td>
-              <td class="text-secondary">{{ p.email || '—' }}</td>
+              <td class="text-secondary">
+                <div>{{ p.telefono || '—' }}</div>
+                <div class="small opacity-75">{{ p.email || '—' }}</div>
+              </td>
 
               <td class="text-end">
                 <div class="fw-bold" :class="saldoClass(p)">
@@ -129,6 +168,10 @@
 
         </table>
       </div>
+
+      <div class="card-footer border-secondary text-secondary small">
+        Tip: el saldo es <b>deuda (compras a cuenta)</b> menos <b>pagos</b>. Si queda negativo, el proveedor te queda “a favor”.
+      </div>
     </div>
 
     <!-- ========================= -->
@@ -136,7 +179,7 @@
     <!-- ========================= -->
     <div class="modal fade" id="proveedorModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-lg modal-dialog-centered">
-        <div class="modal-content bg-dark border-secondary">
+        <div class="modal-content bg-dark border-secondary modal-round">
           <div class="modal-header border-secondary">
             <h5 class="modal-title">
               {{ mode === 'create' ? 'Nuevo proveedor' : 'Editar proveedor' }}
@@ -145,14 +188,80 @@
           </div>
 
           <div class="modal-body">
-            <div v-if="formError" class="alert alert-danger">{{ formError }}</div>
+            <div v-if="formError" class="alert alert-danger py-2">{{ formError }}</div>
+
+            <!-- Tipo -->
+            <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+              <span class="text-secondary small">Tipo:</span>
+
+              <div class="btn-group">
+                <button
+                  class="btn btn-sm"
+                  :class="form.tipo === 'PERSONA' ? 'btn-accent' : 'btn-outline-light'"
+                  @click="setTipo('PERSONA')"
+                  type="button"
+                >
+                  Persona
+                </button>
+                <button
+                  class="btn btn-sm"
+                  :class="form.tipo === 'EMPRESA' ? 'btn-accent' : 'btn-outline-light'"
+                  @click="setTipo('EMPRESA')"
+                  type="button"
+                >
+                  Empresa
+                </button>
+              </div>
+            </div>
 
             <div class="row g-3">
-              <div class="col-12 col-md-6">
-                <label class="form-label text-secondary">Nombre *</label>
-                <input v-model="form.nombre" class="form-control" placeholder="Ej: Distribuidora X" />
-              </div>
+              <!-- PERSONA -->
+              <template v-if="form.tipo !== 'EMPRESA'">
+                <div class="col-12 col-md-6">
+                  <label class="form-label text-secondary">Nombre *</label>
+                  <input v-model="form.nombre" class="form-control" placeholder="Ej: Juan" />
+                </div>
 
+                <div class="col-12 col-md-6">
+                  <label class="form-label text-secondary">Apellido *</label>
+                  <input v-model="form.apellido" class="form-control" placeholder="Ej: Pérez" />
+                </div>
+
+                <div class="col-12 col-md-4">
+                  <label class="form-label text-secondary">Tipo doc.</label>
+                  <select v-model="form.documentoTipo" class="form-select">
+                    <option value="DNI">DNI</option>
+                    <option value="CUIL">CUIL</option>
+                    <option value="PASAPORTE">PASAPORTE</option>
+                    <option value="OTRO">OTRO</option>
+                  </select>
+                </div>
+
+                <div class="col-12 col-md-8">
+                  <label class="form-label text-secondary">Nro doc. *</label>
+                  <input v-model="form.documentoNro" class="form-control" inputmode="numeric" placeholder="Ej: 40111222" />
+                </div>
+              </template>
+
+              <!-- EMPRESA -->
+              <template v-else>
+                <div class="col-12">
+                  <label class="form-label text-secondary">Razón social *</label>
+                  <input v-model="form.razonSocial" class="form-control" placeholder="Ej: Distribuidora X S.A." />
+                </div>
+
+                <div class="col-12 col-md-6">
+                  <label class="form-label text-secondary">CUIT *</label>
+                  <input v-model="form.cuit" class="form-control" inputmode="numeric" placeholder="Ej: 30712345678" />
+                </div>
+
+                <div class="col-12 col-md-6">
+                  <label class="form-label text-secondary">Contacto (opcional)</label>
+                  <input v-model="form.contacto" class="form-control" placeholder="Ej: Mariana / Compras" />
+                </div>
+              </template>
+
+              <!-- Comunes -->
               <div class="col-12 col-md-6">
                 <label class="form-label text-secondary">Teléfono</label>
                 <input v-model="form.telefono" class="form-control" placeholder="Ej: 3564..." />
@@ -163,7 +272,7 @@
                 <input v-model="form.email" class="form-control" placeholder="proveedor@email.com" />
               </div>
 
-              <div class="col-12 col-md-6">
+              <div class="col-12">
                 <label class="form-label text-secondary">Dirección</label>
                 <input v-model="form.direccion" class="form-control" placeholder="Calle, nro, ciudad" />
               </div>
@@ -180,12 +289,15 @@
                 </div>
               </div>
             </div>
+
+            <div class="text-secondary small mt-3">
+              Se valida unicidad por documento/CUIT y por nombre/razón social.
+            </div>
           </div>
 
           <div class="modal-footer border-secondary">
-            <!-- ✅ le agrego dismiss para poder cerrarlo desde código -->
             <button class="btn btn-outline-light" data-bs-dismiss="modal">Cancelar</button>
-            <button class="btn btn-primary" @click="saveProveedor">
+            <button class="btn btn-primary btn-accent" @click="saveProveedor">
               {{ mode === 'create' ? 'Crear' : 'Guardar cambios' }}
             </button>
           </div>
@@ -198,12 +310,12 @@
     <!-- ========================= -->
     <div class="modal fade" id="pagoModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-lg modal-dialog-centered">
-        <div class="modal-content bg-dark border-secondary">
+        <div class="modal-content bg-dark border-secondary modal-round">
           <div class="modal-header border-secondary">
             <div>
               <h5 class="modal-title mb-0">Registrar pago</h5>
               <div class="text-secondary small" v-if="pagoProveedor">
-                Proveedor: <b>{{ pagoProveedor.nombre }}</b>
+                Proveedor: <b>{{ pagoProveedor.displayName }}</b>
                 · Saldo actual:
                 <b :class="saldoClass(pagoProveedor)">
                   $ {{ formatMoney(getSaldo(pagoProveedor).saldo) }}
@@ -214,8 +326,8 @@
           </div>
 
           <div class="modal-body">
-            <div v-if="pagoError" class="alert alert-danger">{{ pagoError }}</div>
-            <div v-if="pagoOk" class="alert alert-success">{{ pagoOk }}</div>
+            <div v-if="pagoError" class="alert alert-danger py-2">{{ pagoError }}</div>
+            <div v-if="pagoOk" class="alert alert-success py-2">{{ pagoOk }}</div>
 
             <div class="row g-3">
               <div class="col-12 col-md-4">
@@ -239,7 +351,7 @@
               </div>
 
               <div class="col-12 d-flex justify-content-end">
-                <button class="btn btn-primary" @click="registrarPago">
+                <button class="btn btn-primary btn-accent" @click="registrarPago">
                   Guardar pago
                 </button>
               </div>
@@ -261,6 +373,7 @@
                 <thead>
                   <tr class="text-secondary">
                     <th>Fecha</th>
+                    <th>Origen</th>
                     <th>Método</th>
                     <th class="text-end">Monto</th>
                     <th>Notas</th>
@@ -270,6 +383,11 @@
                 <tbody>
                   <tr v-for="pg in pagosProveedor" :key="pg.id">
                     <td class="text-secondary">{{ new Date(pg.createdAt).toLocaleString('es-AR') }}</td>
+                    <td class="text-secondary">
+                      <span class="badge" :class="pg.origin === 'AUTO_COMPRA' ? 'text-bg-info' : 'text-bg-secondary'">
+                        {{ pg.origin || 'MANUAL' }}
+                      </span>
+                    </td>
                     <td class="text-secondary">{{ pg.method }}</td>
                     <td class="text-end fw-bold">$ {{ formatMoney(pg.amount) }}</td>
                     <td class="text-secondary">{{ pg.notes || '—' }}</td>
@@ -303,7 +421,7 @@ import {
   listProveedores,
   createProveedor,
   updateProveedor,
-  setProveedorActivo,
+  setProveedorActivo
 } from '../services/proveedoresStorage'
 
 import { getSaldoProveedor } from '../services/proveedoresCC'
@@ -314,14 +432,13 @@ import {
   removePago
 } from '../services/pagosProveedoresStorage'
 
-
 export default {
   name: 'ProveedoresView',
   data() {
     return {
       proveedores: [],
       q: '',
-      sortBy: 'nombre',
+      sortBy: 'displayName',
       includeInactive: false,
 
       error: '',
@@ -331,12 +448,25 @@ export default {
       mode: 'create',
       editingId: null,
       form: {
+        tipo: 'PERSONA', // PERSONA | EMPRESA
+
+        // persona
         nombre: '',
+        apellido: '',
+        documentoTipo: 'DNI',
+        documentoNro: '',
+
+        // empresa
+        razonSocial: '',
+        cuit: '',
+        contacto: '',
+
+        // comunes
         telefono: '',
         email: '',
         direccion: '',
         notas: '',
-        activo: true,
+        activo: true
       },
       formError: '',
 
@@ -353,6 +483,7 @@ export default {
       saldosCache: new Map()
     }
   },
+
   computed: {
     filtered() {
       const q = this.q.trim().toLowerCase()
@@ -360,7 +491,18 @@ export default {
 
       if (q) {
         arr = arr.filter(p => {
-          const blob = `${p.nombre || ''} ${p.telefono || ''} ${p.email || ''}`.toLowerCase()
+          const blob = [
+            p.displayName,
+            p.documentoLabel,
+            p.telefono,
+            p.email,
+            p.direccion,
+            p.notas
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+
           return blob.includes(q)
         })
       }
@@ -378,19 +520,22 @@ export default {
         return arr
       }
 
-      if (this.sortBy === 'nombre') {
-        arr.sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es'))
+      if (this.sortBy === 'displayName') {
+        arr.sort((a, b) => (a.displayName || '').localeCompare(b.displayName || '', 'es'))
       } else {
         arr.sort((a, b) => (b[this.sortBy] || '').localeCompare(a[this.sortBy] || ''))
       }
 
       return arr
-    },
+    }
   },
+
   mounted() {
     this.refresh()
   },
+
   methods: {
+    // ---------- UI helpers ----------
     formatMoney(n) {
       const num = Number(n ?? 0)
       return num.toLocaleString('es-AR', { minimumFractionDigits: 0 })
@@ -403,6 +548,18 @@ export default {
       return 'text-success'            // ok
     },
 
+    docBadgeClass(p) {
+      // solo para darle “punch” visual a doc/cuit
+      if (p?.tipo === 'EMPRESA') return 'text-bg-dark border border-info'
+      return 'text-bg-dark border border-secondary'
+    },
+
+    toastSuccess(msg) {
+      this.success = msg
+      setTimeout(() => (this.success = ''), 2200)
+    },
+
+    // ---------- saldo cache ----------
     getSaldo(p) {
       if (!p?.id) return { deudaCompras: 0, pagosTotal: 0, saldo: 0 }
       if (this.saldosCache.has(p.id)) return this.saldosCache.get(p.id)
@@ -415,6 +572,7 @@ export default {
       this.saldosCache = new Map()
     },
 
+    // ---------- data ----------
     refresh() {
       this.error = ''
       try {
@@ -425,9 +583,21 @@ export default {
       }
     },
 
-    toastSuccess(msg) {
-      this.success = msg
-      setTimeout(() => (this.success = ''), 2200)
+    // ---------- proveedor modal ----------
+    setTipo(tipo) {
+      this.form.tipo = (tipo === 'EMPRESA') ? 'EMPRESA' : 'PERSONA'
+
+      // limpiar campos “del otro tipo” para evitar validaciones raras
+      if (this.form.tipo === 'EMPRESA') {
+        this.form.nombre = ''
+        this.form.apellido = ''
+        this.form.documentoTipo = 'DNI'
+        this.form.documentoNro = ''
+      } else {
+        this.form.razonSocial = ''
+        this.form.cuit = ''
+        this.form.contacto = ''
+      }
     },
 
     prepareCreate() {
@@ -435,12 +605,22 @@ export default {
       this.editingId = null
       this.formError = ''
       this.form = {
+        tipo: 'PERSONA',
+
         nombre: '',
+        apellido: '',
+        documentoTipo: 'DNI',
+        documentoNro: '',
+
+        razonSocial: '',
+        cuit: '',
+        contacto: '',
+
         telefono: '',
         email: '',
         direccion: '',
         notas: '',
-        activo: true,
+        activo: true
       }
     },
 
@@ -448,22 +628,58 @@ export default {
       this.mode = 'edit'
       this.editingId = p.id
       this.formError = ''
+
+      const tipo = (p.tipo === 'EMPRESA') ? 'EMPRESA' : 'PERSONA'
+
       this.form = {
-        nombre: p.nombre || '',
-        telefono: p.telefono || '',
-        email: p.email || '',
-        direccion: p.direccion || '',
-        notas: p.notas || '',
-        activo: p.activo !== false,
+        tipo,
+
+        // persona
+        nombre: p.nombre ?? '',
+        apellido: p.apellido ?? '',
+        documentoTipo: p.documentoTipo ?? 'DNI',
+        documentoNro: p.documentoNro ?? '',
+
+        // empresa
+        razonSocial: p.razonSocial ?? '',
+        cuit: p.cuit ?? '',
+        contacto: p.contacto ?? '',
+
+        // comunes
+        telefono: p.telefono ?? '',
+        email: p.email ?? '',
+        direccion: p.direccion ?? '',
+        notas: p.notas ?? '',
+        activo: p.activo !== false
       }
     },
 
     saveProveedor() {
       this.formError = ''
       try {
-        if (!String(this.form.nombre || '').trim()) {
-          this.formError = 'El nombre es obligatorio.'
-          return
+        // IMPORTANT: el storage valida, pero acá damos mensajes más “UX friendly”
+        if (this.form.tipo === 'EMPRESA') {
+          if (!String(this.form.razonSocial || '').trim()) {
+            this.formError = 'La razón social es obligatoria.'
+            return
+          }
+          if (!String(this.form.cuit || '').replace(/\D/g, '').trim()) {
+            this.formError = 'El CUIT es obligatorio.'
+            return
+          }
+        } else {
+          if (!String(this.form.nombre || '').trim()) {
+            this.formError = 'El nombre es obligatorio.'
+            return
+          }
+          if (!String(this.form.apellido || '').trim()) {
+            this.formError = 'El apellido es obligatorio.'
+            return
+          }
+          if (!String(this.form.documentoNro || '').replace(/\D/g, '').trim()) {
+            this.formError = 'El documento es obligatorio.'
+            return
+          }
         }
 
         if (this.mode === 'create') {
@@ -476,7 +692,7 @@ export default {
 
         this.refresh()
 
-        // cerrar modal
+        // cerrar modal (sin depender del bootstrap instance)
         const modalEl = document.getElementById('proveedorModal')
         const closeBtn = modalEl?.querySelector('[data-bs-dismiss="modal"]')
         closeBtn?.click()
@@ -496,7 +712,7 @@ export default {
       }
     },
 
-    // ======= PAGOS =======
+    // ---------- pagos ----------
     preparePago(p) {
       this.pagoProveedor = p
       this.pagoMonto = ''
@@ -504,7 +720,6 @@ export default {
       this.pagoNotas = ''
       this.pagoError = ''
       this.pagoOk = ''
-
       this.loadPagosProveedor()
       this.invalidateSaldoCache()
     },
@@ -531,7 +746,7 @@ export default {
       try {
         addPago({
           proveedorId: p.id,
-          proveedorNombre: p.nombre,
+          proveedorNombre: p.displayName,
           amount: this.pagoMonto,
           method: this.pagoMetodo,
           notes: this.pagoNotas
@@ -562,19 +777,19 @@ export default {
         this.pagoError = e?.message || 'No se pudo borrar el pago'
       }
     }
-  },
+  }
 }
 </script>
 
 <style scoped>
-.btn-primary {
+.bg-panel{ background: rgba(18, 22, 32, .92); }
+.modal-round{ border-radius: 14px; }
+
+.btn-accent {
   background: #7c3aed;
   border-color: #7c3aed;
 }
-.btn-primary:hover {
-  filter: brightness(1.05);
-}
-.card, .modal-content {
-  border-radius: 14px;
-}
+.btn-accent:hover { filter: brightness(1.05); }
+
+.table td, .table th { vertical-align: middle; }
 </style>
