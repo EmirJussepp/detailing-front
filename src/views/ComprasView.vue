@@ -1,346 +1,253 @@
-<!-- src/views/ComprasView.vue -->
 <script setup>
-import { computed, ref, watch } from 'vue'
-import { getSession, isAdmin } from '../auth/session'
-import { listProductos } from '../services/productosStorage'
-import { listProveedores } from '../services/proveedoresStorage'
-import { listComprasDia, registrarCompra, eliminarCompra } from '../services/comprasStorage'
+import { onMounted, ref, computed } from "vue";
+import { clientesApi } from "../services/clientesService.js";
+import { tipoClienteApi } from "../services/tipoClienteService";
+import { localidadApi } from "../services/localidadService";
 
-const session = getSession()
-const admin = computed(() => isAdmin())
-const userId = session?.userId ?? 'anon'
+const items = ref([]);
+const tiposCliente = ref([]);
+const localidades = ref([]);
 
-function todayISO() {
-  return new Date().toISOString().slice(0, 10)
+const loading = ref(false);
+const saving = ref(false);
+const errorMsg = ref("");
+const okMsg = ref("");
+
+const showCreate = ref(false);
+
+const form = ref({
+  nombre: "",
+  apellido: "",
+  dni: "",
+  telefono: "",
+  email: "",
+  localidadId: null,
+  tipoClienteId: "",
+});
+
+const valid = computed(() => {
+  const tipoId = Number(form.value.tipoClienteId)
+  return (
+    form.value.nombre.trim() &&
+    form.value.dni.trim() &&
+    Number.isFinite(tipoId) &&
+    tipoId > 0
+  )
+})
+
+
+async function fetchAll() {
+  loading.value = true;
+  errorMsg.value = "";
+  try {
+    const [clientesRes, tiposRes, locsRes] = await Promise.all([
+      clientesApi.list(),
+      tipoClienteApi.list(),
+      localidadApi.list(),
+    ]);
+
+    const clientes = clientesRes.data;
+    items.value = Array.isArray(clientes) ? clientes : (clientes?.items ?? []);
+
+    const tipos = tiposRes.data;
+    tiposCliente.value = Array.isArray(tipos) ? tipos : (tipos?.items ?? []);
+
+    const locs = locsRes.data;
+    localidades.value = Array.isArray(locs) ? locs : (locs?.items ?? []);
+  } catch (e) {
+    errorMsg.value =
+      e?.response?.data?.error || e?.message || "Error cargando datos";
+  } finally {
+    loading.value = false;
+  }
 }
 
-function formatMoney(n) {
-  const num = Number(n ?? 0)
-  return num.toLocaleString('es-AR', { minimumFractionDigits: 0 })
+function openCreate() {
+  errorMsg.value = "";
+  okMsg.value = "";
+  form.value = {
+    nombre: "",
+    apellido: "",
+    dni: "",
+    telefono: "",
+    email: "",
+    localidadId: null,
+    tipoClienteId: "",
+  };
+  showCreate.value = true;
 }
 
-const fecha = ref(todayISO())
-const errorMsg = ref('')
-const okMsg = ref('')
-
-const proveedores = ref([])
-const productos = ref([])
-const compras = ref([])
-
-function refresh() {
-  proveedores.value = listProveedores({ includeInactive: false })
-  productos.value = listProductos(userId).filter(p => p.activo)
-  compras.value = listComprasDia(fecha.value)
+function closeCreate() {
+  showCreate.value = false;
 }
 
-watch(fecha, refresh, { immediate: true })
-
-// compra form
-const proveedorId = ref('')
-const proveedorSel = computed(() => proveedores.value.find(p => p.id === proveedorId.value) ?? null)
-
-const condicion = ref('PAGADO') // PAGADO | CUENTA
-const pagadoAhora = ref('0')
-const pagadoAhoraMethod = ref('TRANSFERENCIA') // EFECTIVO | TRANSFERENCIA | DEBITO | OTRO
-
-const selProductoId = ref('')
-const qty = ref('1')
-const unitCost = ref('0')
-const notes = ref('')
-
-const items = ref([])
-
-function uid() {
-  return (crypto?.randomUUID?.() ?? `${Date.now()}_${Math.random().toString(16).slice(2)}`)
-}
-
-function addItem() {
-  errorMsg.value = ''
-  okMsg.value = ''
-
-  const p = productos.value.find(x => x.id === selProductoId.value)
-  if (!p) return (errorMsg.value = 'Seleccioná un producto.')
-
-  const q = Math.floor(Number(String(qty.value).replace(',', '.')))
-  if (!Number.isFinite(q) || q <= 0) return (errorMsg.value = 'Cantidad inválida.')
-
-  const c = Number(String(unitCost.value).replace(',', '.'))
-  if (!Number.isFinite(c) || c < 0) return (errorMsg.value = 'Costo unitario inválido.')
-
-  items.value = [
-    ...items.value,
-    {
-      id: uid(),
-      productId: p.id,
-      name: p.nombre,
-      qty: q,
-      unitCost: c,
-      subtotal: q * c
-    }
-  ]
-
-  selProductoId.value = ''
-  qty.value = '1'
-  unitCost.value = '0'
-}
-
-function removeItem(id) {
-  items.value = items.value.filter(i => i.id !== id)
-}
-
-const totalCalc = computed(() =>
-  items.value.reduce((acc, it) => acc + Number(it.subtotal ?? 0), 0)
-)
-
-function clearForm() {
-  proveedorId.value = ''
-  selProductoId.value = ''
-  qty.value = '1'
-  unitCost.value = '0'
-  notes.value = ''
-  items.value = []
-  condicion.value = 'PAGADO'
-  pagadoAhora.value = '0'
-  pagadoAhoraMethod.value = 'TRANSFERENCIA'
-}
-
-function toastOk(msg) {
-  okMsg.value = msg
-  setTimeout(() => (okMsg.value = ''), 2200)
-}
-
-function registrar() {
-  errorMsg.value = ''
-  okMsg.value = ''
+async function crear() {
+  saving.value = true
+  errorMsg.value = ""
+  okMsg.value = ""
 
   try {
-    const prov = proveedorSel.value
-    if (!prov) return (errorMsg.value = 'Seleccioná un proveedor.')
-    if (items.value.length === 0) return (errorMsg.value = 'Agregá al menos 1 ítem.')
+    // ✅ VALIDACIÓN FUERTE
+    const tipoId = Number(form.value.tipoClienteId)
+    if (!Number.isFinite(tipoId) || tipoId <= 0) {
+      throw new Error("Seleccioná un tipo de cliente")
+    }
 
-    // ✅ ACÁ le pasás el método:
-    const compra = registrarCompra({
-      fechaStr: fecha.value,
-      proveedorId: prov.id,
-      proveedorNombre: prov.nombre,
-      items: items.value,
-      notes: notes.value,
-      condicion: condicion.value,
-      pagadoAhora: pagadoAhora.value,
-      pagadoAhoraMethod: pagadoAhoraMethod.value
+    const locId =
+      form.value.localidadId === null ||
+      form.value.localidadId === "" ||
+      form.value.localidadId === undefined
+        ? null
+        : Number(form.value.localidadId)
+
+    await clientesApi.create({
+      nombre: form.value.nombre.trim(),
+      apellido: form.value.apellido?.trim() || null,
+      dni: form.value.dni.trim(),
+      telefono: form.value.telefono?.trim() || null,
+      email: form.value.email?.trim() || null,
+      localidadId: Number.isFinite(locId) ? locId : null,
+      tipoClienteId: tipoId, // 👈 ACÁ está la clave
     })
 
-    toastOk(`Compra registrada ✅ Stock actualizado (+) — Total $${formatMoney(compra.total)}`)
-    clearForm()
-    refresh()
+    okMsg.value = "Cliente creado."
+    closeCreate()
+    await fetchAll()
+
   } catch (e) {
-    errorMsg.value = e?.message || 'No se pudo registrar la compra.'
+    errorMsg.value =
+      e?.response?.data?.error || e?.message || "Error creando cliente"
+  } finally {
+    saving.value = false
   }
 }
 
-function borrarCompra(c) {
-  errorMsg.value = ''
-  okMsg.value = ''
 
-  if (!confirm(`Eliminar compra a "${c.proveedorNombre}" por $${formatMoney(c.total)}? (Revertirá stock)`)) return
 
-  const res = eliminarCompra({ fechaStr: fecha.value, compraId: c.id })
-  if (!res.ok) {
-    errorMsg.value = res.error || 'No se pudo eliminar.'
-    refresh()
-    return
-  }
-
-  toastOk('Compra eliminada ✅ Stock revertido (-)')
-  refresh()
-}
+onMounted(fetchAll);
 </script>
 
 <template>
   <div>
     <div class="mb-3">
-      <h1 class="h4 mb-1">Compras</h1>
-      <div class="text-secondary">Compras a proveedores → actualiza stock automáticamente (localStorage)</div>
+      <h1 class="h4 mb-1">Clientes</h1>
+      <div class="text-secondary">Conectado a API (Ktor)</div>
     </div>
 
     <div v-if="errorMsg" class="alert alert-danger py-2">{{ errorMsg }}</div>
     <div v-if="okMsg" class="alert alert-success py-2">{{ okMsg }}</div>
 
-    <div class="card bg-panel border-0 shadow-sm mb-4">
-      <div class="card-body">
-        <div class="row g-3 align-items-end">
-          <div class="col-12 col-md-3">
-            <label class="form-label text-secondary">Fecha</label>
-            <input v-model="fecha" type="date" class="form-control bg-dark text-white border-secondary" :disabled="!admin" />
-            <div v-if="!admin" class="text-secondary small mt-1">CASHIER: fecha fija (hoy).</div>
-          </div>
-
-          <div class="col-12 col-md-5">
-            <label class="form-label text-secondary">Proveedor</label>
-            <select v-model="proveedorId" class="form-select bg-dark text-white border-secondary">
-              <option value="">Seleccionar…</option>
-              <option v-for="p in proveedores" :key="p.id" :value="p.id">
-                {{ p.nombre }}
-              </option>
-            </select>
-          </div>
-
-          <div class="col-12 col-md-2">
-            <label class="form-label text-secondary">Condición</label>
-            <select v-model="condicion" class="form-select bg-dark text-white border-secondary">
-              <option value="PAGADO">PAGADO</option>
-              <option value="CUENTA">A CUENTA</option>
-            </select>
-          </div>
-
-          <div class="col-12 col-md-2" v-if="condicion === 'CUENTA'">
-            <label class="form-label text-secondary">Pagado ahora</label>
-            <input v-model="pagadoAhora" class="form-control bg-dark text-white border-secondary" inputmode="numeric" placeholder="0" />
-          </div>
-
-          <div class="col-12 col-md-3" v-if="condicion === 'CUENTA'">
-            <label class="form-label text-secondary">Método pago</label>
-            <select v-model="pagadoAhoraMethod" class="form-select bg-dark text-white border-secondary">
-              <option value="EFECTIVO">EFECTIVO</option>
-              <option value="TRANSFERENCIA">TRANSFERENCIA</option>
-              <option value="DEBITO">DÉBITO</option>
-              <option value="OTRO">OTRO</option>
-            </select>
-          </div>
-
-          <div class="col-12 col-md-4">
-            <label class="form-label text-secondary">Notas</label>
-            <input v-model="notes" class="form-control bg-dark text-white border-secondary" placeholder="Factura, detalle..." />
-          </div>
-        </div>
-
-        <hr class="border-secondary my-3" />
-
-        <div class="row g-3 align-items-end">
-          <div class="col-12 col-md-6">
-            <label class="form-label text-secondary">Producto</label>
-            <select v-model="selProductoId" class="form-select bg-dark text-white border-secondary">
-              <option value="">Seleccionar…</option>
-              <option v-for="p in productos" :key="p.id" :value="p.id">
-                {{ p.nombre }} (Stock: {{ p.stockActual }})
-              </option>
-            </select>
-          </div>
-
-          <div class="col-6 col-md-2">
-            <label class="form-label text-secondary">Cant.</label>
-            <input v-model="qty" class="form-control bg-dark text-white border-secondary" inputmode="numeric" />
-          </div>
-
-          <div class="col-6 col-md-2">
-            <label class="form-label text-secondary">Costo unit.</label>
-            <input v-model="unitCost" class="form-control bg-dark text-white border-secondary" inputmode="numeric" />
-          </div>
-
-          <div class="col-12 col-md-2 d-flex justify-content-md-end">
-            <button class="btn btn-outline-light w-100" @click="addItem" :disabled="!selProductoId">
-              Agregar
-            </button>
-          </div>
-        </div>
-
-        <div class="table-responsive mt-3" v-if="items.length">
-          <table class="table table-dark table-hover align-middle mb-0">
-            <thead>
-              <tr>
-                <th>Producto</th>
-                <th style="width: 110px;">Cant.</th>
-                <th style="width: 150px;">Costo unit.</th>
-                <th style="width: 170px;">Subtotal</th>
-                <th style="width: 120px;" class="text-end">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="it in items" :key="it.id">
-                <td class="fw-semibold">{{ it.name }}</td>
-                <td class="text-secondary">{{ it.qty }}</td>
-                <td class="text-secondary">$ {{ formatMoney(it.unitCost) }}</td>
-                <td class="fw-bold">$ {{ formatMoney(it.subtotal) }}</td>
-                <td class="text-end">
-                  <button class="btn btn-sm btn-outline-light" @click="removeItem(it.id)">Quitar</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div v-else class="text-secondary mt-3">Agregá ítems para armar la compra.</div>
-
-        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-3">
-          <div class="text-secondary">
-            Total: <b class="fs-5">$ {{ formatMoney(totalCalc) }}</b>
-          </div>
-
-          <div class="d-flex gap-2">
-            <button class="btn btn-outline-light" @click="clearForm">Limpiar</button>
-            <button class="btn btn-primary btn-accent" @click="registrar" :disabled="!proveedorId || items.length === 0">
-              Registrar compra
-            </button>
-          </div>
-        </div>
-      </div>
+    <div class="d-flex justify-content-end mb-3">
+      <button class="btn btn-primary btn-accent" @click="openCreate">
+        + Nuevo cliente
+      </button>
     </div>
 
     <div class="card bg-panel border-0 shadow-sm">
       <div class="card-body">
-        <div class="d-flex align-items-center justify-content-between gap-2 mb-3">
-          <h2 class="h6 mb-0">Compras del día</h2>
-          <div class="text-secondary small">{{ compras.length }} compra(s)</div>
-        </div>
-
-        <div v-if="compras.length === 0" class="text-secondary">No hay compras registradas.</div>
+        <div v-if="loading" class="text-secondary">Cargando...</div>
 
         <div v-else class="table-responsive">
           <table class="table table-dark table-hover align-middle mb-0">
             <thead>
               <tr>
-                <th style="width: 220px;">Fecha/Hora</th>
-                <th>Proveedor</th>
-                <th>Total</th>
-                <th style="width: 160px;">Condición</th>
-                <th style="width: 180px;">Saldo pend.</th>
-                <th style="width: 340px;">Detalle</th>
-                <th style="width: 140px;" class="text-end">Acciones</th>
+                <th style="width: 90px;">ID</th>
+                <th>Cliente</th>
+                <th>DNI</th>
+                <th>Tipo</th>
+                <th>Localidad</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="c in compras" :key="c.id">
-                <td class="text-secondary">{{ new Date(c.createdAt).toLocaleString('es-AR') }}</td>
-                <td class="text-secondary">{{ c.proveedorNombre }}</td>
-                <td class="fw-bold">$ {{ formatMoney(c.total) }}</td>
-                <td class="text-secondary">
-                  <span class="badge" :class="c.condicion === 'CUENTA' ? 'text-bg-warning' : 'text-bg-success'">
-                    {{ c.condicion }}
-                  </span>
+              <tr v-for="c in items" :key="c.id">
+                <td class="text-secondary">{{ c.id }}</td>
+                <td class="fw-semibold">
+                  {{ c.nombre }} <span v-if="c.apellido"> {{ c.apellido }}</span>
                 </td>
+                <td class="text-secondary">{{ c.dni }}</td>
                 <td class="text-secondary">
-                  $ {{ formatMoney(c.saldoPendiente ?? 0) }}
+                  {{ c.tipoCliente?.nombre ?? c.tipoClienteId ?? "-" }}
                 </td>
                 <td class="text-secondary">
-                  <div v-for="(it, idx) in (c.items ?? []).slice(0, 3)" :key="idx">
-                    • {{ it.qty }} x {{ it.name }} (${{ formatMoney(it.unitCost) }})
-                  </div>
-                  <div v-if="(c.items ?? []).length > 3" class="text-secondary">
-                    +{{ (c.items ?? []).length - 3 }} más…
-                  </div>
+                  {{ c.localidad?.nombre ?? c.localidadId ?? "-" }}
                 </td>
-                <td class="text-end">
-                  <button class="btn btn-sm btn-outline-light" @click="borrarCompra(c)">
-                    Eliminar
-                  </button>
-                </td>
+              </tr>
+
+              <tr v-if="items.length === 0">
+                <td colspan="5" class="text-secondary">No hay clientes cargados.</td>
               </tr>
             </tbody>
           </table>
         </div>
 
         <div class="text-secondary small mt-3">
-          Al eliminar: revierte stock automáticamente.
+          Próximo: selector de cliente en Ventas.
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Alta -->
+    <div v-if="showCreate" class="modal-backdrop-custom">
+      <div class="modal-custom">
+        <h5 class="mb-3">Nuevo cliente</h5>
+
+        <div class="row g-2">
+          <div class="col-12 col-md-6">
+            <label class="form-label text-secondary">Nombre *</label>
+            <input v-model="form.nombre" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label text-secondary">Apellido</label>
+            <input v-model="form.apellido" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label text-secondary">DNI *</label>
+            <input v-model="form.dni" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label text-secondary">Teléfono</label>
+            <input v-model="form.telefono" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12">
+            <label class="form-label text-secondary">Email</label>
+            <input v-model="form.email" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label text-secondary">Tipo cliente *</label>
+            <select v-model="form.tipoClienteId" class="form-select bg-dark text-white border-secondary">
+              <option disabled value="">Seleccionar...</option>
+              <option v-for="t in tiposCliente" :key="t.id" :value="String(t.id)">
+  {{ t.nombre }}
+</option>
+
+            </select>
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label text-secondary">Localidad</label>
+            <select v-model="form.localidadId" class="form-select bg-dark text-white border-secondary">
+              <option :value="null">—</option>
+              <option value="">—</option>
+<option v-for="l in localidades" :key="l.id" :value="String(l.id)">
+  {{ l.nombre }} ({{ l.provincia }})
+</option>
+
+            </select>
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-end gap-2 mt-3">
+          <button class="btn btn-outline-secondary" @click="closeCreate" :disabled="saving">
+            Cancelar
+          </button>
+          <button class="btn btn-primary btn-accent" @click="crear" :disabled="saving || !valid">
+            Crear
+          </button>
         </div>
       </div>
     </div>
@@ -351,4 +258,20 @@ function borrarCompra(c) {
 .bg-panel{ background: rgba(18, 22, 32, .92); }
 .btn-accent{ background: #6f5cff; border: none; }
 .btn-accent:hover{ background: #5f4de6; }
+
+.modal-backdrop-custom{
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.6);
+  display:flex; align-items:center; justify-content:center;
+  z-index: 2000;
+}
+.modal-custom{
+  width: min(720px, 92vw);
+  background: #111;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.55);
+  color: #fff;
+}
 </style>

@@ -34,11 +34,24 @@ function safeInt(n) {
   return Number.isFinite(x) ? x : NaN
 }
 
+function round2(n) {
+  return Math.round(Number(n ?? 0) * 100) / 100
+}
+
+function calcEstado({ condicion, total, pagadoAhora, saldoPendiente }) {
+  if (condicion === 'PAGADO') return 'PAGADA'
+  // CUENTA
+  if (round2(saldoPendiente) <= 0) return 'PAGADA'
+  if (round2(pagadoAhora) > 0 && round2(pagadoAhora) < round2(total)) return 'PARCIAL'
+  return 'PENDIENTE'
+}
+
 export function listComprasDia(fechaStr) {
   const all = loadAll()
   const arr = all[fechaStr] ?? []
   return [...arr].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
 }
+
 export function listComprasAll() {
   const all = loadAll()
   const arr = []
@@ -48,7 +61,6 @@ export function listComprasAll() {
   }
   return arr.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
 }
-
 
 export function registrarCompra(payload) {
   const s = getSession()
@@ -77,10 +89,10 @@ export function registrarCompra(payload) {
     if (!Number.isFinite(qty) || qty <= 0) throw new Error('Cantidad inválida')
     if (!Number.isFinite(unitCost) || unitCost < 0) throw new Error('Costo unitario inválido')
 
-    return { productId, name, qty, unitCost, subtotal: qty * unitCost }
+    return { productId, name, qty, unitCost, subtotal: round2(qty * unitCost) }
   })
 
-  const total = normItems.reduce((acc, it) => acc + Number(it.subtotal ?? 0), 0)
+  const total = round2(normItems.reduce((acc, it) => acc + Number(it.subtotal ?? 0), 0))
   if (!Number.isFinite(total) || total <= 0) throw new Error('Total inválido')
 
   let pagadoAhora = 0
@@ -88,15 +100,19 @@ export function registrarCompra(payload) {
     pagadoAhora = toNumberMoney(payload?.pagadoAhora)
     if (!Number.isFinite(pagadoAhora) || pagadoAhora < 0) throw new Error('Pagado ahora inválido')
     if (pagadoAhora > total) throw new Error('Pagado ahora no puede ser mayor al total')
+  } else {
+    // contado: pagadoAhora es todo el total
+    pagadoAhora = total
   }
 
   const pagadoAhoraMethod =
-  String(payload?.pagadoAhoraMethod ?? 'TRANSFERENCIA').trim() || 'TRANSFERENCIA'
+    String(payload?.pagadoAhoraMethod ?? 'TRANSFERENCIA').trim() || 'TRANSFERENCIA'
 
-// ✅ MODELO A: deuda completa
-const saldoPendiente =
-  condicion === 'CUENTA' ? Math.round(total * 100) / 100 : 0
+  // ✅ FIX: saldo pendiente real
+  const saldoPendiente = condicion === 'CUENTA' ? round2(total - pagadoAhora) : 0
 
+  // estado SQL-like
+  const estado = calcEstado({ condicion, total, pagadoAhora, saldoPendiente })
 
   // 1) actualizar stock (sumar)
   const applied = []
@@ -109,19 +125,19 @@ const saldoPendiente =
     applied.push({ productId: it.productId, delta: +it.qty })
   }
 
-  // 2) crear compra con ID (CLAVE!)
+  // 2) crear compra
   const compraId = uid()
-
   const compra = {
-    id: compraId, // ✅ IMPORTANTÍSIMO
+    id: compraId,
     fechaStr,
     proveedorId,
-    proveedorNombre,
+    proveedorNombre, // snapshot (podés sacarlo más adelante)
     items: normItems,
     total,
     notes: String(payload?.notes ?? '').trim(),
 
-    condicion,
+    condicion,        // UX
+    estado,           // ✅ SQL-like
     pagadoAhora,
     pagadoAhoraMethod,
     saldoPendiente,
@@ -135,8 +151,14 @@ const saldoPendiente =
   all[fechaStr] = [compra, ...prev]
   saveAll(all)
 
-  // 4) ✅ pago automático si es CUENTA y pagó algo ahora
-  if (condicion === 'CUENTA' && Number(pagadoAhora) > 0) {
+  // 4) ✅ pago automático:
+  // - CUENTA: si pagó algo ahora
+  // - PAGADO: siempre (contado) para que quede compatible con SQL
+  const debeCrearPago =
+    (condicion === 'CUENTA' && round2(pagadoAhora) > 0) ||
+    (condicion === 'PAGADO' && round2(total) > 0)
+
+  if (debeCrearPago) {
     try {
       addPago({
         proveedorId,
@@ -146,7 +168,11 @@ const saldoPendiente =
         notes: compra.notes ? `AUTO: ${compra.notes}` : `AUTO: compra ${compraId}`,
         refCompraId: compraId,
         refFechaStr: fechaStr,
-        origin: 'AUTO_COMPRA'
+        origin: 'AUTO_COMPRA',
+
+        // más adelante: cajaId/metodoPagoId reales
+        cajaId: null,
+        metodoPagoId: null
       })
     } catch (e) {
       // rollback: borrar compra + revertir stock
@@ -189,10 +215,91 @@ export function eliminarCompra({ fechaStr, compraId }) {
   all[fechaStr] = next
   saveAll(all)
 
-  // 3) ✅ borrar pago auto asociado
-  if (target.condicion === 'CUENTA' && Number(target.pagadoAhora ?? 0) > 0) {
-    removePagosByRefCompra(target.id)
-  }
+  // 3) ✅ borrar pagos asociados a la compra (contado o cuenta)
+  removePagosByRefCompra(target.id)
 
   return { ok: true, removed: target }
+}
+// ✅ helpers para aplicar pagos a compras existentes
+
+function calcEstadoFromSaldo({ condicion, total, saldoPendiente }) {
+  if (condicion === 'PAGADO') return 'PAGADA'
+  if (saldoPendiente <= 0) return 'PAGADA'
+  if (saldoPendiente < total) return 'PARCIAL'
+  return 'PENDIENTE'
+}
+
+export function getCompraById(compraId) {
+  const all = loadAll()
+  for (const fechaStr of Object.keys(all)) {
+    const list = all[fechaStr] ?? []
+    const idx = list.findIndex(c => String(c.id) === String(compraId))
+    if (idx !== -1) return { fechaStr, compra: list[idx], idx }
+  }
+  return null
+}
+
+export function listComprasByProveedor(proveedorId) {
+  return listComprasAll()
+    .filter(c => String(c.proveedorId) === String(proveedorId))
+    .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')) // más vieja primero
+}
+
+export function listComprasPendientesProveedor(proveedorId) {
+  return listComprasByProveedor(proveedorId).filter(c =>
+    c.condicion === 'CUENTA' && Number(c.saldoPendiente ?? 0) > 0
+  )
+}
+
+export function aplicarPagoACompra({ compraId, monto }) {
+  const found = getCompraById(compraId)
+  if (!found) throw new Error('Compra no encontrada')
+
+  const { fechaStr, compra, idx } = found
+
+  const m = Math.round(Number(monto ?? 0) * 100) / 100
+  if (!Number.isFinite(m) || m <= 0) throw new Error('Monto inválido')
+
+  const saldoPrev = Math.round(Number(compra.saldoPendiente ?? 0) * 100) / 100
+  const aplicado = Math.min(m, saldoPrev)
+  const saldoNuevo = Math.round((saldoPrev - aplicado) * 100) / 100
+
+  const updated = {
+    ...compra,
+    saldoPendiente: saldoNuevo,
+    estado: calcEstadoFromSaldo({
+      condicion: compra.condicion,
+      total: compra.total,
+      saldoPendiente: saldoNuevo
+    }),
+    updatedAt: new Date().toISOString()
+  }
+
+  const all = loadAll()
+  const list = [...(all[fechaStr] ?? [])]
+  list[idx] = updated
+  all[fechaStr] = list
+  saveAll(all)
+
+  return { aplicado, saldoNuevo, compra: updated }
+}
+
+// Auto: aplica monto a compras pendientes (FIFO)
+export function aplicarPagoAutomaticoProveedor({ proveedorId, monto }) {
+  let remaining = Math.round(Number(monto ?? 0) * 100) / 100
+  if (!Number.isFinite(remaining) || remaining <= 0) throw new Error('Monto inválido')
+
+  const pendientes = listComprasPendientesProveedor(proveedorId)
+  const aplicaciones = []
+
+  for (const c of pendientes) {
+    if (remaining <= 0) break
+    const res = aplicarPagoACompra({ compraId: c.id, monto: remaining })
+    if (res.aplicado > 0) {
+      aplicaciones.push({ compraId: c.id, aplicado: res.aplicado })
+      remaining = Math.round((remaining - res.aplicado) * 100) / 100
+    }
+  }
+
+  return { aplicaciones, sobrante: remaining }
 }

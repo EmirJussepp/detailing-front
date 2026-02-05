@@ -1,36 +1,46 @@
 <!-- src/views/VentasView.vue -->
 <script setup>
-import { computed, ref, watch } from 'vue'
-import { getSession, isAdmin, getShift } from '../auth/session'
-import { requireCajaAbierta, addToVentasTotal } from '../services/cajaStorage'
-import { listVentasBucket, addVenta, removeVenta } from '../services/ventasStorage'
-import { listProductos, hasStock, applyStockDelta } from '../services/productosStorage'
-import { listClientes } from '../services/clientesStorage'
+import { computed, ref, watch } from "vue"
+import { getSession, isAdmin, getShift } from "../auth/session"
 
-const session = getSession()
-const admin = computed(() => isAdmin())
-const userId = session?.userId ?? 'anon'
+import { cajaApi } from "../services/cajaApi"
+import { ventasApi } from "../services/ventasApi"
+import { movimientosCajaApi } from "../services/movimientosCajaApi"
+import { productosApi } from "../services/productosApi"
+import { clientesApi } from "../services/clientesApi"
+
+// =========================
+// Session / permisos
+// =========================
+const saving = ref(false)
+
+const session = getSession() ?? null
+const admin = computed(() => Boolean(session && isAdmin()))
+const userId = session?.userId ?? null
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10)
 }
 
 const fecha = ref(todayISO())
-const turnoSel = ref(admin.value ? 'MAÑANA' : (getShift() ?? 'MAÑANA'))
+const turnoSel = ref(admin.value ? "MAÑANA" : (getShift() ?? "MAÑANA"))
 
-const errorMsg = ref('')
-const okMsg = ref('')
+const errorMsg = ref("")
+const okMsg = ref("")
 
-const paymentMethod = ref('EFECTIVO')
-const notes = ref('')
+const paymentMethod = ref("EFECTIVO")
+const notes = ref("")
 
+// =========================
+// Helpers
+// =========================
 function ensureUUID() {
-  return (crypto?.randomUUID?.() ?? String(Date.now() + Math.random()))
+  return crypto?.randomUUID?.() ?? String(Date.now() + Math.random())
 }
 
 function formatMoney(n) {
   const num = Number(n ?? 0)
-  return num.toLocaleString('es-AR', { minimumFractionDigits: 0 })
+  return num.toLocaleString("es-AR", { minimumFractionDigits: 0 })
 }
 
 function clamp(n, min, max) {
@@ -39,43 +49,133 @@ function clamp(n, min, max) {
   return Math.min(max, Math.max(min, x))
 }
 
-const cajaCheck = ref({ ok: false, error: '' })
-const ventas = ref([])
-
-const productos = ref([]) // activos
-const clientes = ref([])  // activos
-
-const clienteSelId = ref('')
-const clienteSel = computed(() => clientes.value.find(c => c.id === clienteSelId.value) ?? null)
-
-function refresh() {
-  okMsg.value = ''
-  errorMsg.value = ''
-
-  const check = requireCajaAbierta(userId, fecha.value, turnoSel.value)
-  cajaCheck.value = check.ok ? { ok: true } : { ok: false, error: check.error }
-
-  ventas.value = listVentasBucket(userId, fecha.value, turnoSel.value)
-  productos.value = listProductos(userId).filter(p => p.activo)
-  clientes.value = listClientes(userId).filter(c => c.activo)
+function mapMetodoPago(pm) {
+  // Ajustá si tus IDs reales son otros
+  if (pm === "EFECTIVO") return 1
+  if (pm === "TRANSFERENCIA") return 2
+  if (pm === "DEBITO") return 3
+  if (pm === "CREDITO") return 4
+  return 1
 }
 
-watch([fecha, turnoSel, admin], refresh, { immediate: true })
+// =========================
+// Estado principal
+// =========================
+const cajaCheck = ref({ ok: false, error: "" })
+const cajaAbierta = ref(null)
+
+const movimientosCaja = ref([])
+const resumenCaja = ref({ ingresos: 0, egresos: 0, saldo: 0 })
+
+const ventas = ref([]) // (por ahora sin GET por turno)
+const productos = ref([])
+const clientes = ref([])
+
+const clienteSelId = ref("")
+const clienteSel = computed(() =>
+  clientes.value.find(c => String(c.id) === String(clienteSelId.value)) ?? null
+)
 
 const canSell = computed(() => cajaCheck.value?.ok === true)
 
-// ======= Items (productos) con descuento por línea =======
-const selProductoId = ref('')
-const itemQty = ref('1')
-const itemDiscountPct = ref('0') // % por línea
+// =========================
+// Refresh (todo backend)
+// =========================
+async function refresh() {
+  okMsg.value = ""
+  errorMsg.value = ""
+
+  // 1) Caja abierta
+  try {
+    const { data } = await cajaApi.abierta()
+    cajaAbierta.value = data
+    cajaCheck.value = { ok: true, error: "" }
+  } catch (e) {
+    cajaAbierta.value = null
+    cajaCheck.value = { ok: false, error: "No hay caja ABIERTA (backend)." }
+  }
+
+  // 2) Productos
+  try {
+    const { data } = await productosApi.list()
+    const arr = Array.isArray(data) ? data : []
+    productos.value = arr.map(p => ({
+      id: Number(p.productoId),
+      nombre: p.nombre,
+      precioVenta: Number(p.precioVenta ?? 0),
+      precioCosto: Number(p.precioCosto ?? 0),
+      precioMayorista: p.precioMayorista == null ? null : Number(p.precioMayorista),
+      codigoProducto: p.codigoProducto ?? null,
+      categoria: p.categoria ?? null,
+      userId: p.userId ?? null,
+      stockActual: p.stockActual == null ? null : Number(p.stockActual), // si el backend lo devuelve
+      activo: true
+    }))
+  } catch (e) {
+    productos.value = []
+    errorMsg.value = e?.response?.data?.error || e?.message || "Error cargando productos (backend)."
+  }
+
+  // 3) Clientes
+  try {
+    const { data } = await clientesApi.list()
+    const arr = Array.isArray(data) ? data : []
+    clientes.value = arr.map(c => ({
+      id: Number(c.clienteId ?? c.id),
+      nombre: c.nombre,
+      tipoClienteId: c.tipoClienteId ?? null,
+      activo: c.activo ?? true,
+      descuentoPct: c.descuentoPct ?? 0
+    })).filter(c => c.activo !== false)
+  } catch (e) {
+    // Si todavía no tenés endpoint, dejalo vacío sin romper
+    clientes.value = []
+  }
+
+  // 4) Ventas (vacío por ahora)
+  ventas.value = []
+
+  // 5) Movimientos + resumen
+  movimientosCaja.value = []
+  resumenCaja.value = { ingresos: 0, egresos: 0, saldo: 0 }
+
+  if (cajaAbierta.value?.cajaId) {
+    try {
+      const { data: movs } = await movimientosCajaApi.porCajaId(cajaAbierta.value.cajaId)
+      movimientosCaja.value = Array.isArray(movs) ? movs : []
+
+      const ingresos = movimientosCaja.value
+        .filter(m => m.tipo === "INGRESO")
+        .reduce((a, m) => a + Number(m.monto || 0), 0)
+
+      const egresos = movimientosCaja.value
+        .filter(m => m.tipo === "EGRESO")
+        .reduce((a, m) => a + Number(m.monto || 0), 0)
+
+      const saldo = Number(cajaAbierta.value.montoInicial || 0) + ingresos - egresos
+      resumenCaja.value = { ingresos, egresos, saldo }
+    } catch {
+      // no rompemos la vista si falla
+    }
+  }
+}
+
+watch([fecha, turnoSel, admin], () => { refresh() }, { immediate: true })
+
+// =========================
+// Items (productos) con descuento por línea
+// =========================
+const selProductoId = ref("")
+const itemQty = ref("1")
+const itemDiscountPct = ref("0")
 
 const selectedProducto = computed(() =>
-  productos.value.find(p => p.id === selProductoId.value) ?? null
+  productos.value.find(p => String(p.id) === String(selProductoId.value)) ?? null
 )
 
-// item: {id, productId, name, price, cost, qty, discountPct, discountUnit, netUnit, subtotal, invalidReason}
 const items = ref([])
 
+// item: {id, productId, name, price, cost, qty, discountPct, discountUnit, netUnit, subtotal, invalidReason}
 function recalcItem(it) {
   const price = Number(it.price ?? 0)
   const cost = Number(it.cost ?? 0)
@@ -83,7 +183,7 @@ function recalcItem(it) {
   const qtyRaw = Number(it.qty ?? 0)
   const qty = Number.isFinite(qtyRaw) ? qtyRaw : 0
 
-  const discountPct = clamp(String(it.discountPct ?? 0).replace(',', '.'), 0, 100)
+  const discountPct = clamp(String(it.discountPct ?? 0).replace(",", "."), 0, 100)
 
   const discountUnit = Math.round((price * discountPct) / 100)
   const netUnit = Math.max(0, price - discountUnit)
@@ -91,59 +191,43 @@ function recalcItem(it) {
 
   const invalidReason = netUnit < cost
     ? `Vende a pérdida: $${formatMoney(netUnit)} < costo $${formatMoney(cost)}`
-    : ''
+    : ""
 
-  return {
-    ...it,
-    qty,
-    discountPct,
-    discountUnit,
-    netUnit,
-    subtotal,
-    invalidReason
-  }
+  return { ...it, qty, discountPct, discountUnit, netUnit, subtotal, invalidReason }
 }
 
 function addItem() {
-  errorMsg.value = ''
-  okMsg.value = ''
+  errorMsg.value = ""
+  okMsg.value = ""
 
   if (!canSell.value) {
-    errorMsg.value = cajaCheck.value?.error || 'Caja no disponible para vender.'
+    errorMsg.value = cajaCheck.value?.error || "Caja no disponible para vender."
     return
   }
 
   const p = selectedProducto.value
-  if (!p) return (errorMsg.value = 'Seleccioná un producto.')
+  if (!p) { errorMsg.value = "Seleccioná un producto."; return }
 
-  const qty = Math.floor(Number(String(itemQty.value).trim().replace(',', '.')))
-  if (!Number.isFinite(qty) || qty <= 0) return (errorMsg.value = 'Cantidad inválida.')
+  const qty = Math.floor(Number(String(itemQty.value).trim().replace(",", ".")))
+  if (!Number.isFinite(qty) || qty <= 0) { errorMsg.value = "Cantidad inválida."; return }
 
-  const discountPct = clamp(String(itemDiscountPct.value).replace(',', '.'), 0, 100)
-
-  // Stock considerando lo ya cargado
-  const already = items.value
-    .filter(i => i.productId === p.id)
-    .reduce((acc, i) => acc + Number(i.qty ?? 0), 0)
-
-  const check = hasStock(userId, p.id, already + qty)
-  if (!check.ok) return (errorMsg.value = check.error)
+  const discountPct = clamp(String(itemDiscountPct.value).replace(",", "."), 0, 100)
 
   const base = {
     id: ensureUUID(),
-    productId: p.id,
+    productId: Number(p.id),
     name: p.nombre,
     price: Number(p.precioVenta ?? 0),
     cost: Number(p.precioCosto ?? 0),
     qty,
-    discountPct
+    discountPct,
   }
 
   items.value = [...items.value, recalcItem(base)]
 
-  selProductoId.value = ''
-  itemQty.value = '1'
-  itemDiscountPct.value = '0'
+  selProductoId.value = ""
+  itemQty.value = "1"
+  itemDiscountPct.value = "0"
 }
 
 function removeItem(itemId) {
@@ -151,42 +235,18 @@ function removeItem(itemId) {
 }
 
 function updateItemDiscount(itemId, pct) {
-  const parsed = String(pct ?? '').replace(',', '.')
+  const parsed = String(pct ?? "").replace(",", ".")
   items.value = items.value.map(it =>
     it.id === itemId ? recalcItem({ ...it, discountPct: parsed }) : it
   )
 }
 
-function groupQtyByProduct(itemsArr) {
-  const map = new Map()
-  for (const it of itemsArr) {
-    const pid = it.productId
-    const q = Number(it.qty ?? 0)
-    map.set(pid, (map.get(pid) ?? 0) + q)
-  }
-  return map
-}
-
 function updateItemQty(itemId, qty) {
-  errorMsg.value = ''
+  errorMsg.value = ""
 
-  const parsed = Number(String(qty ?? '').replace(',', '.'))
+  const parsed = Number(String(qty ?? "").replace(",", "."))
   const safe = Number.isFinite(parsed) ? parsed : 1
   const finalQty = safe <= 0 ? 1 : Math.floor(safe)
-
-  const target = items.value.find(i => i.id === itemId)
-  if (!target) return
-
-  // Simular cómo quedaría el stock agrupado si aplico el cambio
-  const simulated = items.value.map(i => (i.id === itemId ? { ...i, qty: finalQty } : i))
-  const grouped = groupQtyByProduct(simulated)
-  const want = grouped.get(target.productId) ?? 0
-
-  const check = hasStock(userId, target.productId, want)
-  if (!check.ok) {
-    errorMsg.value = check.error
-    return
-  }
 
   items.value = items.value.map(it =>
     it.id === itemId ? recalcItem({ ...it, qty: finalQty }) : it
@@ -195,14 +255,17 @@ function updateItemQty(itemId, qty) {
 
 function clearForm() {
   items.value = []
-  paymentMethod.value = 'EFECTIVO'
-  notes.value = ''
-  clienteSelId.value = ''
-  selProductoId.value = ''
-  itemQty.value = '1'
-  itemDiscountPct.value = '0'
+  paymentMethod.value = "EFECTIVO"
+  notes.value = ""
+  clienteSelId.value = ""
+  selProductoId.value = ""
+  itemQty.value = "1"
+  itemDiscountPct.value = "0"
 }
 
+// =========================
+// Totales
+// =========================
 const subtotalBase = computed(() =>
   items.value.reduce((acc, it) => acc + Number(it.price ?? 0) * Number(it.qty ?? 0), 0)
 )
@@ -218,133 +281,76 @@ const totalCalc = computed(() =>
 const hasInvalidItems = computed(() => items.value.some(it => it.invalidReason))
 const canRegister = computed(() => canSell.value && items.value.length > 0 && !hasInvalidItems.value)
 
-function registrarVenta() {
-  errorMsg.value = ''
-  okMsg.value = ''
-
-  const checkCaja = requireCajaAbierta(userId, fecha.value, turnoSel.value)
-  if (!checkCaja.ok) return (errorMsg.value = checkCaja.error)
-
-  if (items.value.length === 0) return (errorMsg.value = 'Agregá al menos 1 producto.')
-  if (hasInvalidItems.value) return (errorMsg.value = 'Hay productos con venta a pérdida. Ajustá el descuento.')
-
-  // Validación stock global
-  const grouped = groupQtyByProduct(items.value)
-  for (const [pid, qty] of grouped.entries()) {
-    const check = hasStock(userId, pid, qty)
-    if (!check.ok) return (errorMsg.value = check.error)
-  }
-
-  const total = Number(totalCalc.value)
-  if (!Number.isFinite(total) || total <= 0) return (errorMsg.value = 'Total inválido.')
-
-  // 1) descontar stock
-  const appliedStock = []
-  for (const [pid, qty] of grouped.entries()) {
-    const res = applyStockDelta(userId, pid, -qty)
-    if (!res.ok) {
-      for (const a of appliedStock) applyStockDelta(userId, a.productId, -a.delta)
-      errorMsg.value = res.error ?? 'No se pudo actualizar stock.'
-      refresh()
-      return
-    }
-    appliedStock.push({ productId: pid, delta: -qty })
-  }
-
-  // 2) persistir venta con cliente + descuentos por item (incluye cost para reportes)
-  const venta = {
-    id: ensureUUID(),
-    date: fecha.value,
-    shift: turnoSel.value,
-    cashierUserId: userId,
-
-    clientId: clienteSel.value?.id ?? null,
-    clientNombre: clienteSel.value?.nombre ?? null,
-
-    items: items.value.map(i => ({
-      productId: i.productId,
-      name: i.name,
-      qty: i.qty,
-      price: i.price,
-      cost: i.cost,
-      discountPct: i.discountPct,
-      discountUnit: i.discountUnit,
-      netUnit: i.netUnit,
-      subtotal: i.subtotal
-    })),
-
-    subtotalBase: Number(subtotalBase.value),
-    discountTotal: Number(descuentoTotal.value),
-
-    total,
-    paymentMethod: paymentMethod.value,
-    notes: notes.value?.trim() ?? '',
-    createdAt: new Date().toISOString()
-  }
-
-  addVenta(userId, fecha.value, turnoSel.value, venta)
-
-  // 3) impactar caja
-  const applyCaja = addToVentasTotal(userId, fecha.value, turnoSel.value, total)
-  if (!applyCaja.ok) {
-    removeVenta(userId, fecha.value, turnoSel.value, venta.id)
-    for (const [pid, qty] of grouped.entries()) applyStockDelta(userId, pid, +qty)
-    errorMsg.value = applyCaja.error ?? 'No se pudo impactar la venta en caja.'
-    refresh()
-    return
-  }
-
-  okMsg.value = 'Venta registrada ✅ (cliente + descuentos por producto) — Stock y Caja actualizados.'
-  clearForm()
-  refresh()
-}
-
-function eliminarVenta(ventaId) {
-  errorMsg.value = ''
-  okMsg.value = ''
-
-  const checkCaja = requireCajaAbierta(userId, fecha.value, turnoSel.value)
-  if (!checkCaja.ok) return (errorMsg.value = checkCaja.error)
-
-  const { removed } = removeVenta(userId, fecha.value, turnoSel.value, ventaId)
-  if (!removed) {
-    errorMsg.value = 'No se encontró la venta.'
-    refresh()
-    return
-  }
-
-  // reponer stock
-  const grouped = groupQtyByProduct(removed.items ?? [])
-  const applied = []
-  for (const [pid, qty] of grouped.entries()) {
-    const res = applyStockDelta(userId, pid, +qty)
-    if (!res.ok) {
-      for (const a of applied) applyStockDelta(userId, a.productId, -a.delta)
-      addVenta(userId, fecha.value, turnoSel.value, removed)
-      errorMsg.value = res.error ?? 'No se pudo reponer stock.'
-      refresh()
-      return
-    }
-    applied.push({ productId: pid, delta: +qty })
-  }
-
-  // restar caja
-  const applyCaja = addToVentasTotal(userId, fecha.value, turnoSel.value, -Number(removed.total ?? 0))
-  if (!applyCaja.ok) {
-    for (const [pid, qty] of grouped.entries()) applyStockDelta(userId, pid, -qty)
-    addVenta(userId, fecha.value, turnoSel.value, removed)
-    errorMsg.value = applyCaja.error ?? 'No se pudo actualizar caja al eliminar.'
-    refresh()
-    return
-  }
-
-  okMsg.value = 'Venta eliminada ✅ Stock repuesto y Caja actualizada.'
-  refresh()
-}
-
 const ventasTotalDelBucket = computed(() =>
   ventas.value.reduce((acc, v) => acc + Number(v.total ?? 0), 0)
 )
+
+// =========================
+// Registrar venta (BACKEND)
+// =========================
+async function registrarVenta() {
+  if (saving.value) return
+  saving.value = true
+
+  try {
+    errorMsg.value = ""
+    okMsg.value = ""
+
+    if (!cajaCheck.value?.ok || !cajaAbierta.value?.cajaId) {
+      errorMsg.value = cajaCheck.value?.error || "No hay caja ABIERTA (backend)."
+      return
+    }
+
+    if (items.value.length === 0) {
+      errorMsg.value = "Agregá al menos 1 producto."
+      return
+    }
+
+    if (hasInvalidItems.value) {
+      errorMsg.value = "Hay productos con venta a pérdida. Ajustá el descuento."
+      return
+    }
+
+    // Payload que espera tu backend
+    const detallesVenta = items.value.map(i => ({
+      productoId: Number(i.productId),
+      cantidad: Number(i.qty),
+    }))
+
+    if (detallesVenta.some(d => !Number.isInteger(d.productoId) || d.productoId <= 0)) {
+      errorMsg.value = "Hay un producto inválido en el detalle (productoId vacío)."
+      return
+    }
+    if (detallesVenta.some(d => !Number.isInteger(d.cantidad) || d.cantidad <= 0)) {
+      errorMsg.value = "Hay una cantidad inválida en el detalle."
+      return
+    }
+
+    const command = {
+      cajaId: Number(cajaAbierta.value.cajaId),
+      userId: Number.isFinite(Number(userId)) ? Number(userId) : null,
+      clienteId: clienteSel.value?.id ? Number(clienteSel.value.id) : null,
+      detallesVenta,
+    }
+
+    console.log("PAYLOAD /ventas", JSON.stringify(command, null, 2))
+
+    const { data } = await ventasApi.create(command)
+
+    okMsg.value = `Venta registrada ✅ (backend id: ${data?.ventaId ?? "OK"})`
+    clearForm()
+    await refresh()
+  } catch (e) {
+    errorMsg.value =
+      e?.response?.data?.error ||
+      e?.response?.data ||
+      e?.message ||
+      "Error creando venta en backend."
+    await refresh()
+  } finally {
+    saving.value = false
+  }
+}
 </script>
 
 <template>
@@ -388,6 +394,11 @@ const ventasTotalDelBucket = computed(() =>
             </div>
             <div v-else class="small text-secondary">
               Caja ABIERTA ✅ Podés registrar ventas.
+              <span class="ms-2">
+                · Ingresos: <b>$ {{ formatMoney(resumenCaja.ingresos) }}</b>
+                · Egresos: <b>$ {{ formatMoney(resumenCaja.egresos) }}</b>
+                · Saldo: <b>$ {{ formatMoney(resumenCaja.saldo) }}</b>
+              </span>
             </div>
           </div>
         </div>
@@ -403,17 +414,21 @@ const ventasTotalDelBucket = computed(() =>
         <div class="row g-3 mb-3">
           <div class="col-12 col-md-6">
             <label class="form-label text-secondary">Cliente (opcional)</label>
-            <select v-model="clienteSelId" class="form-select bg-dark text-white border-secondary" :disabled="!canSell || clientes.length === 0">
+            <select
+              v-model="clienteSelId"
+              class="form-select bg-dark text-white border-secondary"
+              :disabled="!canSell || clientes.length === 0"
+            >
               <option value="">Sin cliente</option>
-              <option v-for="c in clientes" :key="c.id" :value="c.id">
-                {{ c.nombre }} ({{ c.tipo }}) — Desc sugerido: {{ c.descuentoPct ?? 0 }}%
+              <option v-for="c in clientes" :key="c.id" :value="String(c.id)">
+                {{ c.nombre }}
               </option>
             </select>
           </div>
 
           <div class="col-12 col-md-6 d-flex align-items-end">
             <div class="text-secondary small">
-              Tip: aunque el cliente tenga “desc sugerido”, el descuento real lo ponés por producto.
+              Tip: el descuento real lo ponés por producto.
             </div>
           </div>
         </div>
@@ -424,8 +439,8 @@ const ventasTotalDelBucket = computed(() =>
             <label class="form-label text-secondary">Producto</label>
             <select v-model="selProductoId" class="form-select bg-dark text-white border-secondary" :disabled="!canSell || productos.length === 0">
               <option value="" disabled>Seleccionar…</option>
-              <option v-for="p in productos" :key="p.id" :value="p.id">
-                {{ p.nombre }} — $ {{ formatMoney(p.precioVenta) }} (Stock: {{ p.stockActual }})
+              <option v-for="p in productos" :key="p.id" :value="String(p.id)">
+                {{ p.nombre }} — $ {{ formatMoney(p.precioVenta) }}
               </option>
             </select>
           </div>
@@ -464,7 +479,6 @@ const ventasTotalDelBucket = computed(() =>
             <tbody>
               <tr v-for="it in items" :key="it.id" :class="it.invalidReason ? 'table-danger' : ''">
                 <td class="fw-semibold">{{ it.name }}</td>
-
                 <td class="text-secondary">$ {{ formatMoney(it.price) }}</td>
 
                 <td>
@@ -541,14 +555,14 @@ const ventasTotalDelBucket = computed(() =>
 
           <div class="d-flex gap-2">
             <button class="btn btn-outline-light" @click="clearForm" :disabled="!canSell">Limpiar</button>
-            <button class="btn btn-primary btn-accent" @click="registrarVenta" :disabled="!canRegister">
-              Registrar venta
+            <button class="btn btn-primary btn-accent" @click="registrarVenta" :disabled="!canRegister || saving">
+              {{ saving ? "Guardando..." : "Registrar venta" }}
             </button>
           </div>
         </div>
 
         <div class="text-secondary small mt-2">
-          ✅ Cliente opcional · ✅ Descuento por producto · ✅ Stock + Caja · ✅ Bloqueo a pérdida
+          ✅ Cliente opcional · ✅ Descuento por producto · ✅ Caja + POST venta
         </div>
       </div>
     </div>
@@ -563,46 +577,8 @@ const ventasTotalDelBucket = computed(() =>
           </div>
         </div>
 
-        <div v-if="ventas.length === 0" class="text-secondary">
-          No hay ventas registradas en este turno.
-        </div>
-
-        <div v-else class="table-responsive">
-          <table class="table table-dark table-hover align-middle mb-0">
-            <thead>
-              <tr>
-                <th style="width: 220px;">Fecha/Hora</th>
-                <th>Cliente</th>
-                <th>Total</th>
-                <th style="width: 320px;">Detalle</th>
-                <th style="width: 140px;" class="text-end">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="v in ventas" :key="v.id">
-                <td class="text-secondary">{{ new Date(v.createdAt).toLocaleString('es-AR') }}</td>
-                <td class="text-secondary">{{ v.clientNombre ?? '—' }}</td>
-                <td class="fw-bold">$ {{ formatMoney(v.total) }}</td>
-                <td class="text-secondary">
-                  <div v-for="(it, idx) in (v.items ?? []).slice(0, 3)" :key="idx">
-                    • {{ it.qty }} x {{ it.name }} ({{ it.discountPct ?? 0 }}%)
-                  </div>
-                  <div v-if="(v.items ?? []).length > 3" class="text-secondary">
-                    +{{ (v.items ?? []).length - 3 }} más…
-                  </div>
-                </td>
-                <td class="text-end">
-                  <button class="btn btn-sm btn-outline-light" @click="eliminarVenta(v.id)" :disabled="!canSell">
-                    Eliminar
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="text-secondary small mt-3">
-          Al eliminar: repone stock y resta caja automáticamente.
+        <div class="text-secondary">
+          (Por ahora el backend no tiene GET por turno, así que este listado está vacío.)
         </div>
       </div>
     </div>

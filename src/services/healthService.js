@@ -1,2 +1,5 @@
 import { http } from "./http";
-export const health = () => http.get("/health");
+
+export function health() {
+  return http.get("/health");
+}
