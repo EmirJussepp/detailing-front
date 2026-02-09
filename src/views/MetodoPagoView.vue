@@ -114,7 +114,8 @@
 
 <script setup>
 import { onMounted, ref } from "vue";
-import { metodoPagoApi } from "../services/metodoPagoService";
+import { metodosPagoApi } from "../services/metodoPagoService"
+
 
 const items = ref([]);
 const loading = ref(false);
@@ -131,7 +132,7 @@ async function fetchAll() {
   error.value = "";
   loading.value = true;
   try {
-    const { data } = await metodoPagoApi.list();
+    const { data } = await metodosPagoApi.list()
     items.value = Array.isArray(data) ? data : (data?.items ?? []);
   } catch (e) {
     error.value = e?.response?.data?.message || e?.message || "Error cargando métodos de pago";
@@ -152,8 +153,8 @@ async function create() {
   saving.value = true;
   error.value = "";
   try {
-    // ⚠️ ajustamos el payload cuando sepamos el DTO exacto
-    await metodoPagoApi.create(newNombre.value.trim());
+  await metodosPagoApi.create({ nombre: newNombre.value.trim() })
+
     closeCreate();
     await fetchAll();
   } catch (e) {
@@ -176,7 +177,9 @@ async function saveEdit(m) {
   saving.value = true;
   error.value = "";
   try {
-    await metodoPagoApi.update(m.id, editNombre.value.trim());
+   await metodosPagoApi.update(m.id, { nombre: editNombre.value.trim() })
+
+
     cancelEdit();
     await fetchAll();
   } catch (e) {

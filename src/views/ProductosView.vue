@@ -1,773 +1,346 @@
-<!-- src/views/ProveedoresView.vue -->
+<script setup>
+import { computed, onMounted, ref } from "vue"
+import { productosApi } from "../services/productosApi"
+import { getSession } from "../auth/session"
+import { mapProducto } from "../mappers/productos.js"
+
+const session = getSession() ?? null
+const userId = session?.userId ?? null
+
+const items = ref([])
+const loading = ref(false)
+const saving = ref(false)
+const error = ref("")
+const ok = ref("")
+
+// filtros
+const q = ref("")
+const onlyLowStock = ref(false)
+
+function formatMoney(n) {
+  const num = Number(n ?? 0)
+  return num.toLocaleString("es-AR", { minimumFractionDigits: 0 })
+}
+
+function resetMsgs() {
+  error.value = ""
+  ok.value = ""
+}
+
+async function fetchAll() {
+  loading.value = true
+  resetMsgs()
+  try {
+    const { data } = await productosApi.list()
+    const arr = Array.isArray(data) ? data : []
+    items.value = arr.map(mapProducto)
+  } catch (e) {
+    error.value = e?.response?.data?.error || e?.message || "Error cargando productos"
+    items.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+// =====================
+// Form Crear
+// =====================
+const nombre = ref("")
+const codigoProducto = ref("")
+const categoria = ref("")
+const stockMinimo = ref("")
+const stockMaximo = ref("")
+const stockInicial = ref("") // opcional
+const precioCosto = ref("")
+const precioVenta = ref("")
+const precioMayorista = ref("")
+
+function toNumOrNull(v) {
+  const x = Number(String(v ?? "").replace(",", "."))
+  return Number.isFinite(x) ? x : null
+}
+function toIntOrNull(v) {
+  const x = parseInt(String(v ?? "").replace(",", "."), 10)
+  return Number.isFinite(x) ? x : null
+}
+
+function resetForm() {
+  nombre.value = ""
+  codigoProducto.value = ""
+  categoria.value = ""
+  stockMinimo.value = ""
+  stockMaximo.value = ""
+  stockInicial.value = ""
+  precioCosto.value = ""
+  precioVenta.value = ""
+  precioMayorista.value = ""
+}
+
+async function create() {
+  if (saving.value) return
+  saving.value = true
+  resetMsgs()
+
+  try {
+    const payload = {
+      nombre: nombre.value.trim(),
+      codigoProducto: codigoProducto.value.trim() || null,
+      categoria: categoria.value.trim() || null,
+      stockMinimo: toIntOrNull(stockMinimo.value),
+      stockMaximo: toIntOrNull(stockMaximo.value),
+      stockInicial: toIntOrNull(stockInicial.value),
+      precioCosto: toNumOrNull(precioCosto.value),
+      precioVenta: toNumOrNull(precioVenta.value),
+      precioMayorista: toNumOrNull(precioMayorista.value),
+      userId: Number(userId),
+    }
+
+    // validaciones “front” (el back valida igual)
+    if (!payload.nombre) throw new Error("Ingresá el nombre.")
+    if (payload.precioCosto == null || payload.precioCosto < 0) throw new Error("Precio costo inválido.")
+    if (payload.precioVenta == null || payload.precioVenta <= 0) throw new Error("Precio venta inválido.")
+    if (payload.precioMayorista != null && payload.precioMayorista <= 0) throw new Error("Precio mayorista inválido.")
+    if (payload.stockMinimo != null && payload.stockMinimo < 0) throw new Error("Stock mínimo inválido.")
+    if (payload.stockMaximo != null && payload.stockMaximo < 0) throw new Error("Stock máximo inválido.")
+    if (payload.stockInicial != null && payload.stockInicial < 0) throw new Error("Stock inicial inválido.")
+    if (payload.stockMaximo != null && payload.stockMinimo != null && payload.stockMinimo > payload.stockMaximo) {
+      throw new Error("Stock mínimo no puede ser mayor que stock máximo.")
+    }
+
+    await productosApi.create(payload)
+
+    ok.value = "Producto creado ✅"
+    resetForm()
+    await fetchAll()
+  } catch (e) {
+    error.value = e?.response?.data?.error || e?.message || "Error creando producto"
+  } finally {
+    saving.value = false
+  }
+}
+
+// =====================
+// Lista + helpers
+// =====================
+function isLowStock(p) {
+  const min = p.stockMinimo ?? null
+  if (min == null) return false
+  return Number(p.stockActual ?? 0) <= Number(min)
+}
+
+const filtered = computed(() => {
+  const term = q.value.trim().toLowerCase()
+  return items.value
+    .filter(p => {
+      if (!term) return true
+      return (
+        p.nombre.toLowerCase().includes(term) ||
+        String(p.codigoProducto ?? "").toLowerCase().includes(term) ||
+        String(p.categoria ?? "").toLowerCase().includes(term)
+      )
+    })
+    .filter(p => (onlyLowStock.value ? isLowStock(p) : true))
+})
+
+onMounted(fetchAll)
+</script>
+
 <template>
-  <div class="container py-4">
+  <div>
     <!-- Header -->
-    <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
-      <div>
-        <h2 class="mb-1">Proveedores</h2>
-        <div class="text-secondary small">
-          Alta/edición · activar/desactivar · cuenta corriente (deuda y pagos).
-        </div>
-      </div>
-
-      <div class="d-flex gap-2 align-items-center">
-        <div class="form-check form-switch m-0">
-          <input class="form-check-input" type="checkbox" id="inactive" v-model="includeInactive" />
-          <label class="form-check-label small text-secondary" for="inactive">Ver inactivos</label>
-        </div>
-
-        <button
-          class="btn btn-primary btn-accent"
-          data-bs-toggle="modal"
-          data-bs-target="#proveedorModal"
-          @click="prepareCreate"
-        >
-          + Nuevo proveedor
-        </button>
-      </div>
+    <div class="mb-3">
+      <h1 class="h4 mb-1">Productos</h1>
+      <div class="text-secondary">Listar + Crear (Backend)</div>
     </div>
 
-    <!-- Filtros -->
-    <div class="card bg-panel border-0 shadow-sm mb-3">
-      <div class="card-body">
-        <div class="row g-2 align-items-center">
-          <div class="col-12 col-md-5">
-            <input
-              v-model="q"
-              class="form-control bg-dark text-white border-secondary"
-              placeholder="Buscar por nombre/razón social, doc/CUIT, teléfono o email…"
-            />
-          </div>
-
-          <div class="col-12 col-md-3">
-            <select v-model="sortBy" class="form-select bg-dark text-white border-secondary">
-              <option value="displayName">Orden: Nombre</option>
-              <option value="updatedAt">Orden: Última edición</option>
-              <option value="createdAt">Orden: Creación</option>
-              <option value="saldoDesc">Orden: Saldo (mayor deuda)</option>
-            </select>
-          </div>
-
-          <div class="col-12 col-md-4 d-flex justify-content-md-end">
-            <span class="text-secondary small">{{ filtered.length }} proveedor(es)</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
+    <!-- Alerts -->
     <div v-if="error" class="alert alert-danger py-2">{{ error }}</div>
-    <div v-if="success" class="alert alert-success py-2">{{ success }}</div>
+    <div v-if="ok" class="alert alert-success py-2">{{ ok }}</div>
 
-    <!-- Tabla -->
-    <div class="card bg-panel border-0 shadow-sm">
-      <div class="table-responsive">
-        <table class="table table-dark table-hover align-middle mb-0">
-          <thead>
-            <tr class="text-secondary">
-              <th>Proveedor</th>
-              <th>Contacto</th>
-              <th class="text-end">Saldo</th>
-              <th class="text-center">Activo</th>
-              <th class="text-end">Acciones</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            <tr v-if="filtered.length === 0">
-              <td colspan="5" class="text-center text-secondary py-4">No hay proveedores para mostrar.</td>
-            </tr>
-
-            <tr v-for="p in filtered" :key="p.id">
-              <td>
-                <div class="d-flex gap-2 align-items-start">
-                  <div class="flex-grow-1">
-                    <div class="fw-semibold d-flex gap-2 align-items-center flex-wrap">
-                      <span>{{ p.displayName || '—' }}</span>
-
-                      <span class="badge" :class="p.tipo === 'EMPRESA' ? 'text-bg-info' : 'text-bg-secondary'">
-                        {{ p.tipo === 'EMPRESA' ? 'EMPRESA' : 'PERSONA' }}
-                      </span>
-
-                      <span class="badge" :class="docBadgeClass(p)">
-                        {{ p.documentoLabel || (p.tipo === 'EMPRESA' ? 'CUIT —' : 'DOC —') }}
-                      </span>
-                    </div>
-
-                    <div class="text-secondary small" v-if="p.direccion">{{ p.direccion }}</div>
-
-                    <div class="text-secondary small" v-if="p.notas">
-                      <span class="opacity-75">📝</span> {{ p.notas }}
-                    </div>
-                  </div>
-                </div>
-              </td>
-
-              <td class="text-secondary">
-                <div>{{ p.telefono || '—' }}</div>
-                <div class="small opacity-75">{{ p.email || '—' }}</div>
-              </td>
-
-              <td class="text-end">
-                <div class="fw-bold" :class="saldoClass(p)">
-                  $ {{ formatMoney(getSaldo(p).saldo) }}
-                </div>
-                <div class="text-secondary small">
-                  deuda: $ {{ formatMoney(getSaldo(p).deudaCompras) }}
-                  · pagos: $ {{ formatMoney(getSaldo(p).pagosTotal) }}
-                </div>
-              </td>
-
-              <td class="text-center">
-                <span class="badge" :class="p.activo ? 'text-bg-success' : 'text-bg-secondary'">
-                  {{ p.activo ? 'Sí' : 'No' }}
-                </span>
-              </td>
-
-              <td class="text-end">
-                <div class="btn-group">
-                  <button
-                    class="btn btn-outline-light btn-sm"
-                    data-bs-toggle="modal"
-                    data-bs-target="#proveedorModal"
-                    @click="prepareEdit(p)"
-                  >
-                    Editar
-                  </button>
-
-                  <button
-                    class="btn btn-outline-success btn-sm"
-                    data-bs-toggle="modal"
-                    data-bs-target="#pagoModal"
-                    @click="preparePago(p)"
-                  >
-                    Pago
-                  </button>
-
-                  <button class="btn btn-outline-warning btn-sm" @click="toggleActivo(p)">
-                    {{ p.activo ? 'Desactivar' : 'Activar' }}
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="card-footer border-secondary text-secondary small">
-        Tip: el saldo es <b>deuda (compras a cuenta)</b> menos <b>pagos</b>. Si queda negativo, el proveedor te queda “a favor”.
-      </div>
-    </div>
-
-    <!-- ========================= -->
-    <!-- MODAL: Crear/Editar Proveedor -->
-    <!-- ========================= -->
-    <div class="modal fade" id="proveedorModal" tabindex="-1" aria-hidden="true">
-      <div class="modal-dialog modal-lg modal-dialog-centered">
-        <div class="modal-content bg-dark border-secondary modal-round">
-          <div class="modal-header border-secondary">
-            <h5 class="modal-title">{{ mode === 'create' ? 'Nuevo proveedor' : 'Editar proveedor' }}</h5>
-            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    <!-- Toolbar -->
+    <div class="card bg-panel border-0 shadow-sm mb-4">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between gap-2">
+          <div class="text-secondary small">
+            Total: <b>{{ filtered.length }}</b>
           </div>
 
-          <div class="modal-body">
-            <div v-if="formError" class="alert alert-danger py-2">{{ formError }}</div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-outline-light" @click="fetchAll" :disabled="loading">
+              Refrescar
+            </button>
 
-            <!-- Tipo -->
-            <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
-              <span class="text-secondary small">Tipo:</span>
-
-              <div class="btn-group">
-                <button
-                  class="btn btn-sm"
-                  :class="form.tipo === 'PERSONA' ? 'btn-accent' : 'btn-outline-light'"
-                  @click="setTipo('PERSONA')"
-                  type="button"
-                >
-                  Persona
-                </button>
-                <button
-                  class="btn btn-sm"
-                  :class="form.tipo === 'EMPRESA' ? 'btn-accent' : 'btn-outline-light'"
-                  @click="setTipo('EMPRESA')"
-                  type="button"
-                >
-                  Empresa
-                </button>
-              </div>
-            </div>
-
-            <div class="row g-3">
-              <!-- PERSONA -->
-              <template v-if="form.tipo !== 'EMPRESA'">
-                <div class="col-12 col-md-6">
-                  <label class="form-label text-secondary">Nombre *</label>
-                  <input v-model="form.nombre" class="form-control" placeholder="Ej: Juan" />
-                </div>
-
-                <div class="col-12 col-md-6">
-                  <label class="form-label text-secondary">Apellido *</label>
-                  <input v-model="form.apellido" class="form-control" placeholder="Ej: Pérez" />
-                </div>
-
-                <div class="col-12 col-md-4">
-                  <label class="form-label text-secondary">Tipo doc.</label>
-                  <select v-model="form.documentoTipo" class="form-select">
-                    <option value="DNI">DNI</option>
-                    <option value="CUIL">CUIL</option>
-                    <option value="PASAPORTE">PASAPORTE</option>
-                    <option value="OTRO">OTRO</option>
-                  </select>
-                </div>
-
-                <div class="col-12 col-md-8">
-                  <label class="form-label text-secondary">Nro doc. *</label>
-                  <input
-                    v-model="form.documentoNro"
-                    class="form-control"
-                    inputmode="numeric"
-                    placeholder="Ej: 40111222"
-                  />
-                </div>
-              </template>
-
-              <!-- EMPRESA -->
-              <template v-else>
-                <div class="col-12">
-                  <label class="form-label text-secondary">Razón social *</label>
-                  <input v-model="form.razonSocial" class="form-control" placeholder="Ej: Distribuidora X S.A." />
-                </div>
-
-                <div class="col-12 col-md-6">
-                  <label class="form-label text-secondary">CUIT *</label>
-                  <input v-model="form.cuit" class="form-control" inputmode="numeric" placeholder="Ej: 30712345678" />
-                </div>
-
-                <div class="col-12 col-md-6">
-                  <label class="form-label text-secondary">Contacto (opcional)</label>
-                  <input v-model="form.contacto" class="form-control" placeholder="Ej: Mariana / Compras" />
-                </div>
-              </template>
-
-              <!-- Comunes -->
-              <div class="col-12 col-md-6">
-                <label class="form-label text-secondary">Teléfono</label>
-                <input v-model="form.telefono" class="form-control" placeholder="Ej: 3564..." />
-              </div>
-
-              <div class="col-12 col-md-6">
-                <label class="form-label text-secondary">Email</label>
-                <input v-model="form.email" class="form-control" placeholder="proveedor@email.com" />
-              </div>
-
-              <div class="col-12">
-                <label class="form-label text-secondary">Dirección</label>
-                <input v-model="form.direccion" class="form-control" placeholder="Calle, nro, ciudad" />
-              </div>
-
-              <div class="col-12">
-                <label class="form-label text-secondary">Notas</label>
-                <textarea v-model="form.notas" class="form-control" rows="3" placeholder="Observaciones..."></textarea>
-              </div>
-
-              <div class="col-12">
-                <div class="form-check form-switch">
-                  <input class="form-check-input" type="checkbox" id="activo" v-model="form.activo" />
-                  <label class="form-check-label text-secondary" for="activo">Activo</label>
-                </div>
-              </div>
-            </div>
-
-            <div class="text-secondary small mt-3">Se valida unicidad por documento/CUIT y por nombre/razón social.</div>
-          </div>
-
-          <div class="modal-footer border-secondary">
-            <button class="btn btn-outline-light" data-bs-dismiss="modal">Cancelar</button>
-            <button class="btn btn-primary btn-accent" @click="saveProveedor">
-              {{ mode === 'create' ? 'Crear' : 'Guardar cambios' }}
+            <button class="btn btn-primary btn-accent" @click="create" :disabled="saving">
+              {{ saving ? "Guardando..." : "+ Crear producto" }}
             </button>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- ========================= -->
-    <!-- MODAL: Registrar Pago -->
-    <!-- ========================= -->
-    <div class="modal fade" id="pagoModal" tabindex="-1" aria-hidden="true">
-      <div class="modal-dialog modal-lg modal-dialog-centered">
-        <div class="modal-content bg-dark border-secondary modal-round">
-          <div class="modal-header border-secondary">
-            <div>
-              <h5 class="modal-title mb-0">Registrar pago</h5>
-              <div class="text-secondary small" v-if="pagoProveedor">
-                Proveedor: <b>{{ pagoProveedor.displayName }}</b>
-                · Saldo actual:
-                <b :class="saldoClass(pagoProveedor)"> $ {{ formatMoney(getSaldo(pagoProveedor).saldo) }} </b>
-              </div>
-            </div>
-            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    <!-- Filtros -->
+    <div class="card bg-panel border-0 shadow-sm mb-4">
+      <div class="card-body">
+        <div class="row g-3 align-items-end">
+          <div class="col-12 col-md-6">
+            <label class="form-label text-secondary">Buscar</label>
+            <input
+              v-model="q"
+              class="form-control bg-dark text-white border-secondary"
+              placeholder="nombre / código / categoría"
+            />
           </div>
 
-          <div class="modal-body">
-            <div v-if="pagoError" class="alert alert-danger py-2">{{ pagoError }}</div>
-            <div v-if="pagoOk" class="alert alert-success py-2">{{ pagoOk }}</div>
-
-            <div class="row g-3">
-              <div class="col-12 col-md-4">
-                <label class="form-label text-secondary">Monto *</label>
-                <input v-model="pagoMonto" class="form-control" inputmode="numeric" placeholder="Ej: 50000" />
-              </div>
-
-              <div class="col-12 col-md-4">
-                <label class="form-label text-secondary">Método</label>
-                <select v-model="pagoMetodo" class="form-select">
-                  <option value="TRANSFERENCIA">TRANSFERENCIA</option>
-                  <option value="EFECTIVO">EFECTIVO</option>
-                  <option value="DEBITO">DÉBITO</option>
-                  <option value="OTRO">OTRO</option>
-                </select>
-              </div>
-
-              <div class="col-12 col-md-4">
-                <label class="form-label text-secondary">Aplicar a</label>
-                <select v-model="pagoAplicarModo" class="form-select">
-                  <option value="AUTO">Automático (más vieja primero)</option>
-                  <option value="COMPRA">Elegir compra pendiente</option>
-                </select>
-              </div>
-
-              <div class="col-12" v-if="pagoAplicarModo === 'COMPRA'">
-                <label class="form-label text-secondary">Compra</label>
-                <select v-model="pagoCompraId" class="form-select">
-                  <option disabled value="">Seleccionar compra...</option>
-                  <option v-for="c in comprasPendientes" :key="c.id" :value="c.id">
-                    {{ formatCompraOption(c) }}
-                  </option>
-                </select>
-                <div class="text-secondary small mt-1">
-                  Se aplica el pago a esa compra (si el monto supera el saldo, queda sobrante a favor).
-                </div>
-              </div>
-
-              <div class="col-12">
-                <label class="form-label text-secondary">Notas</label>
-                <input v-model="pagoNotas" class="form-control" placeholder="Ej: Factura 0001..." />
-              </div>
-
-              <div class="col-12 d-flex justify-content-end">
-                <button class="btn btn-primary btn-accent" @click="registrarPago">Guardar pago</button>
-              </div>
-            </div>
-
-            <hr class="border-secondary my-3" />
-
-            <div class="d-flex align-items-center justify-content-between mb-2">
-              <div class="fw-semibold">Últimos pagos</div>
-              <div class="text-secondary small">{{ pagosProveedor.length }} pago(s)</div>
-            </div>
-
-            <div v-if="pagosProveedor.length === 0" class="text-secondary">No hay pagos registrados para este proveedor.</div>
-
-            <div v-else class="table-responsive">
-              <table class="table table-dark table-hover align-middle mb-0">
-                <thead>
-                  <tr class="text-secondary">
-                    <th>Fecha</th>
-                    <th>Origen</th>
-                    <th>Método</th>
-                    <th class="text-end">Monto</th>
-                    <th>Notas</th>
-                    <th class="text-end">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="pg in pagosProveedor" :key="pg.id">
-                    <td class="text-secondary">{{ new Date(pg.fecha || pg.createdAt).toLocaleString('es-AR') }}</td>
-                    <td class="text-secondary">
-                      <span class="badge" :class="pg.origin === 'AUTO_COMPRA' ? 'text-bg-info' : 'text-bg-secondary'">
-                        {{ pg.origin || 'MANUAL' }}
-                      </span>
-                    </td>
-                    <td class="text-secondary">{{ pg.method }}</td>
-                    <td class="text-end fw-bold">$ {{ formatMoney(pg.amount) }}</td>
-                    <td class="text-secondary">{{ pg.notes || '—' }}</td>
-                    <td class="text-end">
-                      <button class="btn btn-sm btn-outline-danger" @click="borrarPago(pg)">Borrar</button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <div class="text-secondary small mt-3">
-              Nota: si pagás más que la deuda, el saldo puede quedar “a favor” (negativo).
+          <div class="col-12 col-md-3">
+            <div class="form-check mt-4">
+              <input class="form-check-input" type="checkbox" v-model="onlyLowStock" id="low" />
+              <label class="form-check-label text-secondary" for="low">
+                Solo bajo stock
+              </label>
             </div>
           </div>
 
-          <div class="modal-footer border-secondary">
-            <button class="btn btn-outline-light" data-bs-dismiss="modal">Cerrar</button>
+          <div class="col-12 col-md-3 text-secondary small">
+            Tip: marcamos en amarillo los que están <b>bajo stock mínimo</b>.
           </div>
         </div>
       </div>
     </div>
+
+    <!-- Nuevo producto -->
+    <div class="card bg-panel border-0 shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h6 mb-3">Nuevo producto</h2>
+
+        <div class="row g-3">
+          <div class="col-12 col-md-4">
+            <label class="form-label text-secondary">Nombre *</label>
+            <input v-model="nombre" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-2">
+            <label class="form-label text-secondary">Código</label>
+            <input v-model="codigoProducto" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-3">
+            <label class="form-label text-secondary">Categoría</label>
+            <input v-model="categoria" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-6 col-md-1">
+            <label class="form-label text-secondary">Min</label>
+            <input v-model="stockMinimo" type="number" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-6 col-md-1">
+            <label class="form-label text-secondary">Max</label>
+            <input v-model="stockMaximo" type="number" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-1">
+            <label class="form-label text-secondary">Inicial</label>
+            <input v-model="stockInicial" type="number" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-3">
+            <label class="form-label text-secondary">Precio costo *</label>
+            <input v-model="precioCosto" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-3">
+            <label class="form-label text-secondary">Precio venta *</label>
+            <input v-model="precioVenta" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-3">
+            <label class="form-label text-secondary">Precio mayorista</label>
+            <input v-model="precioMayorista" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-3 d-flex align-items-end">
+            <button class="btn btn-outline-light w-100" @click="resetForm">
+              Limpiar
+            </button>
+          </div>
+        </div>
+
+        <div class="text-secondary small mt-2">
+          El backend guarda <b>stock_actual</b> y registra movimiento inicial si corresponde.
+        </div>
+      </div>
+    </div>
+
+    <!-- Lista -->
+    <div class="card bg-panel border-0 shadow-sm">
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table table-dark table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Producto</th>
+                <th>Código</th>
+                <th>Categoría</th>
+                <th>Stock</th>
+                <th>Venta</th>
+                <th>Mayorista</th>
+                <th>Costo</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              <tr
+                v-for="p in filtered"
+                :key="p.id"
+                :class="p.stockMinimo != null && p.stockActual <= p.stockMinimo ? 'table-warning' : ''"
+              >
+                <td class="text-secondary">{{ p.id }}</td>
+
+                <td class="fw-semibold">
+                  {{ p.nombre }}
+                  <div class="text-secondary small" v-if="p.stockMinimo != null">
+                    Min: {{ p.stockMinimo }} · Max: {{ p.stockMaximo ?? '-' }}
+                  </div>
+                </td>
+
+                <td class="text-secondary">{{ p.codigoProducto || '-' }}</td>
+                <td class="text-secondary">{{ p.categoria || '-' }}</td>
+
+                <td class="fw-bold">
+                  {{ p.stockActual }}
+                  <span v-if="p.stockMinimo != null && p.stockActual <= p.stockMinimo"
+                        class="badge text-bg-warning ms-2">
+                    Bajo
+                  </span>
+                </td>
+
+                <td class="text-secondary">$ {{ formatMoney(p.precioVenta) }}</td>
+                <td class="text-secondary">
+                  {{ p.precioMayorista != null ? '$ ' + formatMoney(p.precioMayorista) : '-' }}
+                </td>
+                <td class="text-secondary">$ {{ formatMoney(p.precioCosto) }}</td>
+              </tr>
+
+              <tr v-if="filtered.length === 0">
+                <td colspan="8" class="text-secondary">
+                  No hay productos para mostrar.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
-<script>
-import { listProveedores, createProveedor, updateProveedor, setProveedorActivo } from '../services/proveedoresStorage'
-import { getSaldoProveedor } from '../services/proveedoresCC'
 
-import { listPagosByProveedor, addPagoAplicado, removePago } from '../services/pagosProveedoresStorage'
-import { listComprasPendientesProveedor } from '../services/comprasStorage'
 
-export default {
-  name: 'ProveedoresView',
-  data() {
-    return {
-      proveedores: [],
-      q: '',
-      sortBy: 'displayName',
-      includeInactive: false,
-
-      error: '',
-      success: '',
-
-      // modal proveedor
-      mode: 'create',
-      editingId: null,
-      form: {
-        tipo: 'PERSONA',
-        nombre: '',
-        apellido: '',
-        documentoTipo: 'DNI',
-        documentoNro: '',
-        razonSocial: '',
-        cuit: '',
-        contacto: '',
-        telefono: '',
-        email: '',
-        direccion: '',
-        notas: '',
-        activo: true
-      },
-      formError: '',
-
-      // pagos
-      pagoProveedor: null,
-      pagoMonto: '',
-      pagoMetodo: 'TRANSFERENCIA',
-      pagoNotas: '',
-      pagoError: '',
-      pagoOk: '',
-      pagosProveedor: [],
-
-      // nuevo: aplicar pago
-      pagoAplicarModo: 'AUTO', // AUTO | COMPRA
-      pagoCompraId: '',
-      comprasPendientes: [],
-
-      // cache saldos
-      saldosCache: new Map()
-    }
-  },
-
-  computed: {
-    filtered() {
-      const q = this.q.trim().toLowerCase()
-      let arr = [...this.proveedores]
-
-      if (q) {
-        arr = arr.filter(p => {
-          const blob = [p.displayName, p.documentoLabel, p.telefono, p.email, p.direccion, p.notas]
-            .filter(Boolean)
-            .join(' ')
-            .toLowerCase()
-          return blob.includes(q)
-        })
-      }
-
-      if (!this.includeInactive) arr = arr.filter(p => p.activo !== false)
-
-      if (this.sortBy === 'saldoDesc') {
-        arr.sort((a, b) => (this.getSaldo(b).saldo ?? 0) - (this.getSaldo(a).saldo ?? 0))
-        return arr
-      }
-
-      if (this.sortBy === 'displayName') {
-        arr.sort((a, b) => (a.displayName || '').localeCompare(b.displayName || '', 'es'))
-      } else {
-        arr.sort((a, b) => (b[this.sortBy] || '').localeCompare(a[this.sortBy] || ''))
-      }
-
-      return arr
-    }
-  },
-
-  mounted() {
-    this.refresh()
-  },
-
-  methods: {
-    // ---------- UI helpers ----------
-    formatMoney(n) {
-      const num = Number(n ?? 0)
-      return num.toLocaleString('es-AR', { minimumFractionDigits: 0 })
-    },
-
-    formatCompraOption(c) {
-      const fecha = c.fechaStr || (c.createdAt ? new Date(c.createdAt).toLocaleDateString('es-AR') : '—')
-      const saldo = Number(c.saldoPendiente ?? 0)
-      const total = Number(c.total ?? 0)
-      const estado = c.estado || '—'
-      return `${fecha} · ${estado} · saldo $${this.formatMoney(saldo)} / total $${this.formatMoney(total)} · #${String(c.id).slice(-6)}`
-    },
-
-    saldoClass(p) {
-      const s = this.getSaldo(p).saldo
-      if (s > 0) return 'text-warning'
-      if (s < 0) return 'text-info'
-      return 'text-success'
-    },
-
-    docBadgeClass(p) {
-      if (p?.tipo === 'EMPRESA') return 'text-bg-dark border border-info'
-      return 'text-bg-dark border border-secondary'
-    },
-
-    toastSuccess(msg) {
-      this.success = msg
-      setTimeout(() => (this.success = ''), 2200)
-    },
-
-    // ---------- saldo cache ----------
-    getSaldo(p) {
-      const pid = p?.id ?? p
-      if (!pid) return { deudaCompras: 0, pagosTotal: 0, saldo: 0 }
-      if (this.saldosCache.has(pid)) return this.saldosCache.get(pid)
-      const res = getSaldoProveedor(pid)
-      this.saldosCache.set(pid, res)
-      return res
-    },
-
-    invalidateSaldoCache() {
-      this.saldosCache = new Map()
-    },
-
-    // ---------- data ----------
-    refresh() {
-      this.error = ''
-      try {
-        this.proveedores = listProveedores({ includeInactive: true })
-        this.invalidateSaldoCache()
-      } catch (e) {
-        this.error = e?.message || 'Error cargando proveedores'
-      }
-    },
-
-    // ---------- proveedor modal ----------
-    setTipo(tipo) {
-      this.form.tipo = tipo === 'EMPRESA' ? 'EMPRESA' : 'PERSONA'
-      if (this.form.tipo === 'EMPRESA') {
-        this.form.nombre = ''
-        this.form.apellido = ''
-        this.form.documentoTipo = 'DNI'
-        this.form.documentoNro = ''
-      } else {
-        this.form.razonSocial = ''
-        this.form.cuit = ''
-        this.form.contacto = ''
-      }
-    },
-
-    prepareCreate() {
-      this.mode = 'create'
-      this.editingId = null
-      this.formError = ''
-      this.form = {
-        tipo: 'PERSONA',
-        nombre: '',
-        apellido: '',
-        documentoTipo: 'DNI',
-        documentoNro: '',
-        razonSocial: '',
-        cuit: '',
-        contacto: '',
-        telefono: '',
-        email: '',
-        direccion: '',
-        notas: '',
-        activo: true
-      }
-    },
-
-    prepareEdit(p) {
-      this.mode = 'edit'
-      this.editingId = p.id
-      this.formError = ''
-      const tipo = p.tipo === 'EMPRESA' ? 'EMPRESA' : 'PERSONA'
-      this.form = {
-        tipo,
-        nombre: p.nombre ?? '',
-        apellido: p.apellido ?? '',
-        documentoTipo: p.documentoTipo ?? 'DNI',
-        documentoNro: p.documentoNro ?? '',
-        razonSocial: p.razonSocial ?? '',
-        cuit: p.cuit ?? '',
-        contacto: p.contacto ?? '',
-        telefono: p.telefono ?? '',
-        email: p.email ?? '',
-        direccion: p.direccion ?? '',
-        notas: p.notas ?? '',
-        activo: p.activo !== false
-      }
-    },
-
-    saveProveedor() {
-      this.formError = ''
-      try {
-        if (this.form.tipo === 'EMPRESA') {
-          if (!String(this.form.razonSocial || '').trim()) return (this.formError = 'La razón social es obligatoria.')
-          if (!String(this.form.cuit || '').replace(/\D/g, '').trim()) return (this.formError = 'El CUIT es obligatorio.')
-        } else {
-          if (!String(this.form.nombre || '').trim()) return (this.formError = 'El nombre es obligatorio.')
-          if (!String(this.form.apellido || '').trim()) return (this.formError = 'El apellido es obligatorio.')
-          if (!String(this.form.documentoNro || '').replace(/\D/g, '').trim()) return (this.formError = 'El documento es obligatorio.')
-        }
-
-        if (this.mode === 'create') {
-          createProveedor(this.form)
-          this.toastSuccess('Proveedor creado ✅')
-        } else {
-          updateProveedor(this.editingId, this.form)
-          this.toastSuccess('Proveedor actualizado ✅')
-        }
-
-        this.refresh()
-        const modalEl = document.getElementById('proveedorModal')
-        modalEl?.querySelector('[data-bs-dismiss="modal"]')?.click()
-      } catch (e) {
-        this.formError = e?.message || 'No se pudo guardar'
-      }
-    },
-
-    toggleActivo(p) {
-      this.error = ''
-      try {
-        setProveedorActivo(p.id, !p.activo)
-        this.refresh()
-        this.toastSuccess(p.activo ? 'Proveedor desactivado' : 'Proveedor activado')
-      } catch (e) {
-        this.error = e?.message || 'No se pudo cambiar el estado'
-      }
-    },
-
-    // ---------- pagos ----------
-    preparePago(p) {
-      this.pagoProveedor = p
-      this.pagoMonto = ''
-      this.pagoMetodo = 'TRANSFERENCIA'
-      this.pagoNotas = ''
-      this.pagoError = ''
-      this.pagoOk = ''
-
-      this.pagoAplicarModo = 'AUTO'
-      this.pagoCompraId = ''
-
-      this.loadPagosProveedor()
-      this.loadComprasPendientes()
-      this.invalidateSaldoCache()
-    },
-
-    loadPagosProveedor() {
-      const pid = this.pagoProveedor?.id
-      this.pagosProveedor = pid ? listPagosByProveedor(pid) : []
-    },
-
-    loadComprasPendientes() {
-      const pid = this.pagoProveedor?.id
-      this.comprasPendientes = pid ? listComprasPendientesProveedor(pid) : []
-      if (this.comprasPendientes.length === 0) {
-        this.pagoAplicarModo = 'AUTO'
-        this.pagoCompraId = ''
-      }
-    },
-
-    registrarPago() {
-      this.pagoError = ''
-      this.pagoOk = ''
-
-      const p = this.pagoProveedor
-      if (!p?.id) return (this.pagoError = 'Proveedor inválido')
-
-      if (this.pagoAplicarModo === 'COMPRA' && !this.pagoCompraId) {
-        return (this.pagoError = 'Seleccioná una compra para aplicar el pago.')
-      }
-
-      try {
-        const r = addPagoAplicado({
-          proveedorId: p.id,
-          proveedorNombre: p.displayName,
-          amount: this.pagoMonto,
-          method: this.pagoMetodo,
-          notes: this.pagoNotas,
-          compraId: this.pagoAplicarModo === 'COMPRA' ? this.pagoCompraId : null,
-          origin: 'MANUAL_APLICADO'
-        })
-
-        if (r?.sobrante > 0) {
-          this.pagoOk = `Pago aplicado ✅ (sobrante $ ${this.formatMoney(r.sobrante)} a favor)`
-        } else {
-          this.pagoOk = 'Pago aplicado ✅'
-        }
-
-        this.pagoMonto = ''
-        this.pagoNotas = ''
-
-        this.loadPagosProveedor()
-        this.loadComprasPendientes()
-        this.invalidateSaldoCache()
-        this.refresh()
-      } catch (e) {
-        this.pagoError = e?.message || 'No se pudo registrar el pago'
-      }
-    },
-
-    borrarPago(pg) {
-      if (!confirm('¿Borrar este pago?')) return
-      try {
-        removePago(pg.id)
-        this.loadPagosProveedor()
-        this.loadComprasPendientes()
-        this.invalidateSaldoCache()
-        this.refresh()
-        this.pagoOk = 'Pago eliminado.'
-        setTimeout(() => (this.pagoOk = ''), 1800)
-      } catch (e) {
-        this.pagoError = e?.message || 'No se pudo borrar el pago'
-      }
-    }
-  }
-}
-</script>
 
 <style scoped>
-.bg-panel {
-  background: rgba(18, 22, 32, 0.92);
-}
-.modal-round {
-  border-radius: 14px;
-}
-
-.btn-accent {
-  background: #7c3aed;
-  border-color: #7c3aed;
-}
-.btn-accent:hover {
-  filter: brightness(1.05);
-}
-
-.table td,
-.table th {
-  vertical-align: middle;
-}
+.bg-panel{ background: rgba(18, 22, 32, .92); }
+.btn-accent{ background: #6f5cff; border: none; }
+.btn-accent:hover{ background: #5f4de6; }
 </style>

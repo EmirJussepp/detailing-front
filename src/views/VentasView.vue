@@ -1,6 +1,6 @@
-<!-- src/views/VentasView.vue -->
 <script setup>
 import { computed, ref, watch } from "vue"
+import { useRoute, useRouter } from "vue-router"
 import { getSession, isAdmin, getShift } from "../auth/session"
 
 import { cajaApi } from "../services/cajaApi"
@@ -8,6 +8,19 @@ import { ventasApi } from "../services/ventasApi"
 import { movimientosCajaApi } from "../services/movimientosCajaApi"
 import { productosApi } from "../services/productosApi"
 import { clientesApi } from "../services/clientesApi"
+import { tipoClientesApi } from "../services/tipoClienteService"
+
+import { mapCliente } from "../mappers/clientes"
+
+// =========================
+// Router
+// =========================
+const route = useRoute()
+const router = useRouter()
+
+function goCreateCliente() {
+  router.push({ name: "clientes", query: { from: "ventas" } })
+}
 
 // =========================
 // Session / permisos
@@ -49,14 +62,36 @@ function clamp(n, min, max) {
   return Math.min(max, Math.max(min, x))
 }
 
-function mapMetodoPago(pm) {
-  // Ajustá si tus IDs reales son otros
-  if (pm === "EFECTIVO") return 1
-  if (pm === "TRANSFERENCIA") return 2
-  if (pm === "DEBITO") return 3
-  if (pm === "CREDITO") return 4
-  return 1
+// =========================
+// Tipos de cliente (BACKEND)
+// =========================
+const tiposCliente = ref([])
+
+async function fetchTiposCliente() {
+  try {
+    const { data } = await tipoClientesApi.list()
+    tiposCliente.value = Array.isArray(data) ? data : []
+  } catch {
+    tiposCliente.value = []
+  }
 }
+
+
+function getTipoClienteNameById(tipoId) {
+  const t = tiposCliente.value.find(x => Number(x.tipoClienteId ?? x.id) === Number(tipoId))
+  return String(t?.name ?? "").toUpperCase()
+}
+
+function isMayoristaCliente(cliente) {
+  if (!cliente?.tipoClienteId) return false
+  const name = getTipoClienteNameById(cliente.tipoClienteId)
+  return name.includes("MAYOR") // MAYORISTA
+}
+
+const tipoClienteBadge = computed(() => {
+  if (!clienteSel.value) return null
+  return isMayoristaCliente(clienteSel.value) ? "MAYORISTA" : "MINORISTA"
+})
 
 // =========================
 // Estado principal
@@ -67,16 +102,25 @@ const cajaAbierta = ref(null)
 const movimientosCaja = ref([])
 const resumenCaja = ref({ ingresos: 0, egresos: 0, saldo: 0 })
 
-const ventas = ref([]) // (por ahora sin GET por turno)
+const ventas = ref([]) // sin GET por turno (todavía)
 const productos = ref([])
 const clientes = ref([])
 
 const clienteSelId = ref("")
+
 const clienteSel = computed(() =>
   clientes.value.find(c => String(c.id) === String(clienteSelId.value)) ?? null
 )
 
 const canSell = computed(() => cajaCheck.value?.ok === true)
+
+// ✅ si volvemos desde clientes con ?clienteId=...
+function applyClienteFromQuery() {
+  const qid = route.query.clienteId
+  if (!qid) return
+  clienteSelId.value = String(qid)
+  router.replace({ query: { ...route.query, clienteId: undefined } })
+}
 
 // =========================
 // Refresh (todo backend)
@@ -84,6 +128,8 @@ const canSell = computed(() => cajaCheck.value?.ok === true)
 async function refresh() {
   okMsg.value = ""
   errorMsg.value = ""
+
+  await fetchTiposCliente()
 
   // 1) Caja abierta
   try {
@@ -108,27 +154,22 @@ async function refresh() {
       codigoProducto: p.codigoProducto ?? null,
       categoria: p.categoria ?? null,
       userId: p.userId ?? null,
-      stockActual: p.stockActual == null ? null : Number(p.stockActual), // si el backend lo devuelve
+      stockActual: p.stockActual == null ? null : Number(p.stockActual),
       activo: true
     }))
   } catch (e) {
     productos.value = []
-    errorMsg.value = e?.response?.data?.error || e?.message || "Error cargando productos (backend)."
+    const msg = e?.response?.data?.error || e?.message || "Error cargando productos (backend)."
+    if (!errorMsg.value) errorMsg.value = msg
   }
 
   // 3) Clientes
   try {
     const { data } = await clientesApi.list()
     const arr = Array.isArray(data) ? data : []
-    clientes.value = arr.map(c => ({
-      id: Number(c.clienteId ?? c.id),
-      nombre: c.nombre,
-      tipoClienteId: c.tipoClienteId ?? null,
-      activo: c.activo ?? true,
-      descuentoPct: c.descuentoPct ?? 0
-    })).filter(c => c.activo !== false)
-  } catch (e) {
-    // Si todavía no tenés endpoint, dejalo vacío sin romper
+    clientes.value = arr.map(mapCliente).filter(c => c.activo !== false)
+    applyClienteFromQuery()
+  } catch {
     clientes.value = []
   }
 
@@ -155,7 +196,7 @@ async function refresh() {
       const saldo = Number(cajaAbierta.value.montoInicial || 0) + ingresos - egresos
       resumenCaja.value = { ingresos, egresos, saldo }
     } catch {
-      // no rompemos la vista si falla
+      // no rompemos la vista
     }
   }
 }
@@ -163,7 +204,7 @@ async function refresh() {
 watch([fecha, turnoSel, admin], () => { refresh() }, { immediate: true })
 
 // =========================
-// Items (productos) con descuento por línea
+// Items (productos)
 // =========================
 const selProductoId = ref("")
 const itemQty = ref("1")
@@ -196,6 +237,12 @@ function recalcItem(it) {
   return { ...it, qty, discountPct, discountUnit, netUnit, subtotal, invalidReason }
 }
 
+function getPrecioSugerido(p) {
+  const mayor = isMayoristaCliente(clienteSel.value)
+  if (mayor) return Number(p.precioMayorista ?? p.precioVenta ?? 0)
+  return Number(p.precioVenta ?? 0)
+}
+
 function addItem() {
   errorMsg.value = ""
   okMsg.value = ""
@@ -211,13 +258,19 @@ function addItem() {
   const qty = Math.floor(Number(String(itemQty.value).trim().replace(",", ".")))
   if (!Number.isFinite(qty) || qty <= 0) { errorMsg.value = "Cantidad inválida."; return }
 
+  // UX stock
+  if (p.stockActual != null && qty > p.stockActual) {
+    errorMsg.value = `Stock insuficiente. Disponible: ${p.stockActual}`
+    return
+  }
+
   const discountPct = clamp(String(itemDiscountPct.value).replace(",", "."), 0, 100)
 
   const base = {
     id: ensureUUID(),
     productId: Number(p.id),
     name: p.nombre,
-    price: Number(p.precioVenta ?? 0),
+    price: getPrecioSugerido(p),
     cost: Number(p.precioCosto ?? 0),
     qty,
     discountPct,
@@ -248,6 +301,13 @@ function updateItemQty(itemId, qty) {
   const safe = Number.isFinite(parsed) ? parsed : 1
   const finalQty = safe <= 0 ? 1 : Math.floor(safe)
 
+  const it0 = items.value.find(x => x.id === itemId)
+  const p = it0 ? productos.value.find(p => Number(p.id) === Number(it0.productId)) : null
+  if (p?.stockActual != null && finalQty > p.stockActual) {
+    errorMsg.value = `Stock insuficiente. Disponible: ${p.stockActual}`
+    return
+  }
+
   items.value = items.value.map(it =>
     it.id === itemId ? recalcItem({ ...it, qty: finalQty }) : it
   )
@@ -264,16 +324,14 @@ function clearForm() {
 }
 
 // =========================
-// Totales
+// Totales (preview)
 // =========================
 const subtotalBase = computed(() =>
   items.value.reduce((acc, it) => acc + Number(it.price ?? 0) * Number(it.qty ?? 0), 0)
 )
-
 const descuentoTotal = computed(() =>
   items.value.reduce((acc, it) => acc + Number(it.discountUnit ?? 0) * Number(it.qty ?? 0), 0)
 )
-
 const totalCalc = computed(() =>
   items.value.reduce((acc, it) => acc + Number(it.subtotal ?? 0), 0)
 )
@@ -284,6 +342,8 @@ const canRegister = computed(() => canSell.value && items.value.length > 0 && !h
 const ventasTotalDelBucket = computed(() =>
   ventas.value.reduce((acc, v) => acc + Number(v.total ?? 0), 0)
 )
+
+const lastTicket = ref(null)
 
 // =========================
 // Registrar venta (BACKEND)
@@ -311,20 +371,10 @@ async function registrarVenta() {
       return
     }
 
-    // Payload que espera tu backend
     const detallesVenta = items.value.map(i => ({
       productoId: Number(i.productId),
       cantidad: Number(i.qty),
     }))
-
-    if (detallesVenta.some(d => !Number.isInteger(d.productoId) || d.productoId <= 0)) {
-      errorMsg.value = "Hay un producto inválido en el detalle (productoId vacío)."
-      return
-    }
-    if (detallesVenta.some(d => !Number.isInteger(d.cantidad) || d.cantidad <= 0)) {
-      errorMsg.value = "Hay una cantidad inválida en el detalle."
-      return
-    }
 
     const command = {
       cajaId: Number(cajaAbierta.value.cajaId),
@@ -333,25 +383,36 @@ async function registrarVenta() {
       detallesVenta,
     }
 
-    console.log("PAYLOAD /ventas", JSON.stringify(command, null, 2))
-
     const { data } = await ventasApi.create(command)
 
-    okMsg.value = `Venta registrada ✅ (backend id: ${data?.ventaId ?? "OK"})`
+    const ventaId = data?.venta?.ventaId ?? data?.ventaId ?? null
+    const total = data?.venta?.total ?? data?.total ?? totalCalc.value
+
+    lastTicket.value = data
+
+    okMsg.value = ventaId
+      ? `Venta #${ventaId} registrada ✅ Total: $ ${formatMoney(total)}`
+      : `Venta registrada ✅ Total: $ ${formatMoney(total)}`
+
     clearForm()
     await refresh()
   } catch (e) {
+    console.log("VENTAS ERROR:", e?.response?.status, e?.response?.data)
+
     errorMsg.value =
       e?.response?.data?.error ||
-      e?.response?.data ||
+      e?.response?.data?.message ||
+      (typeof e?.response?.data === "string" ? e.response.data : null) ||
       e?.message ||
       "Error creando venta en backend."
+
     await refresh()
   } finally {
     saving.value = false
   }
 }
 </script>
+
 
 <template>
   <div>
@@ -410,23 +471,31 @@ async function registrarVenta() {
       <div class="card-body">
         <h2 class="h6 mb-3">Nueva venta</h2>
 
-        <!-- Cliente -->
+        <!-- Cliente + Nuevo -->
         <div class="row g-3 mb-3">
-          <div class="col-12 col-md-6">
-            <label class="form-label text-secondary">Cliente (opcional)</label>
-            <select
-              v-model="clienteSelId"
-              class="form-select bg-dark text-white border-secondary"
-              :disabled="!canSell || clientes.length === 0"
-            >
-              <option value="">Sin cliente</option>
-              <option v-for="c in clientes" :key="c.id" :value="String(c.id)">
-                {{ c.nombre }}
-              </option>
-            </select>
+          <div class="col-12 col-md-8">
+            <div class="d-flex gap-2 align-items-end">
+              <div class="flex-grow-1">
+                <label class="form-label text-secondary">Cliente (opcional)</label>
+                <select v-model="clienteSelId" class="form-select bg-dark text-white border-secondary" :disabled="!canSell">
+                  <option value="">Sin cliente</option>
+                  <option v-for="c in clientes" :key="c.id" :value="String(c.id)">
+                    {{ c.nombre }} {{ c.apellido || "" }} — DNI: {{ c.dni || "-" }}
+                  </option>
+                </select>
+              </div>
+
+              <button class="btn btn-outline-light" @click="goCreateCliente" :disabled="!canSell">
+                + Nuevo
+              </button>
+            </div>
+
+            <div v-if="tipoClienteBadge === 'MAYORISTA'" class="small text-secondary mt-2">
+              Cliente <b>Mayorista</b> (el backend aplicará precio mayorista donde corresponda)
+            </div>
           </div>
 
-          <div class="col-12 col-md-6 d-flex align-items-end">
+          <div class="col-12 col-md-4 d-flex align-items-end">
             <div class="text-secondary small">
               Tip: el descuento real lo ponés por producto.
             </div>
@@ -440,8 +509,12 @@ async function registrarVenta() {
             <select v-model="selProductoId" class="form-select bg-dark text-white border-secondary" :disabled="!canSell || productos.length === 0">
               <option value="" disabled>Seleccionar…</option>
               <option v-for="p in productos" :key="p.id" :value="String(p.id)">
-                {{ p.nombre }} — $ {{ formatMoney(p.precioVenta) }}
-              </option>
+  {{ p.nombre }} — $ {{ formatMoney(getPrecioSugerido(p)) }}{{
+    tipoClienteBadge === 'MAYORISTA' && p.precioMayorista != null ? ' (mayorista)' : ''
+  }}
+</option>
+
+
             </select>
           </div>
 
@@ -548,9 +621,9 @@ async function registrarVenta() {
 
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-3">
           <div class="text-secondary">
-            Subtotal: <b>$ {{ formatMoney(subtotalBase) }}</b> ·
+            Subtotal (preview): <b>$ {{ formatMoney(subtotalBase) }}</b> ·
             Descuento: <b>$ {{ formatMoney(descuentoTotal) }}</b> ·
-            Total: <b class="fs-5">$ {{ formatMoney(totalCalc) }}</b>
+            Total (preview): <b class="fs-5">$ {{ formatMoney(totalCalc) }}</b>
           </div>
 
           <div class="d-flex gap-2">
@@ -562,7 +635,40 @@ async function registrarVenta() {
         </div>
 
         <div class="text-secondary small mt-2">
-          ✅ Cliente opcional · ✅ Descuento por producto · ✅ Caja + POST venta
+          ✅ Cliente opcional · ✅ Descuento por producto · ✅ Caja + POST venta · ✅ Total real lo define el backend
+        </div>
+      </div>
+    </div>
+
+    <!-- ÚLTIMA VENTA (respuesta backend) -->
+    <div class="card bg-dark border-secondary mb-4" v-if="lastTicket">
+      <div class="card-body">
+        <h2 class="h6 mb-2">Última venta (backend)</h2>
+        <div class="text-secondary small" v-if="lastTicket?.venta">
+          VentaId: <b>{{ lastTicket.venta.ventaId }}</b>
+          · Total: <b>$ {{ formatMoney(lastTicket.venta.total) }}</b>
+          · Estado: <b>{{ lastTicket.venta.estado }}</b>
+        </div>
+
+        <div class="table-responsive mt-3" v-if="Array.isArray(lastTicket?.detallesVenta)">
+          <table class="table table-dark table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>ProductoId</th>
+                <th>Cant.</th>
+                <th>Precio</th>
+                <th>Subtotal</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="d in lastTicket.detallesVenta" :key="d.detalleId">
+                <td class="text-secondary">{{ d.productoId }}</td>
+                <td class="text-secondary">{{ d.cantidad }}</td>
+                <td class="text-secondary">$ {{ formatMoney(d.precioUnitario) }}</td>
+                <td class="fw-bold">$ {{ formatMoney(d.subtotal) }}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

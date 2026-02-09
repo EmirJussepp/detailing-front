@@ -1,8 +1,10 @@
-import { http } from "./http";
+import { http } from "./http"
 
-const BASE = "/localidades";
-
-export const localidadApi = {
-  list: () => http.get(BASE),
-  create: (payload) => http.post(BASE, payload),
-};
+export const localidadesApi = {
+  list() {
+    return http.get("/localidades")
+  },
+  create(payload) {
+    return http.post("/localidades", payload)
+  },
+}

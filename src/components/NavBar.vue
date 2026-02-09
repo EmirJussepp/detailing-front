@@ -7,12 +7,14 @@ const router = useRouter()
 const session = computed(() => getSession())
 
 const isAdmin = computed(() => session.value?.role === 'ADMIN')
+const isDev = import.meta.env.DEV   // 👈 NUEVO
 
 function logout() {
   clearSession()
   router.push({ name: 'login' })
 }
 </script>
+
 
 <template>
   <nav class="navbar navbar-expand-lg navbar-dark bg-dark border-bottom">
@@ -32,8 +34,13 @@ function logout() {
           <li class="nav-item"><RouterLink class="nav-link" to="/productos">Productos</RouterLink></li>
           <li class="nav-item"><RouterLink class="nav-link" to="/ventas">Ventas</RouterLink></li>
           <li class="nav-item"><RouterLink class="nav-link" to="/clientes">Clientes</RouterLink></li>
-          <li class="nav-item"><RouterLink class="nav-link" to="/compras">Compras</RouterLink></li>
           <li class="nav-item"><RouterLink class="nav-link" to="/proveedores">Proveedores</RouterLink></li>
+
+          <li class="nav-item" v-if="isDev">
+  <RouterLink class="nav-link text-warning" to="/api">
+    API Test
+  </RouterLink>
+</li>
 
           <!-- ✅ Configuración solo ADMIN -->
           <li class="nav-item" v-if="isAdmin">

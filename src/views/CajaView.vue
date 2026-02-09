@@ -221,7 +221,6 @@ onMounted(() => refresh())
           </div>
         </div>
       </div>
-
       <!-- Acciones -->
       <div class="col-12 col-lg-7">
         <div class="card bg-panel border-0 shadow-sm h-100">
@@ -245,7 +244,6 @@ onMounted(() => refresh())
                   Ya hay una caja abierta.
                 </div>
               </div>
-
               <div class="col-12 col-md-6">
                 <label class="form-label text-secondary">Monto final (cerrar)</label>
                 <input
