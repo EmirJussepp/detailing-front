@@ -1,6 +1,6 @@
 export function getSession() {
   try {
-    const raw = localStorage.getItem('session')
+    const raw = localStorage.getItem("session")
     return raw ? JSON.parse(raw) : null
   } catch {
     return null
@@ -8,16 +8,16 @@ export function getSession() {
 }
 
 export function setSession(session) {
-  localStorage.setItem('session', JSON.stringify(session))
+  localStorage.setItem("session", JSON.stringify(session))
 }
 
 export function clearSession() {
-  localStorage.removeItem('session')
-  localStorage.removeItem('token') // por si quedó viejo
+  localStorage.removeItem("session")
+  localStorage.removeItem("token")
 }
 
 export function isAdmin() {
-  return getSession()?.role === 'ADMIN'
+  return getSession()?.role === "ADMIN"
 }
 
 export function getShift() {

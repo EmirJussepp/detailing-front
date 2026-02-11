@@ -9,7 +9,8 @@ import { movimientosCajaApi } from "../services/movimientosCajaApi"
 import { productosApi } from "../services/productosApi"
 import { clientesApi } from "../services/clientesApi"
 import { tipoClientesApi } from "../services/tipoClienteService"
-
+import { pagosApi } from "../services/pagosApi"
+import { metodosPagoApi } from "../services/metodopagoService"
 import { mapCliente } from "../mappers/clientes"
 
 // =========================
@@ -29,7 +30,20 @@ const saving = ref(false)
 
 const session = getSession() ?? null
 const admin = computed(() => Boolean(session && isAdmin()))
-const userId = session?.userId ?? null
+
+function resolveUserId(sess) {
+  const v = sess?.userId
+  const n = Number(v)
+  if (Number.isFinite(n) && n > 0) return n
+
+  const s = String(v ?? "").toLowerCase()
+  if (s.includes("maniana")) return 1
+  if (s.includes("tarde")) return 2
+
+  return 1
+}
+
+const userIdInt = computed(() => resolveUserId(session))
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10)
@@ -41,8 +55,11 @@ const turnoSel = ref(admin.value ? "MAÑANA" : (getShift() ?? "MAÑANA"))
 const errorMsg = ref("")
 const okMsg = ref("")
 
-const paymentMethod = ref("EFECTIVO")
 const notes = ref("")
+
+function turnoBackend(t) {
+  return t === "MAÑANA" ? "MANIANA" : t
+}
 
 // =========================
 // Helpers
@@ -62,6 +79,11 @@ function clamp(n, min, max) {
   return Math.min(max, Math.max(min, x))
 }
 
+function toMoneyNumber(v) {
+  const x = Number(String(v ?? "").replace(",", "."))
+  return Number.isFinite(x) ? x : NaN
+}
+
 // =========================
 // Tipos de cliente (BACKEND)
 // =========================
@@ -76,7 +98,6 @@ async function fetchTiposCliente() {
   }
 }
 
-
 function getTipoClienteNameById(tipoId) {
   const t = tiposCliente.value.find(x => Number(x.tipoClienteId ?? x.id) === Number(tipoId))
   return String(t?.name ?? "").toUpperCase()
@@ -85,7 +106,7 @@ function getTipoClienteNameById(tipoId) {
 function isMayoristaCliente(cliente) {
   if (!cliente?.tipoClienteId) return false
   const name = getTipoClienteNameById(cliente.tipoClienteId)
-  return name.includes("MAYOR") // MAYORISTA
+  return name.includes("MAYOR")
 }
 
 const tipoClienteBadge = computed(() => {
@@ -102,12 +123,11 @@ const cajaAbierta = ref(null)
 const movimientosCaja = ref([])
 const resumenCaja = ref({ ingresos: 0, egresos: 0, saldo: 0 })
 
-const ventas = ref([]) // sin GET por turno (todavía)
+const ventas = ref([]) // aún sin GET por turno
 const productos = ref([])
 const clientes = ref([])
 
 const clienteSelId = ref("")
-
 const clienteSel = computed(() =>
   clientes.value.find(c => String(c.id) === String(clienteSelId.value)) ?? null
 )
@@ -123,6 +143,131 @@ function applyClienteFromQuery() {
 }
 
 // =========================
+// Métodos de pago (BACKEND)
+// =========================
+const metodosPago = ref([])
+
+function normalizeMetodoPago(x) {
+  return {
+    id: Number(x?.metodoPagoId ?? x?.id ?? 0),
+    nombre: String(x?.nombre ?? x?.name ?? x?.descripcion ?? x?.tipo ?? "SIN NOMBRE"),
+  }
+}
+
+async function fetchMetodosPago() {
+  try {
+    const { data } = await metodosPagoApi.list()
+    const arr = Array.isArray(data) ? data : []
+    metodosPago.value = arr.map(normalizeMetodoPago).filter(m => m.id > 0)
+  } catch {
+    metodosPago.value = []
+  }
+}
+
+// =========================
+// Modal Pago
+// =========================
+const showPagoModal = ref(false)
+const pagoVentaId = ref(null)
+const pagoMonto = ref("")
+const pagoMetodoPagoId = ref("")
+const pagoReferencia = ref("")
+const pagoLoading = ref(false)
+const pagosDeVenta = ref([])
+
+async function loadPagosVenta(ventaId) {
+  try {
+    const { data } = await pagosApi.porVentaId(ventaId)
+    pagosDeVenta.value = Array.isArray(data) ? data : []
+  } catch {
+    pagosDeVenta.value = []
+  }
+}
+
+function openPagoModal(ventaId, suggestedMonto = null) {
+  pagoVentaId.value = Number(ventaId)
+  pagoMonto.value = suggestedMonto != null ? String(suggestedMonto) : ""
+  pagoReferencia.value = ""
+
+  // set default método
+  pagoMetodoPagoId.value = metodosPago.value?.[0]?.id ? String(metodosPago.value[0].id) : ""
+
+  showPagoModal.value = true
+  loadPagosVenta(ventaId)
+}
+
+function closePagoModal() {
+  showPagoModal.value = false
+  pagoVentaId.value = null
+  pagoMonto.value = ""
+  pagoMetodoPagoId.value = ""
+  pagoReferencia.value = ""
+  pagosDeVenta.value = []
+}
+
+const totalPagadoVenta = computed(() =>
+  (pagosDeVenta.value ?? []).reduce((a, p) => a + Number(p.monto ?? 0), 0)
+)
+
+async function registrarPago() {
+  if (pagoLoading.value) return
+  pagoLoading.value = true
+  errorMsg.value = ""
+  okMsg.value = ""
+
+  if (!cajaAbierta.value?.cajaId) {
+    errorMsg.value = "No hay caja ABIERTA para registrar el pago."
+    pagoLoading.value = false
+    return
+  }
+
+  if (!pagoVentaId.value) {
+    errorMsg.value = "Venta inválida."
+    pagoLoading.value = false
+    return
+  }
+
+  const mp = Number(pagoMetodoPagoId.value)
+  if (!Number.isFinite(mp) || mp <= 0) {
+    errorMsg.value = "Seleccioná un método de pago."
+    pagoLoading.value = false
+    return
+  }
+
+  const monto = toMoneyNumber(pagoMonto.value)
+  if (!Number.isFinite(monto) || monto <= 0) {
+    errorMsg.value = "Monto de pago inválido."
+    pagoLoading.value = false
+    return
+  }
+
+  try {
+    const payload = {
+      ventaId: Number(pagoVentaId.value),
+      cajaId: Number(cajaAbierta.value.cajaId),
+      metodoPagoId: mp,
+      monto,
+      referencia: pagoReferencia.value?.trim() || null,
+    }
+
+    await pagosApi.create(payload)
+
+    okMsg.value = `Pago registrado ✅ $ ${formatMoney(monto)}`
+    await loadPagosVenta(pagoVentaId.value)
+    await refresh()
+  } catch (e) {
+    errorMsg.value =
+      e?.response?.data?.error ||
+      e?.response?.data?.message ||
+      e?.response?.data ||
+      e?.message ||
+      "Error registrando pago."
+  } finally {
+    pagoLoading.value = false
+  }
+}
+
+// =========================
 // Refresh (todo backend)
 // =========================
 async function refresh() {
@@ -130,15 +275,28 @@ async function refresh() {
   errorMsg.value = ""
 
   await fetchTiposCliente()
+  await fetchMetodosPago()
 
   // 1) Caja abierta
   try {
-    const { data } = await cajaApi.abierta()
-    cajaAbierta.value = data
+    const { data } = await cajaApi.abierta({
+      fecha: fecha.value,
+      turno: turnoBackend(turnoSel.value),
+      userId: userIdInt.value,
+    })
+
+    cajaAbierta.value = data ?? null
     cajaCheck.value = { ok: true, error: "" }
   } catch (e) {
+    const status = e?.response?.status
+    const msg = e?.response?.data?.message || e?.response?.data?.error || ""
     cajaAbierta.value = null
-    cajaCheck.value = { ok: false, error: "No hay caja ABIERTA (backend)." }
+
+    if (status === 404 && String(msg).toLowerCase().includes("no hay caja abierta")) {
+      cajaCheck.value = { ok: false, error: "No hay caja ABIERTA para esa fecha/turno." }
+    } else {
+      cajaCheck.value = { ok: false, error: msg || "Error consultando caja (backend)." }
+    }
   }
 
   // 2) Productos
@@ -155,7 +313,7 @@ async function refresh() {
       categoria: p.categoria ?? null,
       userId: p.userId ?? null,
       stockActual: p.stockActual == null ? null : Number(p.stockActual),
-      activo: true
+      activo: true,
     }))
   } catch (e) {
     productos.value = []
@@ -173,7 +331,7 @@ async function refresh() {
     clientes.value = []
   }
 
-  // 4) Ventas (vacío por ahora)
+  // 4) Ventas (aún vacío por falta de endpoint)
   ventas.value = []
 
   // 5) Movimientos + resumen
@@ -196,7 +354,7 @@ async function refresh() {
       const saldo = Number(cajaAbierta.value.montoInicial || 0) + ingresos - egresos
       resumenCaja.value = { ingresos, egresos, saldo }
     } catch {
-      // no rompemos la vista
+      // si falla, dejamos 0 sin romper vista
     }
   }
 }
@@ -258,7 +416,6 @@ function addItem() {
   const qty = Math.floor(Number(String(itemQty.value).trim().replace(",", ".")))
   if (!Number.isFinite(qty) || qty <= 0) { errorMsg.value = "Cantidad inválida."; return }
 
-  // UX stock
   if (p.stockActual != null && qty > p.stockActual) {
     errorMsg.value = `Stock insuficiente. Disponible: ${p.stockActual}`
     return
@@ -302,7 +459,8 @@ function updateItemQty(itemId, qty) {
   const finalQty = safe <= 0 ? 1 : Math.floor(safe)
 
   const it0 = items.value.find(x => x.id === itemId)
-  const p = it0 ? productos.value.find(p => Number(p.id) === Number(it0.productId)) : null
+  const p = it0 ? productos.value.find(pp => Number(pp.id) === Number(it0.productId)) : null
+
   if (p?.stockActual != null && finalQty > p.stockActual) {
     errorMsg.value = `Stock insuficiente. Disponible: ${p.stockActual}`
     return
@@ -315,7 +473,6 @@ function updateItemQty(itemId, qty) {
 
 function clearForm() {
   items.value = []
-  paymentMethod.value = "EFECTIVO"
   notes.value = ""
   clienteSelId.value = ""
   selProductoId.value = ""
@@ -329,9 +486,11 @@ function clearForm() {
 const subtotalBase = computed(() =>
   items.value.reduce((acc, it) => acc + Number(it.price ?? 0) * Number(it.qty ?? 0), 0)
 )
+
 const descuentoTotal = computed(() =>
   items.value.reduce((acc, it) => acc + Number(it.discountUnit ?? 0) * Number(it.qty ?? 0), 0)
 )
+
 const totalCalc = computed(() =>
   items.value.reduce((acc, it) => acc + Number(it.subtotal ?? 0), 0)
 )
@@ -378,9 +537,10 @@ async function registrarVenta() {
 
     const command = {
       cajaId: Number(cajaAbierta.value.cajaId),
-      userId: Number.isFinite(Number(userId)) ? Number(userId) : null,
+      userId: userIdInt.value,
       clienteId: clienteSel.value?.id ? Number(clienteSel.value.id) : null,
       detallesVenta,
+      notas: notes.value?.trim() || null,
     }
 
     const { data } = await ventasApi.create(command)
@@ -393,6 +553,10 @@ async function registrarVenta() {
     okMsg.value = ventaId
       ? `Venta #${ventaId} registrada ✅ Total: $ ${formatMoney(total)}`
       : `Venta registrada ✅ Total: $ ${formatMoney(total)}`
+
+    if (ventaId) {
+      openPagoModal(ventaId, total)
+    }
 
     clearForm()
     await refresh()
@@ -413,7 +577,6 @@ async function registrarVenta() {
 }
 </script>
 
-
 <template>
   <div>
     <div class="mb-3">
@@ -433,7 +596,12 @@ async function registrarVenta() {
         <div class="row g-3 align-items-end">
           <div class="col-12 col-md-3">
             <label class="form-label text-secondary">Fecha</label>
-            <input v-model="fecha" type="date" class="form-control bg-dark text-white border-secondary" :disabled="!admin" />
+            <input
+              v-model="fecha"
+              type="date"
+              class="form-control bg-dark text-white border-secondary"
+              :disabled="!admin"
+            />
           </div>
 
           <div class="col-12 col-md-3" v-if="admin">
@@ -466,6 +634,48 @@ async function registrarVenta() {
       </div>
     </div>
 
+    <!-- MOVIMIENTOS DEL TURNO -->
+    <div class="card bg-panel border-0 shadow-sm mb-4" v-if="cajaAbierta?.cajaId">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h2 class="h6 mb-0">Movimientos del turno</h2>
+          <div class="text-secondary small">
+            Caja #{{ cajaAbierta.cajaId }} · Saldo: <b>$ {{ formatMoney(resumenCaja.saldo) }}</b>
+          </div>
+        </div>
+
+        <div v-if="!movimientosCaja.length" class="text-secondary small">
+          No hay movimientos todavía.
+        </div>
+
+        <div v-else class="table-responsive">
+          <table class="table table-dark table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Tipo</th>
+                <th>Concepto</th>
+                <th>Descripción</th>
+                <th class="text-end">Monto</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="m in movimientosCaja" :key="m.movimientoId ?? m.id">
+                <td class="text-secondary">{{ m.tipo }}</td>
+                <td class="text-secondary">{{ m.concepto ?? "-" }}</td>
+                <td class="text-secondary">{{ m.descripcion ?? "-" }}</td>
+                <td class="text-end fw-bold">$ {{ formatMoney(m.monto) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="text-secondary small mt-2">
+          Ingresos: <b>$ {{ formatMoney(resumenCaja.ingresos) }}</b> ·
+          Egresos: <b>$ {{ formatMoney(resumenCaja.egresos) }}</b>
+        </div>
+      </div>
+    </div>
+
     <!-- NUEVA VENTA -->
     <div class="card bg-panel border-0 shadow-sm mb-4">
       <div class="card-body">
@@ -477,7 +687,11 @@ async function registrarVenta() {
             <div class="d-flex gap-2 align-items-end">
               <div class="flex-grow-1">
                 <label class="form-label text-secondary">Cliente (opcional)</label>
-                <select v-model="clienteSelId" class="form-select bg-dark text-white border-secondary" :disabled="!canSell">
+                <select
+                  v-model="clienteSelId"
+                  class="form-select bg-dark text-white border-secondary"
+                  :disabled="!canSell"
+                >
                   <option value="">Sin cliente</option>
                   <option v-for="c in clientes" :key="c.id" :value="String(c.id)">
                     {{ c.nombre }} {{ c.apellido || "" }} — DNI: {{ c.dni || "-" }}
@@ -496,9 +710,7 @@ async function registrarVenta() {
           </div>
 
           <div class="col-12 col-md-4 d-flex align-items-end">
-            <div class="text-secondary small">
-              Tip: el descuento real lo ponés por producto.
-            </div>
+            <div class="text-secondary small">Tip: el descuento real lo ponés por producto.</div>
           </div>
         </div>
 
@@ -506,26 +718,39 @@ async function registrarVenta() {
         <div class="row g-3 align-items-end">
           <div class="col-12 col-md-6">
             <label class="form-label text-secondary">Producto</label>
-            <select v-model="selProductoId" class="form-select bg-dark text-white border-secondary" :disabled="!canSell || productos.length === 0">
+            <select
+              v-model="selProductoId"
+              class="form-select bg-dark text-white border-secondary"
+              :disabled="!canSell || productos.length === 0"
+            >
               <option value="" disabled>Seleccionar…</option>
               <option v-for="p in productos" :key="p.id" :value="String(p.id)">
-  {{ p.nombre }} — $ {{ formatMoney(getPrecioSugerido(p)) }}{{
-    tipoClienteBadge === 'MAYORISTA' && p.precioMayorista != null ? ' (mayorista)' : ''
-  }}
-</option>
-
-
+                {{ p.nombre }} — $ {{ formatMoney(getPrecioSugerido(p)) }}
+                {{
+                  tipoClienteBadge === "MAYORISTA" && p.precioMayorista != null ? " (mayorista)" : ""
+                }}
+              </option>
             </select>
           </div>
 
           <div class="col-6 col-md-2">
             <label class="form-label text-secondary">Cant.</label>
-            <input v-model="itemQty" class="form-control bg-dark text-white border-secondary" inputmode="numeric" :disabled="!canSell || !selProductoId" />
+            <input
+              v-model="itemQty"
+              class="form-control bg-dark text-white border-secondary"
+              inputmode="numeric"
+              :disabled="!canSell || !selProductoId"
+            />
           </div>
 
           <div class="col-6 col-md-2">
             <label class="form-label text-secondary">Desc %</label>
-            <input v-model="itemDiscountPct" class="form-control bg-dark text-white border-secondary" inputmode="numeric" :disabled="!canSell || !selProductoId" />
+            <input
+              v-model="itemDiscountPct"
+              class="form-control bg-dark text-white border-secondary"
+              inputmode="numeric"
+              :disabled="!canSell || !selProductoId"
+            />
           </div>
 
           <div class="col-12 col-md-2 d-flex justify-content-md-end">
@@ -541,12 +766,12 @@ async function registrarVenta() {
             <thead>
               <tr>
                 <th>Producto</th>
-                <th style="width: 120px;">Precio</th>
-                <th style="width: 90px;">Cant.</th>
-                <th style="width: 110px;">Desc %</th>
-                <th style="width: 180px;">Unit. final</th>
-                <th style="width: 150px;">Subtotal</th>
-                <th style="width: 120px;" class="text-end">Acciones</th>
+                <th style="width: 120px">Precio</th>
+                <th style="width: 90px">Cant.</th>
+                <th style="width: 110px">Desc %</th>
+                <th style="width: 180px">Unit. final</th>
+                <th style="width: 150px">Subtotal</th>
+                <th style="width: 120px" class="text-end">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -593,26 +818,14 @@ async function registrarVenta() {
           </table>
         </div>
 
-        <div class="text-secondary mt-3" v-else>
-          Agregá productos para armar la venta.
-        </div>
+        <div class="text-secondary mt-3" v-else>Agregá productos para armar la venta.</div>
 
         <div v-if="hasInvalidItems" class="alert alert-danger py-2 mt-3 mb-0">
           Hay ítems a pérdida. Ajustá el descuento para poder registrar la venta.
         </div>
 
-        <!-- Totales -->
-        <div class="row g-3 mt-3">
-          <div class="col-12 col-md-4">
-            <label class="form-label text-secondary">Método de pago</label>
-            <select v-model="paymentMethod" class="form-select bg-dark text-white border-secondary" :disabled="!canSell">
-              <option value="EFECTIVO">EFECTIVO</option>
-              <option value="TRANSFERENCIA">TRANSFERENCIA</option>
-              <option value="DEBITO">DÉBITO</option>
-              <option value="CREDITO">CRÉDITO</option>
-            </select>
-          </div>
-
+        <!-- Notas -->
+        <div class="row g-3 mt-1">
           <div class="col-12 col-md-8">
             <label class="form-label text-secondary">Notas</label>
             <input v-model="notes" class="form-control bg-dark text-white border-secondary" :disabled="!canSell" />
@@ -635,16 +848,28 @@ async function registrarVenta() {
         </div>
 
         <div class="text-secondary small mt-2">
-          ✅ Cliente opcional · ✅ Descuento por producto · ✅ Caja + POST venta · ✅ Total real lo define el backend
+          ✅ Venta descuenta stock · ✅ Caja debe estar ABIERTA · ✅ Cobro parcial o total: desde el modal
         </div>
       </div>
     </div>
 
-    <!-- ÚLTIMA VENTA (respuesta backend) -->
+    <!-- ÚLTIMA VENTA -->
     <div class="card bg-dark border-secondary mb-4" v-if="lastTicket">
       <div class="card-body">
-        <h2 class="h6 mb-2">Última venta (backend)</h2>
-        <div class="text-secondary small" v-if="lastTicket?.venta">
+        <div class="d-flex justify-content-between align-items-center gap-2">
+          <h2 class="h6 mb-0">Última venta (backend)</h2>
+
+          <button
+            class="btn btn-sm btn-outline-light"
+            v-if="lastTicket?.venta?.ventaId"
+            @click="openPagoModal(lastTicket.venta.ventaId, lastTicket.venta.total)"
+            :disabled="!cajaAbierta?.cajaId"
+          >
+            Registrar pago
+          </button>
+        </div>
+
+        <div class="text-secondary small mt-2" v-if="lastTicket?.venta">
           VentaId: <b>{{ lastTicket.venta.ventaId }}</b>
           · Total: <b>$ {{ formatMoney(lastTicket.venta.total) }}</b>
           · Estado: <b>{{ lastTicket.venta.estado }}</b>
@@ -688,6 +913,97 @@ async function registrarVenta() {
         </div>
       </div>
     </div>
+
+    <!-- MODAL PAGO -->
+    <div v-if="showPagoModal" class="modal-backdrop-custom">
+      <div class="modal-card">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div>
+            <div class="h6 mb-0">Registrar pago</div>
+            <div class="text-secondary small">Venta #{{ pagoVentaId }} — Caja #{{ cajaAbierta?.cajaId }}</div>
+          </div>
+          <button class="btn btn-sm btn-outline-light" @click="closePagoModal">X</button>
+        </div>
+
+        <div class="row g-2">
+          <div class="col-12 col-md-6">
+            <label class="form-label text-secondary">Monto</label>
+            <input v-model="pagoMonto" class="form-control bg-dark text-white border-secondary" placeholder="Ej: 20000" />
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label text-secondary">Método de pago</label>
+
+            <select v-model="pagoMetodoPagoId" class="form-select bg-dark text-white border-secondary">
+              <option disabled value="">Seleccionar método…</option>
+
+              <option v-if="!metodosPago.length" disabled value="">
+                No hay métodos cargados
+              </option>
+
+              <option v-for="m in metodosPago" :key="m.id" :value="String(m.id)">
+                {{ m.nombre }}
+              </option>
+            </select>
+          </div>
+
+          <div class="col-12">
+            <label class="form-label text-secondary">Referencia (opcional)</label>
+            <input
+              v-model="pagoReferencia"
+              class="form-control bg-dark text-white border-secondary"
+              placeholder="Ej: comprobante / alias"
+            />
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mt-3">
+          <div class="text-secondary small">
+            Pagado en esta venta: <b>$ {{ formatMoney(totalPagadoVenta) }}</b>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button class="btn btn-outline-light" @click="closePagoModal" :disabled="pagoLoading">
+              Cancelar
+            </button>
+            <button class="btn btn-primary btn-accent" @click="registrarPago" :disabled="pagoLoading || !cajaAbierta?.cajaId">
+              {{ pagoLoading ? "Guardando..." : "Registrar pago" }}
+            </button>
+          </div>
+        </div>
+
+        <hr class="border-secondary my-3" />
+
+        <div>
+          <div class="text-secondary small mb-2">Pagos registrados</div>
+
+          <div v-if="pagosDeVenta.length === 0" class="text-secondary small">Sin pagos todavía.</div>
+
+          <div v-else class="table-responsive">
+            <table class="table table-dark table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Método</th>
+                  <th class="text-end">Monto</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="p in pagosDeVenta" :key="p.pagoId ?? p.id">
+                  <td class="text-secondary">{{ p.pagoId ?? p.id }}</td>
+                  <td class="text-secondary">{{ p.metodoPagoId }}</td>
+                  <td class="text-end fw-bold">$ {{ formatMoney(p.monto) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="text-secondary small mt-2">
+            ✅ Los pagos impactan caja porque el backend crea un MovimientoCaja (INGRESO / VENTA).
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -695,4 +1011,22 @@ async function registrarVenta() {
 .bg-panel{ background: rgba(18, 22, 32, .92); }
 .btn-accent{ background: #6f5cff; border: none; }
 .btn-accent:hover{ background: #5f4de6; }
+
+.modal-backdrop-custom{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.55);
+  display: grid;
+  place-items: center;
+  z-index: 2000;
+  padding: 16px;
+}
+.modal-card{
+  width: min(720px, 96vw);
+  border-radius: 16px;
+  padding: 16px;
+  background: rgba(18, 22, 32, .98);
+  border: 1px solid rgba(255,255,255,.08);
+  box-shadow: 0 20px 70px rgba(0,0,0,.55);
+}
 </style>

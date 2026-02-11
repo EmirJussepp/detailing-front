@@ -9,7 +9,8 @@ const router = useRouter()
 const form = reactive({
   email: '',
   password: '',
-  remember: false
+  remember: false,
+  shift: 'MAÑANA', // ✅ ahora lo elegís acá
 })
 
 const loading = ref(false)
@@ -26,11 +27,24 @@ onMounted(() => {
 
 function validate() {
   errorMsg.value = ''
-  if (!form.email.trim()) return (errorMsg.value = 'Ingresá tu email')
-  if (!form.password.trim()) return (errorMsg.value = 'Ingresá tu contraseña')
-  if (!form.email.includes('@')) return (errorMsg.value = 'Email inválido')
-  if (form.password.length < 6) return (errorMsg.value = 'La contraseña debe tener al menos 6 caracteres')
+  if (!form.email.trim()) return (errorMsg.value = 'Ingresá tu email'), false
+  if (!form.password.trim()) return (errorMsg.value = 'Ingresá tu contraseña'), false
+  if (!form.email.includes('@')) return (errorMsg.value = 'Email inválido'), false
+  if (form.password.length < 6) return (errorMsg.value = 'La contraseña debe tener al menos 6 caracteres'), false
   return true
+}
+
+// ✅ MOCK basado en tu BD (IDs reales)
+const USERS_MOCK = [
+  { userId: 4, email: 'juan.perez@example.com', password: 'juanperez', role: 'ADMIN' },
+  { userId: 5, email: 'juan.montiel@example.com', password: 'gero124.', role: 'ADMIN' },
+]
+
+// ✅ alias para seguir usando tus mails demo viejos si querés
+const ALIASES = {
+  'maniana@demo.com': 'juan.perez@example.com',
+  'tarde@demo.com': 'juan.montiel@example.com',
+  'admin@demo.com': 'juan.perez@example.com',
 }
 
 async function onSubmit() {
@@ -38,35 +52,33 @@ async function onSubmit() {
 
   try {
     loading.value = true
+    errorMsg.value = ''
 
-    // ✅ Login simulado (mock)
-    await new Promise((r) => setTimeout(r, 500))
+    // ✅ login simulado
+    await new Promise((r) => setTimeout(r, 250))
 
-    // Recordarme email
-    const email = form.email.trim().toLowerCase()
-    if (form.remember) localStorage.setItem('remember_email', email)
+    const rawEmail = form.email.trim().toLowerCase()
+    const email = (ALIASES[rawEmail] ?? rawEmail).toLowerCase()
+
+    // Recordarme email (guardamos el que escribió)
+    if (form.remember) localStorage.setItem('remember_email', rawEmail)
     else localStorage.removeItem('remember_email')
 
-    // ✅ Mock de roles/turnos para probar:
-    // - maniana@demo.com -> CASHIER MAÑANA
-    // - tarde@demo.com   -> CASHIER TARDE
-    // - admin@demo.com   -> ADMIN
-    let role = 'CASHIER'
-    let shift = 'MAÑANA'
-
-    if (email.includes('tarde')) shift = 'TARDE'
-    if (email.includes('admin')) role = 'ADMIN'
+    const user = USERS_MOCK.find((u) => u.email.toLowerCase() === email)
+    if (!user || user.password !== form.password) {
+      errorMsg.value = 'Credenciales inválidas'
+      return
+    }
 
     const session = {
       token: 'mock-token',
-      role,        // CASHIER | ADMIN
-      shift,       // MAÑANA | TARDE (solo para CASHIER)
-      userId: email
+      role: user.role,     // ADMIN (por ahora)
+      shift: form.shift,   // MAÑANA | TARDE
+      userId: user.userId, // ✅ NUMÉRICO REAL (4/5)
+      email: user.email,
     }
 
     setSession(session)
-
-    // (compatibilidad si te quedó código viejo revisando token)
     localStorage.setItem('token', 'mock-token')
 
     router.push({ name: 'dashboard' })
@@ -128,6 +140,14 @@ async function onSubmit() {
               </button>
             </div>
           </div>
+          <div class="field">
+  <label>Turno</label>
+  <select v-model="form.shift" :disabled="loading" style="width:100%; height:44px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.92); padding: 0 12px;">
+    <option value="MAÑANA">MAÑANA</option>
+    <option value="TARDE">TARDE</option>
+  </select>
+</div>
+
 
           <div class="row-options">
             <label class="remember">

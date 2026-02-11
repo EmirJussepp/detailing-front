@@ -114,7 +114,7 @@
 
 <script setup>
 import { onMounted, ref } from "vue";
-import { metodosPagoApi } from "../services/metodoPagoService"
+import { metodosPagoApi } from "../services/metodopagoService"
 
 
 const items = ref([]);

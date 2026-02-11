@@ -32,8 +32,11 @@ async function fetchAll() {
   resetMsgs()
   try {
     const { data } = await productosApi.list()
-    const arr = Array.isArray(data) ? data : []
-    items.value = arr.map(mapProducto)
+const arr = Array.isArray(data) ? data : []
+console.log("RAW[0]:", arr[0])
+console.log("MAP[0]:", mapProducto(arr[0]))
+items.value = arr.map(mapProducto)
+
   } catch (e) {
     error.value = e?.response?.data?.error || e?.message || "Error cargando productos"
     items.value = []
