@@ -5,7 +5,6 @@ export const cajaApi = {
     return http.post("/cajas/abrir", payload)
   },
 
-  // ✅ ahora recibe params y los manda por query
   abierta(params) {
     return http.get("/cajas/abierta", { params })
   },

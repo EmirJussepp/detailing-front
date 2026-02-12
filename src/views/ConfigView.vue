@@ -16,7 +16,7 @@
         </div>
       </div>
 
-      <div class="col-12 col-md-6 col-lg-4">
+      <!-- <div class="col-12 col-md-6 col-lg-4">
         <div class="card bg-dark border-0 shadow-sm h-100">
           <div class="card-body">
             <div class="fw-semibold text-light">Tipos de cliente</div>
@@ -26,7 +26,7 @@
             </RouterLink>
           </div>
         </div>
-      </div>
+      </div> -->
 
       <div class="col-12 col-md-6 col-lg-4">
   <div class="card bg-dark border-0 shadow-sm h-100">

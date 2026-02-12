@@ -1,34 +1,30 @@
 <script setup>
-import { computed, ref, onMounted } from "vue"
+import { computed, ref, onMounted, watch } from "vue"
 import { RouterLink } from "vue-router"
-import { getSession, getShift } from "../auth/session"
+import { getSession } from "../auth/session"
 
 import { cajaApi } from "../services/cajaApi"
 import { movimientosCajaApi } from "../services/movimientosCajaApi"
 
 const session = getSession() ?? null
-
-// mock-friendly: si no hay session todavía, cae a 1
 const userId = Number(session?.userId ?? 1)
 
 const todayISO = new Date().toISOString().slice(0, 10)
 const selectedFecha = ref(todayISO)
 
-// UI: session guarda 'MAÑANA' | 'TARDE'
-const shiftRaw = getShift?.() ?? session?.shift ?? "MAÑANA"
-// back: espera 'MANIANA' | 'TARDE'
-const selectedTurno = ref(shiftRaw === "MAÑANA" ? "MANIANA" : shiftRaw)
+// Turno guardado por user (UX cheta)
+const turnoKey = `caja_turno_v1:${userId}`
+const selectedTurno = ref("MANIANA") // MANIANA | TARDE
 
 const loading = ref(false)
 const errorMsg = ref("")
 const okMsg = ref("")
 
-const cajaAbierta = ref(null)
+const caja = ref(null)
 const saldoActual = ref(0)
-
 const movimientos = ref([])
 
-// inputs abrir
+// abrir
 const abrirMontoInicial = ref("")
 
 // modal movimientos
@@ -49,7 +45,6 @@ function toMoneyNumber(v) {
   return Number.isFinite(x) ? x : NaN
 }
 
-// respeta tu handler: GASTO/RETIRO => EGRESO, APORTE => INGRESO, AJUSTE => (por defecto EGRESO)
 function tipoPorConcepto(concepto) {
   if (concepto === "GASTO" || concepto === "RETIRO") return "EGRESO"
   if (concepto === "APORTE") return "INGRESO"
@@ -57,12 +52,11 @@ function tipoPorConcepto(concepto) {
 }
 
 async function loadMovimientos() {
-  if (!cajaAbierta.value?.cajaId) {
+  if (!caja.value?.cajaId) {
     movimientos.value = []
     return
   }
-
-  const { data } = await movimientosCajaApi.porCajaId(cajaAbierta.value.cajaId)
+  const { data } = await movimientosCajaApi.porCajaId(caja.value.cajaId)
   movimientos.value = Array.isArray(data) ? data : []
 }
 
@@ -70,30 +64,24 @@ async function refresh() {
   loading.value = true
   errorMsg.value = ""
   okMsg.value = ""
-
   try {
-    // ✅ tu back hoy devuelve "la caja abierta" sin params
     const { data } = await cajaApi.abierta({
-  fecha: selectedFecha.value,     // "YYYY-MM-DD"
-  turno: selectedTurno.value,     // "MANIANA" | "TARDE"
-  userId,                         // INT
-})
-cajaAbierta.value = data ?? null
+      fecha: selectedFecha.value,
+      turno: selectedTurno.value,
+      userId,
+    })
 
-saldoActual.value = 0
-movimientos.value = []
+    caja.value = data ?? null
+    saldoActual.value = 0
+    movimientos.value = []
 
-if (cajaAbierta.value?.cajaId) {
-  // saldo auto
-  const { data: saldoDto } = await cajaApi.saldo(cajaAbierta.value.cajaId)
-  saldoActual.value = Number(saldoDto?.saldoActual ?? 0)
-
-  // movimientos
-  await loadMovimientos()
-}
-
+    if (caja.value?.cajaId) {
+      const { data: saldoDto } = await cajaApi.saldo(caja.value.cajaId)
+      saldoActual.value = Number(saldoDto?.saldoActual ?? 0)
+      await loadMovimientos()
+    }
   } catch (e) {
-    cajaAbierta.value = null
+    caja.value = null
     saldoActual.value = 0
     movimientos.value = []
     errorMsg.value =
@@ -111,6 +99,12 @@ async function abrirCaja() {
   errorMsg.value = ""
   okMsg.value = ""
 
+  const hoy = new Date().toISOString().slice(0, 10)
+  if (selectedFecha.value !== hoy) {
+    errorMsg.value = "Solo podés abrir caja para HOY. Cambiá la fecha a hoy."
+    return
+  }
+
   const monto = toMoneyNumber(abrirMontoInicial.value)
   if (!Number.isFinite(monto) || monto < 0) {
     errorMsg.value = "Ingresá un monto inicial válido."
@@ -118,7 +112,6 @@ async function abrirCaja() {
   }
 
   try {
-    // ✅ tu AbrirCajaCommand actual: turno, montoInicial, userId (sin fecha)
     await cajaApi.abrir({
       turno: selectedTurno.value,
       montoInicial: monto,
@@ -142,15 +135,13 @@ async function cerrarCaja() {
   errorMsg.value = ""
   okMsg.value = ""
 
-  if (!cajaAbierta.value?.cajaId) {
+  if (!caja.value?.cajaId) {
     errorMsg.value = "No hay caja ABIERTA para cerrar."
     return
   }
 
   try {
-    // ✅ tu CerrarCajaCommand actual: userId (montoFinal lo calculás vos por saldo)
-    await cajaApi.cerrar(cajaAbierta.value.cajaId, { userId })
-
+    await cajaApi.cerrar(caja.value.cajaId, { userId })
     okMsg.value = `Caja cerrada ✅ (monto final auto: $ ${formatMoney(saldoActual.value)})`
     await refresh()
   } catch (e) {
@@ -167,7 +158,7 @@ async function crearMovimientoManual() {
   errorMsg.value = ""
   okMsg.value = ""
 
-  if (!cajaAbierta.value?.cajaId) {
+  if (!caja.value?.cajaId) {
     errorMsg.value = "Abrí una caja primero."
     return
   }
@@ -180,13 +171,12 @@ async function crearMovimientoManual() {
 
   try {
     await movimientosCajaApi.crear({
-      cajaId: cajaAbierta.value.cajaId,
+      cajaId: caja.value.cajaId,
       userId,
       tipo: tipoPorConcepto(movForm.value.concepto),
       concepto: movForm.value.concepto,
       descripcion: movForm.value.descripcion?.trim() || null,
       monto,
-      // metodoPagoId: null, // si querés agregarlo después
     })
 
     okMsg.value = "Movimiento registrado ✅"
@@ -207,17 +197,44 @@ async function crearMovimientoManual() {
 
 const ultimosMovs = computed(() => movimientos.value.slice(0, 10))
 
-onMounted(() => refresh())
+onMounted(() => {
+  const saved = localStorage.getItem(turnoKey)
+  if (saved === "MANIANA" || saved === "TARDE") selectedTurno.value = saved
+  refresh()
+})
+
+watch(selectedTurno, (v) => localStorage.setItem(turnoKey, v))
 </script>
+
 
 <template>
   <div>
-    <!-- Header -->
     <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
       <div>
         <h1 class="h4 mb-1">Caja</h1>
         <div class="text-secondary small">
-          Fecha: <b>{{ selectedFecha }}</b> — Turno: <b>{{ selectedTurno }}</b> — User: <b>{{ userId }}</b>
+          User: <b>{{ userId }}</b>
+        </div>
+
+        <div class="d-flex gap-2 mt-2 flex-wrap align-items-end">
+          <div>
+            <label class="form-label text-secondary mb-1">Fecha</label>
+            <input
+              type="date"
+              v-model="selectedFecha"
+              class="form-control bg-dark text-white border-secondary"
+              :disabled="loading"
+            />
+          </div>
+
+          <div>
+            <label class="form-label text-secondary mb-1">Turno</label>
+            <select v-model="selectedTurno" class="form-control bg-dark text-white border-secondary">
+  <option value="MANIANA">MAÑANA</option>
+  <option value="TARDE">TARDE</option>
+</select>
+
+          </div>
         </div>
       </div>
 
@@ -235,25 +252,23 @@ onMounted(() => refresh())
     <div v-if="errorMsg" class="alert alert-danger py-2">{{ errorMsg }}</div>
     <div v-if="okMsg" class="alert alert-success py-2">{{ okMsg }}</div>
 
-    <!-- Estado + acciones -->
     <div class="row g-3 mb-3">
-      <!-- Estado -->
       <div class="col-12 col-lg-5">
         <div class="card bg-panel border-0 shadow-sm h-100">
           <div class="card-body">
             <div class="text-secondary small">Estado</div>
 
-            <div v-if="cajaAbierta?.cajaId" class="mt-2">
+            <div v-if="caja?.cajaId" class="mt-2">
               <span class="badge text-bg-success">ABIERTA</span>
               <div class="text-secondary small mt-2">
-                Caja ID: <b>{{ cajaAbierta.cajaId }}</b>
+                Caja ID: <b>{{ caja.cajaId }}</b>
               </div>
 
               <hr class="border-secondary my-3" />
 
               <div class="d-flex justify-content-between">
                 <div class="text-secondary small">Monto inicial</div>
-                <div class="fw-bold">$ {{ formatMoney(cajaAbierta.montoInicial) }}</div>
+                <div class="fw-bold">$ {{ formatMoney(caja.montoInicial) }}</div>
               </div>
 
               <div class="d-flex justify-content-between mt-2">
@@ -263,13 +278,12 @@ onMounted(() => refresh())
             </div>
 
             <div v-else class="mt-2 text-secondary">
-              No hay caja abierta.
+              No hay caja abierta para esta fecha/turno.
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Acciones -->
       <div class="col-12 col-lg-7">
         <div class="card bg-panel border-0 shadow-sm h-100">
           <div class="card-body">
@@ -288,7 +302,7 @@ onMounted(() => refresh())
                 <button
                   class="btn btn-primary btn-accent w-100 mt-2"
                   @click="abrirCaja"
-                  :disabled="loading || !!cajaAbierta?.cajaId"
+                  :disabled="loading || !!caja?.cajaId"
                 >
                   Abrir caja
                 </button>
@@ -304,7 +318,7 @@ onMounted(() => refresh())
                 <button
                   class="btn btn-outline-light w-100 mt-2"
                   @click="cerrarCaja"
-                  :disabled="loading || !cajaAbierta?.cajaId"
+                  :disabled="loading || !caja?.cajaId"
                 >
                   Cerrar caja
                 </button>
@@ -314,7 +328,7 @@ onMounted(() => refresh())
             <div class="d-flex gap-2 mt-3">
               <button
                 class="btn btn-sm btn-primary btn-accent"
-                :disabled="!cajaAbierta?.cajaId"
+                :disabled="!caja?.cajaId"
                 @click="showMovModal = true"
               >
                 + Movimiento
@@ -322,19 +336,16 @@ onMounted(() => refresh())
             </div>
 
             <div class="text-secondary small mt-3">
-              Tip: Caja como dashboard, Ventas como pantalla dedicada. Movimientos manuales se cargan desde el modal.
+              Caja = dashboard por fecha/turno. Ventas = pantalla dedicada.
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Últimos movimientos -->
-    <div class="card bg-panel border-0 shadow-sm" v-if="cajaAbierta?.cajaId">
+    <div class="card bg-panel border-0 shadow-sm" v-if="caja?.cajaId">
       <div class="card-body">
-        <div class="d-flex align-items-center justify-content-between gap-2 mb-3">
-          <h2 class="h6 mb-0">Últimos movimientos</h2>
-        </div>
+        <h2 class="h6 mb-3">Últimos movimientos</h2>
 
         <div v-if="ultimosMovs.length === 0" class="text-secondary">
           No hay movimientos todavía.
@@ -368,14 +379,9 @@ onMounted(() => refresh())
             </tbody>
           </table>
         </div>
-
-        <div class="text-secondary small mt-3">
-          Después podemos sumar filtros y una pantalla /caja/movimientos con paginado.
-        </div>
       </div>
     </div>
 
-    <!-- MODAL MOVIMIENTO -->
     <div v-if="showMovModal" class="modal-backdrop" @click.self="showMovModal = false">
       <div class="modal-card">
         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -410,7 +416,7 @@ onMounted(() => refresh())
         </button>
 
         <div class="text-secondary small mt-2">
-          Nota: VENTA y PAGO_PROVEEDOR no se cargan manual (los genera el sistema).
+          Nota: ventas/pagos de proveedor generan movimientos automáticos.
         </div>
       </div>
     </div>

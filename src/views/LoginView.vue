@@ -141,14 +141,12 @@ async function onSubmit() {
             </div>
           </div>
           <div class="field">
-  <label>Turno</label>
+  <!-- <label>Turno</label>
   <select v-model="form.shift" :disabled="loading" style="width:100%; height:44px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.92); padding: 0 12px;">
     <option value="MAÑANA">MAÑANA</option>
     <option value="TARDE">TARDE</option>
-  </select>
+  </select> -->
 </div>
-
-
           <div class="row-options">
             <label class="remember">
               <input type="checkbox" v-model="form.remember" :disabled="loading" />

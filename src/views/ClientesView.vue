@@ -37,8 +37,13 @@ function mapCliente(c) {
 }
 
 function mapTipo(t) {
-  return { id: Number(t.tipoClienteId ?? t.id), name: t.name ?? "", descripcion: t.descripcion ?? null }
+  return {
+    id: Number(t.tipoClienteId ?? t.id),
+    name: t.name ?? t.nombre ?? "",
+    descripcion: t.descripcion ?? t.detalle ?? null,
+  }
 }
+
 
 function mapLoc(l) {
   return { id: Number(l.localidadId ?? l.id), nombre: l.nombre ?? l.name ?? "" }
