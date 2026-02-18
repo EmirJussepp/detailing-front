@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from "vue-router"
+
 import MainLayout from "../layouts/MainLayout.vue"
 import AuthLayout from "../layouts/AuthLayout.vue"
+
 import LoginView from "../views/LoginView.vue"
 import HomeView from "../views/HomeView.vue"
 import CajaView from "../views/CajaView.vue"
@@ -32,13 +34,14 @@ const routes = [
         name: "caja.movimientos",
         component: () => import("../views/MovimientosCajaView.vue"),
       },
+
       { path: "compras/proveedores", name: "compras.proveedores", component: ProveedoresView },
 
       { path: "clientes", name: "clientes", component: ClientesView },
       { path: "productos", name: "productos", component: ProductosView },
-    
 
       { path: "metodos-pago", name: "metodos-pago", component: MetodoPagoView },
+
       { path: "configuracion", name: "configuracion", component: () => import("../views/ConfigView.vue") },
       { path: "config/localidades", name: "config-localidades", component: () => import("../views/LocalidadView.vue") },
       { path: "config/tipos-cliente", name: "config-tipos-cliente", component: () => import("../views/TipoClienteView.vue") },
@@ -46,7 +49,6 @@ const routes = [
 
       { path: "ventas", redirect: "/caja/ventas" },
       { path: "proveedores", redirect: "/compras/proveedores" },
-      { path: "clientes", redirect: "/clientes/nueva" },
     ],
   },
 ]

@@ -35,6 +35,10 @@ function logout() {
           <li class="nav-item"><RouterLink class="nav-link" to="/ventas">Ventas</RouterLink></li>
           <li class="nav-item"><RouterLink class="nav-link" to="/clientes">Clientes</RouterLink></li>
           <li class="nav-item"><RouterLink class="nav-link" to="/proveedores">Proveedores</RouterLink></li>
+          <li class="nav-item">
+  <RouterLink class="nav-link" to="/caja/movimientos">Movimientos</RouterLink>
+</li>
+
 
           <li class="nav-item" v-if="isDev">
   <RouterLink class="nav-link text-warning" to="/api">

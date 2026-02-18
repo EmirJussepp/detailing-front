@@ -3,15 +3,54 @@ import { computed, ref, watch, nextTick } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { getSession, isAdmin, getShift } from "../auth/session"
 
+import SmartClientePicker from "../components/SmartClientePicker.vue"
+import SmartProductoPicker from "../components/SmartProductoPicker.vue"
+
 import { cajaApi } from "../services/cajaApi"
 import { ventasApi } from "../services/ventasApi"
 import { movimientosCajaApi } from "../services/movimientosCajaApi"
 import { productosApi } from "../services/productosApi"
 import { clientesApi } from "../services/clientesApi"
-import { tipoClientesApi } from "../services/tipoClienteService"
+import { tipoClientesApi } from "../services/tipoClienteService"   // ✅ nombre consistente
 import { pagosApi } from "../services/pagosApi"
-import { metodosPagoApi } from "../services/metodopagoService"
+import { metodosPagoApi } from "../services/metodopagoService"     // ✅ nombre consistente
+
 import { mapCliente } from "../mappers/clientes"
+
+// =========================
+// Search PRO (normalize + tokens + debounce)
+// =========================
+function normalizeTxt(v) {
+  return String(v ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+}
+
+function buildTokens(q) {
+  const s = normalizeTxt(q)
+  if (!s) return []
+  return s.split(/[\s,;|/\\]+/g).filter(Boolean)
+}
+
+function tokensMatch(blob, tokens) {
+  if (!tokens.length) return true
+  for (const t of tokens) {
+    if (!blob.includes(t)) return false
+  }
+  return true
+}
+
+function useDebouncedRef(sourceRef, delay = 180) {
+  const debounced = ref(sourceRef.value)
+  let t = null
+  watch(sourceRef, (v) => {
+    clearTimeout(t)
+    t = setTimeout(() => (debounced.value = v), delay)
+  })
+  return debounced
+}
 
 // =========================
 // Router
@@ -70,7 +109,6 @@ const turnoSel = ref(turnoUI(admin.value ? "MAÑANA" : getShift()))
 const errorMsg = ref("")
 const okMsg = ref("")
 
-
 // =========================
 // Helpers
 // =========================
@@ -102,7 +140,6 @@ function readLastCtx() {
   try { return JSON.parse(localStorage.getItem(LS_LAST_CTX) || "null") } catch { return null }
 }
 
-// Bucket por turno/usuario/fecha
 function bucketKey() {
   return `ventas:bucket_v1:${userIdInt.value}:${fecha.value}:${turnoBE(turnoSel.value)}`
 }
@@ -128,13 +165,12 @@ function isOpenEstado(e) {
 }
 function pickBestCtxForHeader() {
   const arr = readBucket()
-  // 1) Prioridad: ventas abiertas (pendiente/parcial) más recientes
-  const open = arr.filter(v => isOpenEstado(v.estado)).sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0))
+  const open = arr
+    .filter(v => isOpenEstado(v.estado))
+    .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0))
   if (open.length) return open[0]
-  // 2) fallback: última venta guardada
   const last = readLastCtx()
   if (last?.ventaId) return last
-  // 3) o cualquier cosa del bucket
   if (arr.length) return arr[0]
   return null
 }
@@ -148,7 +184,7 @@ const tiposLoaded = ref(false)
 async function fetchTiposClienteOnce() {
   if (tiposLoaded.value && tiposCliente.value.length) return
   try {
-    const { data } = await tipoClientesApi.list()
+    const { data } = await tipoClientesApi.list() // ✅ consistente
     tiposCliente.value = Array.isArray(data) ? data : []
   } catch {
     tiposCliente.value = []
@@ -159,7 +195,7 @@ async function fetchTiposClienteOnce() {
 
 function getTipoClienteNameById(tipoId) {
   const t = tiposCliente.value.find(x => Number(x.tipoClienteId ?? x.id) === Number(tipoId))
-  return String(t?.name ?? "").toUpperCase()
+  return String(t?.name ?? t?.nombre ?? "").toUpperCase()
 }
 function isMayoristaCliente(cliente) {
   if (!cliente?.tipoClienteId) return false
@@ -175,9 +211,46 @@ const cajaAbierta = ref(null)
 const movimientosCaja = ref([])
 const resumenCaja = ref({ ingresos: 0, egresos: 0, saldo: 0 })
 
-const ventas = ref([]) // aún sin GET por turno
+const ventas = ref([])
 const productos = ref([])
 const clientes = ref([])
+
+// =========================
+// Search Clientes PRO
+// =========================
+const clienteSearch = ref("")
+const clienteSearchDebounced = useDebouncedRef(clienteSearch, 160)
+
+const clientesById = computed(() => {
+  const m = new Map()
+  for (const c of (clientes.value || [])) m.set(Number(c.id), c)
+  return m
+})
+
+const clientesIndex = computed(() => {
+  const arr = clientes.value || []
+  return arr.map(c => {
+    const id = Number(c.id ?? c.clienteId ?? 0)
+    const blob = normalizeTxt([
+      id,
+      c.nombre,
+      c.apellido,
+      c.dni,
+      c.telefono,
+      c.email,
+      c.localidad,
+    ].filter(Boolean).join(" "))
+    return { c, id, blob }
+  })
+})
+
+const clientesFiltrados = computed(() => {
+  const tokens = buildTokens(clienteSearchDebounced.value)
+  if (!tokens.length) return clientes.value
+  return clientesIndex.value
+    .filter(x => tokensMatch(x.blob, tokens))
+    .map(x => x.c)
+})
 
 const clienteSelId = ref("")
 const clienteSel = computed(() => clientes.value.find(c => String(c.id) === String(clienteSelId.value)) ?? null)
@@ -189,7 +262,6 @@ const tipoClienteBadge = computed(() => {
 
 const canSell = computed(() => cajaCheck.value?.ok === true && Boolean(cajaAbierta.value?.cajaId))
 
-// ✅ si volvemos desde clientes con ?clienteId=...
 function applyClienteFromQuery() {
   const qid = route.query.clienteId
   if (!qid) return
@@ -197,14 +269,13 @@ function applyClienteFromQuery() {
   router.replace({ query: { ...route.query, clienteId: undefined } })
 }
 
-// Helper clienteTxt robusto
 function buildClienteTxtFromClienteObj(c) {
   if (!c) return "Sin cliente"
   return `${c.nombre} ${c.apellido || ""} (DNI: ${c.dni || "-"})`
 }
 function resolveClienteTxt(clienteId, fallbackTxt = "Sin cliente") {
   if (!clienteId) return "Sin cliente"
-  const c = clientes.value.find(x => Number(x.id) === Number(clienteId))
+  const c = clientesById.value.get(Number(clienteId))
   return c ? buildClienteTxtFromClienteObj(c) : (fallbackTxt || "Sin cliente")
 }
 
@@ -223,7 +294,7 @@ function normalizeMetodoPago(x) {
 async function fetchMetodosPagoOnce() {
   if (metodosLoaded.value && metodosPago.value.length) return
   try {
-    const { data } = await metodosPagoApi.list()
+    const { data } = await metodosPagoApi.list() // ✅ consistente
     const arr = Array.isArray(data) ? data : []
     metodosPago.value = arr.map(normalizeMetodoPago).filter(m => m.id > 0)
   } catch {
@@ -385,7 +456,6 @@ function clearForm() {
   }
 
   items.value = []
- 
   clienteSelId.value = ""
   selProductoId.value = ""
   itemQty.value = "1"
@@ -406,7 +476,6 @@ const pendientesDelTurno = computed(() => {
     .filter(v => isOpenEstado(v.estado))
     .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0))
 
-  // “rehidratar” cliente por si ya cargó clientes
   return open.map(v => ({
     ...v,
     clienteTxt: resolveClienteTxt(v.clienteId, v.clienteTxt || "Sin cliente"),
@@ -418,8 +487,6 @@ function formatTs(ts) {
   if (!Number.isFinite(n) || n <= 0) return "-"
   return new Date(n).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })
 }
-
-
 
 // =========================
 // Última venta (UI)
@@ -529,7 +596,14 @@ function addFromSearchEnter() {
 // =========================
 function normalizePago(p) {
   const id = Number(p?.pagoId ?? p?.id ?? p?.pago_id ?? 0)
-  const metodoPagoId = Number(p?.metodoPagoId ?? p?.metodo_pago_id ?? p?.metodoPago ?? p?.metodo_id ?? p?.metodoId ?? 0)
+  const metodoPagoId = Number(
+    p?.metodoPagoId ??
+    p?.metodo_pago_id ??
+    p?.metodoPago ??
+    p?.metodo_id ??
+    p?.metodoId ??
+    0
+  )
   const monto = Number(p?.monto ?? p?.importe ?? p?.amount ?? p?.total ?? p?.valor ?? 0)
   return {
     id,
@@ -565,7 +639,6 @@ const restanteVenta = computed(() => {
   return Math.max(0, r)
 })
 
-// ✅ PENDIENTE / PARCIAL / PAGADA
 const estadoPagoVenta = computed(() => {
   if (!pagoVentaId.value) return "-"
   const total = Number(pagoTotalVenta.value ?? 0)
@@ -634,8 +707,6 @@ async function restoreBestVentaAndPagos() {
   saveLastCtx({ ...best, estado, ts: Date.now() })
 }
 
-
-
 async function registrarPago() {
   if (pagoLoading.value) return
   pagoLoading.value = true
@@ -663,20 +734,15 @@ async function registrarPago() {
     const { data: res } = await pagosApi.create(payload)
     const ventaUpdated = res?.venta ?? res?.ventaActualizada ?? null
 
-    // Autoridad: recargar pagos + refrescar caja
     await loadPagosVenta(pagoVentaId.value)
     await refreshAfterPago()
 
     if (ventaUpdated?.total != null) pagoTotalVenta.value = Number(ventaUpdated.total)
 
     const total = Number(pagoTotalVenta.value ?? 0)
-const pagado = Number(totalPagadoVenta.value ?? 0)
+    const pagado = Number(totalPagadoVenta.value ?? 0)
+    const estadoFinal = pagado <= 0 ? "PENDIENTE" : pagado < total ? "PARCIAL" : "PAGADA"
 
-const estadoFinal =
-  pagado <= 0 ? "PENDIENTE" : pagado < total ? "PARCIAL" : "PAGADA"
-
-
-    // Sync UI header si corresponde
     if (lastVentaUI.value && Number(lastVentaUI.value.ventaId) === Number(pagoVentaId.value)) {
       lastVentaUI.value = {
         ...lastVentaUI.value,
@@ -685,7 +751,6 @@ const estadoFinal =
       }
     }
 
-    // Persistir: bucket + last_ctx
     const ctx = {
       ventaId: Number(pagoVentaId.value),
       total: Number(pagoTotalVenta.value ?? 0),
@@ -702,10 +767,8 @@ const estadoFinal =
 
     okMsg.value = `Pago registrado ✅ $ ${formatMoney(monto)} (${metodoNombreById(mp)})`
 
-    // UX: si queda restante, deja sugerido
     if (restanteVenta.value > 0) pagoMonto.value = String(restanteVenta.value)
     else pagoMonto.value = ""
-
   } catch (e) {
     errorMsg.value =
       e?.response?.data?.error ||
@@ -748,7 +811,7 @@ async function refreshProductos() {
     const { data } = await productosApi.list()
     const arr = Array.isArray(data) ? data : []
     productos.value = arr.map(p => ({
-      id: Number(p.productoId),
+      id: Number(p.productoId ?? p.id),
       nombre: p.nombre,
       precioVenta: Number(p.precioVenta ?? 0),
       precioCosto: Number(p.precioCosto ?? 0),
@@ -810,7 +873,6 @@ async function refreshAll() {
   await Promise.all([refreshProductos(), refreshClientes()])
   await refreshMovimientos()
 
-  // ✅ al volver: mostrar la mejor venta (pendiente/parcial) y pagos reales
   await restoreBestVentaAndPagos()
 }
 
@@ -825,7 +887,6 @@ async function refreshAfterPago() {
   await refreshMovimientos()
 }
 
-// ✅ SIN F5
 watch([fecha, turnoSel, admin], async () => {
   try {
     await refreshAll()
@@ -850,7 +911,6 @@ async function registrarVenta() {
       return
     }
 
-    // ✅ DECLARAR uid ACÁ
     const uid = Number(userIdInt.value)
     if (!Number.isFinite(uid) || uid <= 0) {
       throw new Error("userId inválido en sesión.")
@@ -863,7 +923,7 @@ async function registrarVenta() {
 
     const command = {
       cajaId: Number(cajaAbierta.value.cajaId),
-      userId: uid, // ✅ ahora sí existe
+      userId: uid,
       clienteId: clienteSel.value?.id ? Number(clienteSel.value.id) : null,
       detallesVenta,
     }
@@ -881,7 +941,6 @@ async function registrarVenta() {
       ? `Venta #${ventaId} registrada ✅ Total: $ ${formatMoney(total)}`
       : `Venta registrada ✅ Total: $ ${formatMoney(total)}`
 
-    // ✅ Persistimos (NO SE PISA: bucket)
     if (ventaId) {
       const clienteTxt = resolveClienteTxt(
         clienteSel.value?.id ? Number(clienteSel.value.id) : null,
@@ -902,16 +961,13 @@ async function registrarVenta() {
       if (isOpenEstado(ctx.estado)) upsertInBucket(ctx)
     }
 
-    // reset form
     items.value = []
-    
     selProductoId.value = ""
     itemQty.value = "1"
     productSearch.value = ""
 
     await refreshAfterVenta()
 
-    // abrir pagos
     if (ventaId) await openPagoModal(ventaId, total)
 
     nextTick(() => codeInputRef.value?.focus?.())
@@ -931,8 +987,6 @@ async function registrarVenta() {
   }
 }
 </script>
-
-
 
 <template>
   <div>
@@ -1227,8 +1281,6 @@ async function registrarVenta() {
           Hay ítems a pérdida. Ajustá el precio/costo.
         </div>
 
-      
-
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-3">
           <div class="text-secondary">
             Total (preview): <b class="fs-5">$ {{ formatMoney(totalCalc) }}</b>
@@ -1247,84 +1299,84 @@ async function registrarVenta() {
         </div>
       </div>
     </div>
+
     <!-- PENDIENTES / PARCIALES (DEL TURNO) -->
-<div class="card bg-panel border-0 shadow-sm mb-4">
-  <div class="card-body">
-    <div class="d-flex align-items-center justify-content-between gap-2 mb-3">
-      <h2 class="h6 mb-0">Pendientes / parciales del turno</h2>
-      <div class="text-secondary small">
-        {{ pendientesDelTurno.length }} venta(s) abierta(s)
+    <div class="card bg-panel border-0 shadow-sm mb-4">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between gap-2 mb-3">
+          <h2 class="h6 mb-0">Pendientes / parciales del turno</h2>
+          <div class="text-secondary small">
+            {{ pendientesDelTurno.length }} venta(s) abierta(s)
+          </div>
+        </div>
+
+        <div v-if="!pendientesDelTurno.length" class="text-secondary">
+          No hay ventas pendientes/parciales guardadas en este turno.
+        </div>
+
+        <div v-else class="table-responsive">
+          <table class="table table-dark table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th style="width: 90px">Venta</th>
+                <th>Cliente</th>
+                <th style="width: 120px">Estado</th>
+                <th style="width: 140px" class="text-end">Total</th>
+                <th style="width: 110px" class="text-secondary">Último</th>
+                <th style="width: 220px" class="text-end">Acciones</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              <tr v-for="v in pendientesDelTurno" :key="v.ventaId">
+                <td class="fw-semibold">#{{ v.ventaId }}</td>
+
+                <td class="text-secondary">
+                  {{ v.clienteTxt || "Sin cliente" }}
+                </td>
+
+                <td>
+                  <span
+                    class="badge"
+                    :class="String(v.estado).toUpperCase() === 'PARCIAL' ? 'bg-warning text-dark' : 'bg-secondary'"
+                  >
+                    {{ String(v.estado || 'PENDIENTE').toUpperCase() }}
+                  </span>
+                </td>
+
+                <td class="text-end fw-bold">$ {{ formatMoney(v.total) }}</td>
+
+                <td class="text-secondary small">{{ formatTs(v.ts) }}</td>
+
+                <td class="text-end">
+                  <div class="d-inline-flex gap-2">
+                    <button
+                      class="btn btn-sm btn-outline-light"
+                      @click="openPagoModal(v.ventaId, v.total)"
+                      :disabled="!cajaAbierta?.cajaId"
+                    >
+                      Pagar
+                    </button>
+
+                    <button
+                      class="btn btn-sm btn-outline-danger"
+                      title="Saca esta venta del listado local"
+                      @click="removeFromBucket(v.ventaId)"
+                    >
+                      Quitar
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="text-secondary small mt-2">
+            ✅ Sale del <b>bucket</b> (localStorage por fecha/turno). Si una venta queda <b>PAGADA</b>, se limpia sola.
+          </div>
+        </div>
       </div>
     </div>
-
-    <div v-if="!pendientesDelTurno.length" class="text-secondary">
-      No hay ventas pendientes/parciales guardadas en este turno.
-    </div>
-
-    <div v-else class="table-responsive">
-      <table class="table table-dark table-hover align-middle mb-0">
-        <thead>
-          <tr>
-            <th style="width: 90px">Venta</th>
-            <th>Cliente</th>
-            <th style="width: 120px">Estado</th>
-            <th style="width: 140px" class="text-end">Total</th>
-            <th style="width: 110px" class="text-secondary">Último</th>
-            <th style="width: 220px" class="text-end">Acciones</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          <tr v-for="v in pendientesDelTurno" :key="v.ventaId">
-            <td class="fw-semibold">#{{ v.ventaId }}</td>
-
-            <td class="text-secondary">
-              {{ v.clienteTxt || "Sin cliente" }}
-            </td>
-
-            <td>
-              <span
-                class="badge"
-                :class="String(v.estado).toUpperCase() === 'PARCIAL' ? 'bg-warning text-dark' : 'bg-secondary'"
-              >
-                {{ String(v.estado || 'PENDIENTE').toUpperCase() }}
-              </span>
-            </td>
-
-            <td class="text-end fw-bold">$ {{ formatMoney(v.total) }}</td>
-
-            <td class="text-secondary small">{{ formatTs(v.ts) }}</td>
-
-            <td class="text-end">
-              <div class="d-inline-flex gap-2">
-                <button
-                  class="btn btn-sm btn-outline-light"
-                  @click="openPagoModal(v.ventaId, v.total)"
-                  :disabled="!cajaAbierta?.cajaId"
-                >
-                  Pagar
-                </button>
-
-                <button
-                  class="btn btn-sm btn-outline-danger"
-                  title="Saca esta venta del listado local"
-                  @click="removeFromBucket(v.ventaId)"
-                >
-                  Quitar
-                </button>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div class="text-secondary small mt-2">
-        ✅ Sale del <b>bucket</b> (localStorage por fecha/turno). Si una venta queda <b>PAGADA</b>, se limpia sola.
-      </div>
-    </div>
-  </div>
-</div>
-
 
     <!-- LISTADO -->
     <div class="card bg-panel border-0 shadow-sm">
@@ -1351,17 +1403,16 @@ async function registrarVenta() {
             <div class="text-secondary small">
               Estado:
               <b
-  :class="
-    estadoPagoVenta === 'PAGADA'
-      ? 'text-success'
-      : estadoPagoVenta === 'PARCIAL'
-      ? 'text-warning'
-      : 'text-secondary'
-  "
->
-  {{ estadoPagoVenta }}
-</b>
-
+                :class="
+                  estadoPagoVenta === 'PAGADA'
+                    ? 'text-success'
+                    : estadoPagoVenta === 'PARCIAL'
+                    ? 'text-warning'
+                    : 'text-secondary'
+                "
+              >
+                {{ estadoPagoVenta }}
+              </b>
             </div>
             <div class="text-secondary small">
               Venta #{{ pagoVentaId }} — Caja #{{ cajaAbierta?.cajaId }}
@@ -1462,6 +1513,7 @@ async function registrarVenta() {
     </div>
   </div>
 </template>
+
 
 <style scoped>
 .bg-panel{ background: rgba(18, 22, 32, .92); }
