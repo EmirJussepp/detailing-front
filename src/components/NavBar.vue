@@ -38,17 +38,9 @@ function logout() {
           <li class="nav-item">
   <RouterLink class="nav-link" to="/caja/movimientos">Movimientos</RouterLink>
 </li>
-
-
-          <li class="nav-item" v-if="isDev">
-  <RouterLink class="nav-link text-warning" to="/api">
-    API Test
-  </RouterLink>
-</li>
-
           <!-- ✅ Configuración solo ADMIN -->
           <li class="nav-item" v-if="isAdmin">
-            <RouterLink class="nav-link" to="/configuracion">⚙ Configuración</RouterLink>
+            <RouterLink class="nav-link nav-link text-warning" to="/configuracion">⚙ Configuración</RouterLink>
           </li>
         </ul>
 

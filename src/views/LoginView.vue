@@ -1,24 +1,23 @@
 <script setup>
-import { reactive, ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import { setSession } from '../auth/session'
-import logo3byte from '../assets/img/logo3byte.png'
+import { reactive, ref, onMounted } from "vue"
+import { useRouter } from "vue-router"
+import { setSession } from "../auth/session"
+import { usuariosApi } from "../services/usuariosService" // <-- crealo si no existe
+import logo3byte from "../assets/img/logo3byte.png"
 
 const router = useRouter()
 
 const form = reactive({
-  email: '',
-  password: '',
+  email: "",
   remember: false,
-  shift: 'MAÑANA', // ✅ ahora lo elegís acá
+  shift: "MAÑANA", // si querés luego lo habilitamos
 })
 
 const loading = ref(false)
-const errorMsg = ref('')
-const showPassword = ref(false)
+const errorMsg = ref("")
 
 onMounted(() => {
-  const savedEmail = localStorage.getItem('remember_email')
+  const savedEmail = localStorage.getItem("remember_email")
   if (savedEmail) {
     form.email = savedEmail
     form.remember = true
@@ -26,25 +25,35 @@ onMounted(() => {
 })
 
 function validate() {
-  errorMsg.value = ''
-  if (!form.email.trim()) return (errorMsg.value = 'Ingresá tu email'), false
-  if (!form.password.trim()) return (errorMsg.value = 'Ingresá tu contraseña'), false
-  if (!form.email.includes('@')) return (errorMsg.value = 'Email inválido'), false
-  if (form.password.length < 6) return (errorMsg.value = 'La contraseña debe tener al menos 6 caracteres'), false
+  errorMsg.value = ""
+  const email = form.email.trim().toLowerCase()
+  if (!email) return (errorMsg.value = "Ingresá tu email"), false
+  if (!email.includes("@")) return (errorMsg.value = "Email inválido"), false
   return true
 }
 
-// ✅ MOCK basado en tu BD (IDs reales)
-const USERS_MOCK = [
-  { userId: 4, email: 'juan.perez@example.com', password: 'juanperez', role: 'ADMIN' },
-  { userId: 5, email: 'juan.montiel@example.com', password: 'gero124.', role: 'ADMIN' },
-]
-
-// ✅ alias para seguir usando tus mails demo viejos si querés
+// Opcional: aliases demo -> emails reales
 const ALIASES = {
-  'maniana@demo.com': 'juan.perez@example.com',
-  'tarde@demo.com': 'juan.montiel@example.com',
-  'admin@demo.com': 'juan.perez@example.com',
+  "maniana@demo.com": "juan.perez@example.com",
+  "tarde@demo.com": "juan.montiel@example.com",
+  "admin@demo.com": "juan.perez@example.com",
+}
+
+function normalizeUser(u) {
+  return {
+    userId: Number(u?.userId ?? u?.id ?? 0),
+    nombre: u?.nombre ?? null,
+    email: String(u?.email ?? "").toLowerCase(),
+    roleId: Number(u?.roleId ?? u?.role_id ?? 0) || null,
+    // Si tu back no devuelve roleName, lo “derivamos”:
+    roleName: u?.roleName ?? u?.role_name ?? null,
+  }
+}
+
+function roleFromRoleId(roleId) {
+  // ajustá si tus IDs son otros
+  if (Number(roleId) === 1) return "ADMIN"
+  return "CASHIER"
 }
 
 async function onSubmit() {
@@ -52,38 +61,44 @@ async function onSubmit() {
 
   try {
     loading.value = true
-    errorMsg.value = ''
-
-    // ✅ login simulado
-    await new Promise((r) => setTimeout(r, 250))
+    errorMsg.value = ""
 
     const rawEmail = form.email.trim().toLowerCase()
     const email = (ALIASES[rawEmail] ?? rawEmail).toLowerCase()
 
-    // Recordarme email (guardamos el que escribió)
-    if (form.remember) localStorage.setItem('remember_email', rawEmail)
-    else localStorage.removeItem('remember_email')
+    if (form.remember) localStorage.setItem("remember_email", rawEmail)
+    else localStorage.removeItem("remember_email")
 
-    const user = USERS_MOCK.find((u) => u.email.toLowerCase() === email)
-    if (!user || user.password !== form.password) {
-      errorMsg.value = 'Credenciales inválidas'
+    const { data } = await usuariosApi.list()
+    const arr = Array.isArray(data) ? data : []
+    const users = arr.map(normalizeUser).filter((u) => u.userId > 0 && u.email)
+
+    const user = users.find((u) => u.email === email)
+    if (!user) {
+      errorMsg.value = "Usuario no encontrado en el sistema"
       return
     }
 
     const session = {
-      token: 'mock-token',
-      role: user.role,     // ADMIN (por ahora)
-      shift: form.shift,   // MAÑANA | TARDE
-      userId: user.userId, // ✅ NUMÉRICO REAL (4/5)
+      token: "session-local", // por ahora “fake token”
+      userId: user.userId,
       email: user.email,
+      roleId: user.roleId,
+      roleName: user.roleName,
+      role: user.roleName ? String(user.roleName).toUpperCase() : roleFromRoleId(user.roleId),
+      shift: form.shift, // MAÑANA | TARDE (si lo activás)
     }
 
     setSession(session)
-    localStorage.setItem('token', 'mock-token')
+    localStorage.setItem("token", session.token)
 
-    router.push({ name: 'dashboard' })
+    router.push({ name: "dashboard" })
   } catch (e) {
-    errorMsg.value = 'Error al iniciar sesión'
+    errorMsg.value =
+      e?.response?.data?.error ||
+      e?.response?.data?.message ||
+      e?.message ||
+      "Error consultando usuarios"
   } finally {
     loading.value = false
   }
@@ -124,53 +139,41 @@ async function onSubmit() {
             />
           </div>
 
+          <!-- Turno (si lo querés activar, descomentá) -->
+          <!--
           <div class="field">
-            <label>Contraseña</label>
-
-            <div class="password-wrap">
-              <input
-                v-model="form.password"
-                :type="showPassword ? 'text' : 'password'"
-                placeholder="••••••••"
-                autocomplete="current-password"
-                :disabled="loading"
-              />
-              <button type="button" class="toggle" @click="showPassword = !showPassword" :disabled="loading">
-                {{ showPassword ? 'Ocultar' : 'Ver' }}
-              </button>
-            </div>
+            <label>Turno</label>
+            <select
+              v-model="form.shift"
+              :disabled="loading"
+              style="width:100%; height:44px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.92); padding: 0 12px;"
+            >
+              <option value="MAÑANA">MAÑANA</option>
+              <option value="TARDE">TARDE</option>
+            </select>
           </div>
-          <div class="field">
-  <!-- <label>Turno</label>
-  <select v-model="form.shift" :disabled="loading" style="width:100%; height:44px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.92); padding: 0 12px;">
-    <option value="MAÑANA">MAÑANA</option>
-    <option value="TARDE">TARDE</option>
-  </select> -->
-</div>
+          -->
+
           <div class="row-options">
             <label class="remember">
               <input type="checkbox" v-model="form.remember" :disabled="loading" />
               <span>Recordarme</span>
             </label>
 
-            <button type="button" class="linkish" disabled>
-              ¿Olvidaste tu contraseña?
-            </button>
+            <button type="button" class="linkish" disabled>¿Olvidaste tu contraseña?</button>
           </div>
 
           <button class="btn-primary" type="submit" :disabled="loading">
             <span v-if="loading" class="spinner"></span>
-            {{ loading ? 'Entrando…' : 'Entrar' }}
+            {{ loading ? "Entrando…" : "Entrar" }}
           </button>
 
           <div class="demo-hint">
-            <div class="text-secondary small mb-1">Usuarios demo:</div>
-            <div class="small">
-              <span class="chip">maniana@demo.com</span>
-              <span class="chip">tarde@demo.com</span>
-              <span class="chip">admin@demo.com</span>
+            <div class="text-secondary small mb-1">Tip:</div>
+            <div class="text-secondary small">
+              Ingresá un email que exista en tu tabla <b>usuarios</b>.
+              (Opcional: <span class="chip">maniana@demo.com</span> <span class="chip">tarde@demo.com</span>)
             </div>
-            <div class="text-secondary small mt-1">Contraseña: cualquiera (mín. 6)</div>
           </div>
         </form>
 
@@ -184,6 +187,7 @@ async function onSubmit() {
 </template>
 
 <style scoped>
+/* Tu mismo CSS (no lo toco) */
 .login-bg {
   position: fixed;
   inset: 0;
@@ -191,10 +195,8 @@ async function onSubmit() {
   min-height: 100vh;
   margin: 0;
   padding: 24px;
-
   display: grid;
   place-items: center;
-
   overflow: hidden;
   background:
     radial-gradient(900px 520px at 15% 10%, rgba(120, 92, 255, 0.10), transparent 60%),
@@ -203,14 +205,7 @@ async function onSubmit() {
   color: rgba(255, 255, 255, 0.92);
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 }
-
-.login-container {
-  width: 100%;
-  max-width: 420px;
-  position: relative;
-  z-index: 1;
-}
-
+.login-container { width: 100%; max-width: 420px; position: relative; z-index: 1; }
 .login-card {
   width: 100%;
   border-radius: 16px;
@@ -220,206 +215,72 @@ async function onSubmit() {
   box-shadow: 0 18px 55px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(10px);
 }
-
-/* Brand */
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
+.brand { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .brand-logo {
-  width: 46px;
-  height: 46px;
-  border-radius: 12px;
-  object-fit: contain;
+  width: 46px; height: 46px; border-radius: 12px; object-fit: contain;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 6px;
 }
-
-.product-name {
-  font-weight: 800;
-  letter-spacing: 0.2px;
-  font-size: 1.05rem;
-}
-
-.product-sub {
-  font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.55);
-}
-
-.brand-3byte {
-  color: rgba(170, 150, 255, 0.95);
-  font-weight: 700;
-}
-
-/* Title */
-.title h1 {
-  margin: 6px 0 2px;
-  font-size: 1.25rem;
-  font-weight: 800;
-}
-
-.title p {
-  margin: 0 0 12px;
-  color: rgba(255, 255, 255, 0.55);
-  font-size: 0.95rem;
-}
-
-/* Alert */
+.product-name { font-weight: 800; letter-spacing: 0.2px; font-size: 1.05rem; }
+.product-sub { font-size: 0.85rem; color: rgba(255, 255, 255, 0.55); }
+.brand-3byte { color: rgba(170, 150, 255, 0.95); font-weight: 700; }
+.title h1 { margin: 6px 0 2px; font-size: 1.25rem; font-weight: 800; }
+.title p { margin: 0 0 12px; color: rgba(255, 255, 255, 0.55); font-size: 0.95rem; }
 .alert-dark {
-  padding: 10px 12px;
-  border-radius: 12px;
+  padding: 10px 12px; border-radius: 12px;
   background: rgba(255, 80, 110, 0.12);
   border: 1px solid rgba(255, 80, 110, 0.22);
   color: rgba(255, 210, 220, 0.95);
   margin-bottom: 10px;
 }
-
-/* Form */
-.form {
-  display: grid;
-  gap: 12px;
-}
-
-.field label {
-  display: block;
-  margin-bottom: 6px;
-  font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.62);
-}
-
+.form { display: grid; gap: 12px; }
+.field label { display: block; margin-bottom: 6px; font-size: 0.8rem; color: rgba(255, 255, 255, 0.62); }
 .field input {
-  width: 100%;
-  height: 44px;
-  border-radius: 12px;
+  width: 100%; height: 44px; border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.10);
   background: rgba(255, 255, 255, 0.05);
   color: rgba(255, 255, 255, 0.92);
   padding: 0 12px;
 }
-
-.field input::placeholder {
-  color: rgba(255, 255, 255, 0.35);
-}
-
+.field input::placeholder { color: rgba(255, 255, 255, 0.35); }
 .field input:focus {
   outline: none;
   border-color: rgba(170, 150, 255, 0.55);
   box-shadow: 0 0 0 4px rgba(170, 150, 255, 0.12);
 }
-
-.password-wrap {
-  position: relative;
-}
-
-.toggle {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  border: none;
-  background: transparent;
-  color: rgba(170, 150, 255, 0.95);
-  font-weight: 700;
-  font-size: 0.8rem;
-  cursor: pointer;
-  padding: 4px 6px;
-}
-
-.row-options {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 2px;
-}
-
-.remember {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.62);
-}
-
-.remember input {
-  accent-color: rgba(170, 150, 255, 0.95);
-}
-
-.linkish {
-  border: none;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.35);
-  font-size: 0.85rem;
-  cursor: not-allowed;
-}
-
+.row-options { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 2px; }
+.remember { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: rgba(255, 255, 255, 0.62); }
+.remember input { accent-color: rgba(170, 150, 255, 0.95); }
+.linkish { border: none; background: transparent; color: rgba(255, 255, 255, 0.35); font-size: 0.85rem; cursor: not-allowed; }
 .btn-primary {
-  height: 44px;
-  border-radius: 12px;
+  height: 44px; border-radius: 12px;
   border: 1px solid rgba(170, 150, 255, 0.35);
   background: rgba(170, 150, 255, 0.14);
   color: rgba(255, 255, 255, 0.92);
-  font-weight: 800;
-  letter-spacing: 0.2px;
-  cursor: pointer;
-  margin-top: 6px;
+  font-weight: 800; letter-spacing: 0.2px;
+  cursor: pointer; margin-top: 6px;
 }
-
-.btn-primary:hover {
-  background: rgba(170, 150, 255, 0.20);
-}
-
-.btn-primary:disabled {
-  opacity: 0.75;
-  cursor: not-allowed;
-}
-
+.btn-primary:hover { background: rgba(170, 150, 255, 0.20); }
+.btn-primary:disabled { opacity: 0.75; cursor: not-allowed; }
 .spinner {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
+  display: inline-block; width: 14px; height: 14px;
   border: 2px solid rgba(255,255,255,0.25);
   border-top-color: rgba(255,255,255,0.85);
   border-radius: 999px;
-  margin-right: 8px;
-  vertical-align: -2px;
+  margin-right: 8px; vertical-align: -2px;
   animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-
-.demo-hint{
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid rgba(255,255,255,0.06);
-}
+.demo-hint { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06); }
 .chip {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 999px;
+  display: inline-block; padding: 4px 10px; border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.10);
   background: rgba(255, 255, 255, 0.05);
-  margin-right: 6px;
-  margin-top: 6px;
+  margin-right: 6px; margin-top: 6px;
 }
-
-.footer {
-  margin-top: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: rgba(255, 255, 255, 0.45);
-  font-size: 0.85rem;
-}
-
-.muted {
-  color: rgba(255,255,255,0.45);
-}
-
+.footer { margin-top: 14px; display: flex; align-items: center; justify-content: center; gap: 10px; color: rgba(255, 255, 255, 0.45); font-size: 0.85rem; }
+.muted { color: rgba(255,255,255,0.45); }
 @media (max-width: 420px) {
   .login-bg { padding: 16px; }
   .login-card { padding: 18px 16px; }

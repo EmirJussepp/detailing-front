@@ -21,3 +21,6 @@ http.interceptors.response.use(
     return Promise.reject(err)
   }
 )
+
+// ✅ ESTO ES LO QUE TE FALTA
+export default http

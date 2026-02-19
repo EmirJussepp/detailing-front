@@ -1,4 +1,5 @@
-import http from "./http";
+import { http } from "./http"
+
 
 export const cajaApi = {
   abrir(payload) {

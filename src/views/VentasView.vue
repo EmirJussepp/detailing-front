@@ -1048,37 +1048,7 @@ async function registrarVenta() {
     <!-- MOVIMIENTOS DEL TURNO -->
     <div class="card bg-panel border-0 shadow-sm mb-4" v-if="cajaAbierta?.cajaId">
       <div class="card-body">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-          <h2 class="h6 mb-0">Movimientos del turno</h2>
-          <div class="text-secondary small">
-            Caja #{{ cajaAbierta.cajaId }} · Saldo: <b>$ {{ formatMoney(resumenCaja.saldo) }}</b>
-          </div>
-        </div>
-
-        <div v-if="!movimientosCaja.length" class="text-secondary small">
-          No hay movimientos todavía.
-        </div>
-
-        <div v-else class="table-responsive">
-          <table class="table table-dark table-hover align-middle mb-0">
-            <thead>
-              <tr>
-                <th>Tipo</th>
-                <th>Concepto</th>
-                <th>Descripción</th>
-                <th class="text-end">Monto</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="m in movimientosCaja" :key="m.movimientoId ?? m.id">
-                <td class="text-secondary">{{ m.tipo }}</td>
-                <td class="text-secondary">{{ m.concepto ?? "-" }}</td>
-                <td class="text-secondary">{{ m.descripcion ?? "-" }}</td>
-                <td class="text-end fw-bold">$ {{ formatMoney(m.monto) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        
 
         <div class="text-secondary small mt-2">
           Ingresos: <b>$ {{ formatMoney(resumenCaja.ingresos) }}</b> ·

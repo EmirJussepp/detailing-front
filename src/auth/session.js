@@ -1,25 +1,37 @@
+const LS_KEY = "session_v2"
+
+export function setSession(session) {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(session))
+  } catch {}
+}
+
 export function getSession() {
   try {
-    const raw = localStorage.getItem("session")
-    return raw ? JSON.parse(raw) : null
+    return JSON.parse(localStorage.getItem(LS_KEY) || "null")
   } catch {
     return null
   }
 }
 
-export function setSession(session) {
-  localStorage.setItem("session", JSON.stringify(session))
-}
-
 export function clearSession() {
-  localStorage.removeItem("session")
-  localStorage.removeItem("token")
+  try {
+    localStorage.removeItem(LS_KEY)
+  } catch {}
 }
 
 export function isAdmin() {
-  return getSession()?.role === "ADMIN"
+  const s = getSession()
+  const roleId = Number(s?.roleId ?? 0)
+  const roleName = String(s?.roleName ?? "").toUpperCase()
+  return roleId === 1 || roleName === "ADMIN"
 }
 
 export function getShift() {
-  return getSession()?.shift // 'MAÑANA' | 'TARDE'
+  const s = getSession()
+  const t = String(s?.shift ?? "").toUpperCase()
+  // tu back usa MANIANA/TARDE
+  if (t === "MANIANA" || t === "MAÑANA") return "MANIANA"
+  if (t === "TARDE") return "TARDE"
+  return "MANIANA"
 }

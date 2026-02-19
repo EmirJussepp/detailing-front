@@ -8,3 +8,4 @@ export const movimientosCajaApi = {
     return http.post(`/movimientos-caja`, payload)
   },
 }
+
