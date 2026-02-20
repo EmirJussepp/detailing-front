@@ -1,16 +1,17 @@
 <script setup>
 import { reactive, ref, onMounted } from "vue"
-import { useRouter } from "vue-router"
+import { useRoute, useRouter } from "vue-router"
 import { setSession } from "../auth/session"
-import { usuariosApi } from "../services/usuariosService" // <-- crealo si no existe
+import { usuariosApi } from "../services/usuariosService"
 import logo3byte from "../assets/img/logo3byte.png"
 
 const router = useRouter()
+const route = useRoute()
 
 const form = reactive({
   email: "",
   remember: false,
-  shift: "MAÑANA", // si querés luego lo habilitamos
+  shift: "MAÑANA",
 })
 
 const loading = ref(false)
@@ -24,75 +25,97 @@ onMounted(() => {
   }
 })
 
+function normalizeEmail(v) {
+  return String(v || "").trim().toLowerCase()
+}
+
 function validate() {
   errorMsg.value = ""
-  const email = form.email.trim().toLowerCase()
+  const email = normalizeEmail(form.email)
   if (!email) return (errorMsg.value = "Ingresá tu email"), false
   if (!email.includes("@")) return (errorMsg.value = "Email inválido"), false
   return true
 }
 
-// Opcional: aliases demo -> emails reales
+// Aliases demo -> emails reales (mantenemos tu idea)
 const ALIASES = {
   "maniana@demo.com": "juan.perez@example.com",
   "tarde@demo.com": "juan.montiel@example.com",
   "admin@demo.com": "juan.perez@example.com",
 }
 
+// ✅ Admin temporal mientras el back no devuelva roleId
+const ADMIN_EMAILS = new Set([
+  "juan.perez@example.com",
+  // agregá acá los emails reales que querés que entren como ADMIN
+])
+
 function normalizeUser(u) {
   return {
     userId: Number(u?.userId ?? u?.id ?? 0),
-    nombre: u?.nombre ?? null,
-    email: String(u?.email ?? "").toLowerCase(),
+    name: u?.name ?? u?.nombre ?? null,
+    email: normalizeEmail(u?.email),
+    // cuando tu compañero lo agregue, esto va a empezar a venir ✅
     roleId: Number(u?.roleId ?? u?.role_id ?? 0) || null,
-    // Si tu back no devuelve roleName, lo “derivamos”:
     roleName: u?.roleName ?? u?.role_name ?? null,
   }
 }
 
-function roleFromRoleId(roleId) {
-  // ajustá si tus IDs son otros
-  if (Number(roleId) === 1) return "ADMIN"
-  return "CASHIER"
+function resolveRole(user) {
+  // 1) Si viene roleName del back, lo usamos
+  const rn = user?.roleName ? String(user.roleName).toUpperCase() : null
+  if (rn) return { role: rn, roleId: user.roleId ?? null, roleName: rn }
+
+  // 2) Si viene roleId, derivamos
+  if (Number(user?.roleId) === 1) return { role: "ADMIN", roleId: 1, roleName: "ADMIN" }
+  if (Number(user?.roleId) === 2) return { role: "CASHIER", roleId: 2, roleName: "CASHIER" }
+
+  // 3) Si no viene nada (situación actual), admin por whitelist de email
+  if (ADMIN_EMAILS.has(user.email)) return { role: "ADMIN", roleId: 1, roleName: "ADMIN" }
+
+  // default
+  return { role: "CASHIER", roleId: 2, roleName: "CASHIER" }
 }
 
 async function onSubmit() {
   if (!validate()) return
 
+  loading.value = true
+  errorMsg.value = ""
   try {
-    loading.value = true
-    errorMsg.value = ""
-
-    const rawEmail = form.email.trim().toLowerCase()
-    const email = (ALIASES[rawEmail] ?? rawEmail).toLowerCase()
+    const rawEmail = normalizeEmail(form.email)
+    const email = normalizeEmail(ALIASES[rawEmail] ?? rawEmail)
 
     if (form.remember) localStorage.setItem("remember_email", rawEmail)
     else localStorage.removeItem("remember_email")
 
     const { data } = await usuariosApi.list()
     const arr = Array.isArray(data) ? data : []
-    const users = arr.map(normalizeUser).filter((u) => u.userId > 0 && u.email)
+    const users = arr.map(normalizeUser).filter(u => u.userId > 0 && u.email)
 
-    const user = users.find((u) => u.email === email)
+    const user = users.find(u => u.email === email)
     if (!user) {
       errorMsg.value = "Usuario no encontrado en el sistema"
       return
     }
 
+    const r = resolveRole(user)
+
     const session = {
-      token: "session-local", // por ahora “fake token”
       userId: user.userId,
       email: user.email,
-      roleId: user.roleId,
-      roleName: user.roleName,
-      role: user.roleName ? String(user.roleName).toUpperCase() : roleFromRoleId(user.roleId),
-      shift: form.shift, // MAÑANA | TARDE (si lo activás)
+      name: user.name,
+      roleId: r.roleId,
+      roleName: r.roleName,
+      role: r.role,
+      shift: form.shift,
     }
 
     setSession(session)
-    localStorage.setItem("token", session.token)
 
-    router.push({ name: "dashboard" })
+    // ✅ respetar redirect del guard (si existe)
+    const redirect = typeof route.query.redirect === "string" ? route.query.redirect : null
+    router.replace(redirect || { name: "dashboard" })
   } catch (e) {
     errorMsg.value =
       e?.response?.data?.error ||

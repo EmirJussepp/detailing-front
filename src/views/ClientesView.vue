@@ -1,9 +1,13 @@
+<!-- src/views/ClientesView.vue -->
 <script setup>
 import { onMounted, ref, computed } from "vue"
-import { clientesApi } from "../services/clientesService"
+import { useRouter } from "vue-router"
+
+import { clientesApi } from "../services/clientesApi"
 import { tipoClientesApi } from "../services/tipoClienteService"
 import { localidadesApi } from "../services/localidadService"
 
+const router = useRouter()
 
 const items = ref([])
 const tipos = ref([])
@@ -14,13 +18,17 @@ const saving = ref(false)
 const error = ref("")
 const ok = ref("")
 
+// form
 const nombre = ref("")
 const apellido = ref("")
 const dni = ref("")
 const telefono = ref("")
 const email = ref("")
-const localidadId = ref("")     // "" = null
-const tipoClienteId = ref("")   // requerido
+const localidadId = ref("") // "" => null
+const tipoClienteId = ref("") // requerido
+
+// filtro simple
+const search = ref("")
 
 function mapCliente(c) {
   return {
@@ -40,10 +48,8 @@ function mapTipo(t) {
   return {
     id: Number(t.tipoClienteId ?? t.id),
     name: t.name ?? t.nombre ?? "",
-    descripcion: t.descripcion ?? t.detalle ?? null,
   }
 }
-
 
 function mapLoc(l) {
   return { id: Number(l.localidadId ?? l.id), nombre: l.nombre ?? l.name ?? "" }
@@ -51,20 +57,28 @@ function mapLoc(l) {
 
 const tipoById = computed(() => {
   const m = new Map()
-  tipos.value.forEach(t => m.set(String(t.id), t))
+  tipos.value.forEach((t) => m.set(String(t.id), t))
   return m
 })
 
 const locById = computed(() => {
   const m = new Map()
-  localidades.value.forEach(l => m.set(String(l.id), l))
+  localidades.value.forEach((l) => m.set(String(l.id), l))
   return m
 })
 
-const activos = computed(() => items.value.filter(c => c.activo !== false))
+const activos = computed(() => items.value.filter((c) => c.activo !== false))
+
+const filtrados = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  if (!q) return activos.value
+  return activos.value.filter((c) => {
+    const blob = `${c.id} ${c.nombre} ${c.apellido ?? ""} ${c.dni ?? ""} ${c.telefono ?? ""} ${c.email ?? ""}`.toLowerCase()
+    return blob.includes(q)
+  })
+})
 
 async function fetchMaestros() {
-  // Tipos
   try {
     const { data } = await tipoClientesApi.list()
     const arr = Array.isArray(data) ? data : []
@@ -73,7 +87,6 @@ async function fetchMaestros() {
     tipos.value = []
   }
 
-  // Localidades
   try {
     const { data } = await localidadesApi.list()
     const arr = Array.isArray(data) ? data : []
@@ -104,7 +117,6 @@ function resetForm() {
   telefono.value = ""
   email.value = ""
   localidadId.value = ""
-  // tipoClienteId lo dejamos como estaba (más cómodo)
 }
 
 async function create() {
@@ -140,9 +152,12 @@ async function create() {
   }
 }
 
+function goCuentaCorriente(clienteId) {
+  router.push({ name: "caja.cuenta", query: { clienteId: String(clienteId) } })
+}
+
 onMounted(async () => {
   await fetchMaestros()
-  // default tipo si hay
   if (!tipoClienteId.value && tipos.value.length) tipoClienteId.value = String(tipos.value[0].id)
   await fetchAll()
 })
@@ -150,28 +165,34 @@ onMounted(async () => {
 
 <template>
   <div>
-    <!-- Header (igual a Ventas) -->
     <div class="mb-3">
       <h1 class="h4 mb-1">Clientes</h1>
       <div class="text-secondary">Listar + Crear (Backend)</div>
     </div>
 
-    <!-- Alerts -->
     <div v-if="error" class="alert alert-danger py-2">{{ error }}</div>
     <div v-if="ok" class="alert alert-success py-2">{{ ok }}</div>
 
-    <!-- Toolbar (igual a Ventas) -->
+    <!-- toolbar -->
     <div class="card bg-panel border-0 shadow-sm mb-4">
       <div class="card-body">
         <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between">
           <div class="text-secondary small">
-            Total: <b>{{ activos.length }}</b>
+            Total activos: <b>{{ activos.length }}</b>
           </div>
 
-          <div class="d-flex gap-2">
+          <div class="d-flex gap-2 flex-wrap">
+            <input
+              v-model="search"
+              class="form-control bg-dark text-white border-secondary"
+              style="max-width: 320px"
+              placeholder="Buscar (nombre / dni / tel / email)…"
+            />
+
             <button class="btn btn-outline-light" @click="fetchAll" :disabled="loading">
               Refrescar
             </button>
+
             <button class="btn btn-primary btn-accent" @click="create" :disabled="saving">
               {{ saving ? "Guardando..." : "+ Crear cliente" }}
             </button>
@@ -180,7 +201,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Form (igual a Ventas) -->
+    <!-- form -->
     <div class="card bg-panel border-0 shadow-sm mb-4">
       <div class="card-body">
         <h2 class="h6 mb-3">Nuevo cliente</h2>
@@ -212,11 +233,9 @@ onMounted(async () => {
           </div>
 
           <div class="col-12 col-md-2">
-            <label class="form-label text-secondary">Tipo de cliente</label>
+            <label class="form-label text-secondary">Tipo</label>
             <select v-model="tipoClienteId" class="form-select bg-dark text-white border-secondary">
-              <option v-for="t in tipos" :key="t.id" :value="String(t.id)">
-                {{ t.name }}
-              </option>
+              <option v-for="t in tipos" :key="t.id" :value="String(t.id)">{{ t.name }}</option>
             </select>
           </div>
 
@@ -224,16 +243,14 @@ onMounted(async () => {
             <label class="form-label text-secondary">Localidad</label>
             <select v-model="localidadId" class="form-select bg-dark text-white border-secondary">
               <option value="">Sin localidad</option>
-              <option v-for="l in localidades" :key="l.id" :value="String(l.id)">
-                {{ l.nombre }}
-              </option>
+              <option v-for="l in localidades" :key="l.id" :value="String(l.id)">{{ l.nombre }}</option>
             </select>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Lista (igual a Ventas) -->
+    <!-- list -->
     <div class="card bg-panel border-0 shadow-sm">
       <div class="card-body">
         <div v-if="loading" class="text-secondary">Cargando...</div>
@@ -242,45 +259,68 @@ onMounted(async () => {
           <table class="table table-dark table-hover align-middle mb-0">
             <thead>
               <tr>
-                <th style="width: 80px">ID</th>
+                <th style="width: 70px">ID</th>
                 <th>Cliente</th>
                 <th>DNI</th>
                 <th>Teléfono</th>
                 <th>Email</th>
-                <th style="width: 160px">Tipo</th>
-                <th style="width: 180px">Localidad</th>
+                <th style="width: 150px">Tipo</th>
+                <th style="width: 160px">Localidad</th>
+                <th style="width: 190px" class="text-end">Acciones</th>
               </tr>
             </thead>
 
             <tbody>
-              <tr v-for="c in activos" :key="c.id">
+              <tr v-for="c in filtrados" :key="c.id">
                 <td class="text-secondary">{{ c.id }}</td>
-                <td class="fw-semibold">{{ c.nombre }} {{ c.apellido || "" }}</td>
+
+                <td class="fw-semibold">
+                  {{ c.nombre }} {{ c.apellido || "" }}
+                </td>
+
                 <td class="text-secondary">{{ c.dni || "-" }}</td>
                 <td class="text-secondary">{{ c.telefono || "-" }}</td>
                 <td class="text-secondary">{{ c.email || "-" }}</td>
+
                 <td class="text-secondary">
                   {{ tipoById.get(String(c.tipoClienteId))?.name || ("#" + (c.tipoClienteId ?? "-")) }}
                 </td>
+
                 <td class="text-secondary">
                   {{ locById.get(String(c.localidadId))?.nombre || "-" }}
                 </td>
+
+                <td class="text-end">
+                  <button class="btn btn-sm btn-outline-light" @click="goCuentaCorriente(c.id)">
+                    Ver cuenta
+                  </button>
+                </td>
               </tr>
 
-              <tr v-if="activos.length === 0">
-                <td colspan="7" class="text-secondary">No hay clientes activos.</td>
+              <tr v-if="filtrados.length === 0">
+                <td colspan="8" class="text-secondary">No hay resultados.</td>
               </tr>
             </tbody>
           </table>
+
+          <div class="text-secondary small mt-2">
+            ✅ “Ver cuenta” abre la cuenta corriente real del backend.
+          </div>
         </div>
       </div>
     </div>
-
   </div>
 </template>
 
 <style scoped>
-.bg-panel{ background: rgba(18, 22, 32, .92); }
-.btn-accent{ background: #6f5cff; border: none; }
-.btn-accent:hover{ background: #5f4de6; }
+.bg-panel {
+  background: rgba(18, 22, 32, 0.92);
+}
+.btn-accent {
+  background: #6f5cff;
+  border: none;
+}
+.btn-accent:hover {
+  background: #5f4de6;
+}
 </style>

@@ -1,10 +1,13 @@
-import { http } from "./http";
+import { http } from "./http"
 
 export const ventasApi = {
-  create(command) {
-    return http.post("/ventas", command);
+  list() {
+    return http.get("/ventas")
   },
-  getById(id) {
-    return http.get(`/ventas/${id}`);
+  create(payload) {
+    return http.post("/ventas", payload)
   },
-};
+  porId(id) {
+    return http.get(`/ventas/${id}`)
+  },
+}

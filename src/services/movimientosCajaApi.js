@@ -5,7 +5,6 @@ export const movimientosCajaApi = {
     return http.get(`/movimientos-caja/caja/${cajaId}`)
   },
   crear(payload) {
-    return http.post(`/movimientos-caja`, payload)
+    return http.post("/movimientos-caja", payload)
   },
 }
-

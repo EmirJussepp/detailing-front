@@ -13,7 +13,7 @@ import ProductosView from "../views/ProductosView.vue"
 import ProveedoresView from "../views/ProveedoresView.vue"
 import MetodoPagoView from "../views/MetodoPagoView.vue"
 
-import { getSession, isAdmin } from "../auth/session"
+import { getSession } from "../auth/session"
 
 const routes = [
   // Auth
@@ -21,6 +21,7 @@ const routes = [
     path: "/login",
     component: AuthLayout,
     children: [{ path: "", name: "login", component: LoginView }],
+    meta: { public: true }, // ✅
   },
 
   // App
@@ -29,56 +30,75 @@ const routes = [
     component: MainLayout,
     children: [
       { path: "", redirect: "/dashboard" },
-      { path: "dashboard", name: "dashboard", component: HomeView },
+
+      { path: "dashboard", name: "dashboard", component: HomeView, meta: { requiresAuth: true } },
 
       // Caja
-      { path: "caja", name: "caja.dashboard", component: CajaView },
-      { path: "caja/ventas", name: "caja.ventas", component: VentasView },
+      { path: "caja", name: "caja.dashboard", component: CajaView, meta: { requiresAuth: true } },
+      { path: "caja/ventas", name: "caja.ventas", component: VentasView, meta: { requiresAuth: true } },
       {
         path: "caja/movimientos",
         name: "caja.movimientos",
         component: () => import("../views/MovimientosCajaView.vue"),
+        meta: { requiresAuth: true },
       },
+      
 
       // Compras / Proveedores
-      { path: "compras/proveedores", name: "compras.proveedores", component: ProveedoresView },
+      {
+        path: "compras/proveedores",
+        name: "compras.proveedores",
+        component: ProveedoresView,
+        meta: { requiresAuth: true },
+      },
 
       // Maestros
-      { path: "clientes", name: "clientes", component: ClientesView },
-      { path: "productos", name: "productos", component: ProductosView },
+      { path: "clientes", name: "clientes", component: ClientesView, meta: { requiresAuth: true } },
+      { path: "productos", name: "productos", component: ProductosView, meta: { requiresAuth: true } },
 
-      // Métodos de pago (si lo querés como pantalla directa)
-      { path: "metodos-pago", name: "metodos-pago", component: MetodoPagoView },
+      // Métodos de pago (pantalla directa)
+      { path: "metodos-pago", name: "metodos-pago", component: MetodoPagoView, meta: { requiresAuth: true } },
 
-      // Config (solo ADMIN si querés)
+      // Config (solo ADMIN)
       {
         path: "configuracion",
         name: "configuracion",
         component: () => import("../views/ConfigView.vue"),
-        meta: { requiresAdmin: true },
+        meta: { requiresAuth: true, roles: ["ADMIN"] },
       },
       {
         path: "config/localidades",
         name: "config-localidades",
         component: () => import("../views/LocalidadView.vue"),
-        meta: { requiresAdmin: true },
+        meta: { requiresAuth: true, roles: ["ADMIN"] },
       },
       {
         path: "config/tipos-cliente",
         name: "config-tipos-cliente",
         component: () => import("../views/TipoClienteView.vue"),
-        meta: { requiresAdmin: true },
+        meta: { requiresAuth: true, roles: ["ADMIN"] },
       },
       {
         path: "config/metodos-pago",
         name: "config-metodos-pago",
         component: () => import("../views/MetodoPagoView.vue"),
-        meta: { requiresAdmin: true },
+        meta: { requiresAuth: true, roles: ["ADMIN"] },
       },
+      // src/router/index.js (solo el agregado)
+{
+  path: "caja/cuenta-corriente",
+  name: "caja.cuenta",
+  component: () => import("../views/CuentaCorrienteView.vue"),
+},
+
+
+
 
       // Redirects “cortos”
       { path: "ventas", redirect: "/caja/ventas" },
       { path: "proveedores", redirect: "/compras/proveedores" },
+      { path: "cuenta", redirect: "/cuenta-corriente" },
+
     ],
   },
 
@@ -92,13 +112,30 @@ const router = createRouter({
 })
 
 router.beforeEach((to) => {
-  const s = getSession()
+  const session = getSession()
 
-  // login required
-  if (to.path !== "/login" && !s) return "/login"
+  // ✅ Si la ruta es pública (login), dejar pasar
+  if (to.meta?.public) {
+    // si ya está logueado, que no vuelva al login
+    if (to.name === "login" && session) return { name: "dashboard" }
+    return true
+  }
 
-  // admin-only
-  if (to.meta?.requiresAdmin && !isAdmin()) return "/dashboard"
+  // ✅ Requiere auth
+  if (to.meta?.requiresAuth && !session) {
+    return { name: "login", query: { redirect: to.fullPath } }
+  }
+
+  // ✅ Roles
+  const roles = to.meta?.roles
+  if (Array.isArray(roles) && roles.length > 0) {
+    const userRole = session?.role
+    if (!userRole || !roles.includes(userRole)) {
+      return { name: "dashboard" } // o una vista 403
+    }
+  }
+
+  return true
 })
 
 export default router

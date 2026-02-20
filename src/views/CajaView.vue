@@ -2,20 +2,51 @@
 import { computed, ref, onMounted, watch } from "vue"
 import { RouterLink } from "vue-router"
 import { getSession } from "../auth/session"
-
+import { emitCajaChanged } from "../ui/cajaEvents"
 import { cajaApi } from "../services/cajaApi"
 import { movimientosCajaApi } from "../services/movimientosCajaApi"
 
+// =========================
+// Session
+// =========================
 const session = getSession() ?? null
 const userId = Number(session?.userId ?? 1)
 
-const todayISO = new Date().toISOString().slice(0, 10)
-const selectedFecha = ref(todayISO)
+// =========================
+// Helpers
+// =========================
+function todayISO() {
+  return new Date().toISOString().slice(0, 10)
+}
 
-// Turno guardado por user (UX cheta)
+function formatMoney(n) {
+  const num = Number(n ?? 0)
+  return num.toLocaleString("es-AR", { minimumFractionDigits: 0 })
+}
+
+function toMoneyNumber(v) {
+  const x = Number(String(v ?? "").replace(",", "."))
+  return Number.isFinite(x) ? x : NaN
+}
+
+function tipoPorConcepto(concepto) {
+  if (concepto === "GASTO" || concepto === "RETIRO") return "EGRESO"
+  if (concepto === "APORTE") return "INGRESO"
+  return "EGRESO"
+}
+
+
+// =========================
+// Filtros (fecha / turno)
+// =========================
+const selectedFecha = ref(todayISO())
+
 const turnoKey = `caja_turno_v1:${userId}`
-const selectedTurno = ref("MANIANA") // MANIANA | TARDE
+const selectedTurno = ref("MANIANA") // BE: MANIANA | TARDE
 
+// =========================
+// Estado UI
+// =========================
 const loading = ref(false)
 const errorMsg = ref("")
 const okMsg = ref("")
@@ -35,22 +66,11 @@ const movForm = ref({
   descripcion: "",
 })
 
-function formatMoney(n) {
-  const num = Number(n ?? 0)
-  return num.toLocaleString("es-AR", { minimumFractionDigits: 0 })
-}
+const ultimosMovs = computed(() => movimientos.value.slice(0, 10))
 
-function toMoneyNumber(v) {
-  const x = Number(String(v ?? "").replace(",", "."))
-  return Number.isFinite(x) ? x : NaN
-}
-
-function tipoPorConcepto(concepto) {
-  if (concepto === "GASTO" || concepto === "RETIRO") return "EGRESO"
-  if (concepto === "APORTE") return "INGRESO"
-  return "EGRESO"
-}
-
+// =========================
+// Fetch
+// =========================
 async function loadMovimientos() {
   if (!caja.value?.cajaId) {
     movimientos.value = []
@@ -95,11 +115,16 @@ async function refresh() {
   }
 }
 
+// =========================
+// Acciones
+// =========================
+
+
 async function abrirCaja() {
   errorMsg.value = ""
   okMsg.value = ""
 
-  const hoy = new Date().toISOString().slice(0, 10)
+  const hoy = todayISO()
   if (selectedFecha.value !== hoy) {
     errorMsg.value = "Solo podés abrir caja para HOY. Cambiá la fecha a hoy."
     return
@@ -120,6 +145,8 @@ async function abrirCaja() {
 
     okMsg.value = "Caja abierta ✅"
     abrirMontoInicial.value = ""
+
+    emitCajaChanged() // ✅ solo acá
     await refresh()
   } catch (e) {
     errorMsg.value =
@@ -130,6 +157,9 @@ async function abrirCaja() {
       "Error abriendo caja."
   }
 }
+
+
+
 
 async function cerrarCaja() {
   errorMsg.value = ""
@@ -143,6 +173,8 @@ async function cerrarCaja() {
   try {
     await cajaApi.cerrar(caja.value.cajaId, { userId })
     okMsg.value = `Caja cerrada ✅ (monto final auto: $ ${formatMoney(saldoActual.value)})`
+
+    emitCajaChanged() // ✅ solo acá
     await refresh()
   } catch (e) {
     errorMsg.value =
@@ -153,6 +185,8 @@ async function cerrarCaja() {
       "Error cerrando caja."
   }
 }
+
+
 
 async function crearMovimientoManual() {
   errorMsg.value = ""
@@ -184,6 +218,7 @@ async function crearMovimientoManual() {
     movForm.value.descripcion = ""
     showMovModal.value = false
 
+    emitCajaChanged()
     await refresh()
   } catch (e) {
     errorMsg.value =
@@ -195,8 +230,9 @@ async function crearMovimientoManual() {
   }
 }
 
-const ultimosMovs = computed(() => movimientos.value.slice(0, 10))
-
+// =========================
+// Lifecycle
+// =========================
 onMounted(() => {
   const saved = localStorage.getItem(turnoKey)
   if (saved === "MANIANA" || saved === "TARDE") selectedTurno.value = saved
@@ -205,7 +241,6 @@ onMounted(() => {
 
 watch(selectedTurno, (v) => localStorage.setItem(turnoKey, v))
 </script>
-
 
 <template>
   <div>
@@ -230,10 +265,9 @@ watch(selectedTurno, (v) => localStorage.setItem(turnoKey, v))
           <div>
             <label class="form-label text-secondary mb-1">Turno</label>
             <select v-model="selectedTurno" class="form-control bg-dark text-white border-secondary">
-  <option value="MANIANA">MAÑANA</option>
-  <option value="TARDE">TARDE</option>
-</select>
-
+              <option value="MANIANA">MAÑANA</option>
+              <option value="TARDE">TARDE</option>
+            </select>
           </div>
         </div>
       </div>
@@ -382,6 +416,7 @@ watch(selectedTurno, (v) => localStorage.setItem(turnoKey, v))
       </div>
     </div>
 
+    <!-- Modal movimiento -->
     <div v-if="showMovModal" class="modal-backdrop" @click.self="showMovModal = false">
       <div class="modal-card">
         <div class="d-flex justify-content-between align-items-center mb-2">
