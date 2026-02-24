@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 
 import { clientesApi } from "../services/clientesService"
@@ -64,6 +64,156 @@ const clienteTitulo = computed(() => {
 })
 
 // =========================
+// Bonus PRO: buscador inteligente
+// =========================
+const searchMode = ref("DNI") // DNI | NOMBRE
+const searchInput = ref("")
+const searching = ref(false)
+const searchError = ref("")
+const showSuggest = ref(false)
+const suggestions = ref([]) // [{ id, label, cliente }]
+let debounceTimer = null
+
+function clienteLabel(c) {
+  const full = `${c.nombre} ${c.apellido || ""}`.trim()
+  const dni = c.dni ? ` · DNI ${c.dni}` : ""
+  return `${full} (ID #${c.id})${dni}`
+}
+
+function buildSuggestionsByName(txt) {
+  const t = txt.trim().toLowerCase()
+  if (!t) return []
+
+  const arr = clientesActivos.value
+    .map(c => ({
+      id: c.id,
+      cliente: c,
+      label: clienteLabel(c),
+      blob: `${c.nombre} ${c.apellido} ${c.dni ?? ""}`.toLowerCase(),
+    }))
+    .filter(x => x.blob.includes(t))
+    .slice(0, 8)
+
+  return arr.map(x => ({ id: x.id, label: x.label, cliente: x.cliente }))
+}
+
+function selectCliente(c) {
+  if (!c?.id) return
+  clienteIdSel.value = String(c.id) // dispara watcher y carga cuenta
+  showSuggest.value = false
+  suggestions.value = []
+  searchError.value = ""
+  // opcional: limpiar el input después de seleccionar
+  // searchInput.value = ""
+}
+
+async function searchByDni(dni) {
+  const clean = String(dni || "").replace(/\D/g, "").trim()
+  if (!clean) return
+
+  searching.value = true
+  searchError.value = ""
+
+  try {
+    const { data } = await clientesApi.getByDni(clean)
+    const c = mapCliente(data)
+    if (!c?.id) throw new Error("Cliente inválido")
+    selectCliente(c)
+    okMsg.value = `Cliente encontrado: ${c.nombre} ${c.apellido || ""}`.trim()
+    setTimeout(() => (okMsg.value = ""), 1800)
+  } catch (e) {
+    searchError.value =
+      e?.response?.data?.error ||
+      "No se encontró cliente con ese DNI."
+  } finally {
+    searching.value = false
+  }
+}
+
+function onSearchInput() {
+  const v = searchInput.value
+  searchError.value = ""
+
+  if (!v.trim()) {
+    showSuggest.value = false
+    suggestions.value = []
+    return
+  }
+
+  clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(async () => {
+    // Modo nombre/apellido: sugerencias 100% local
+    if (searchMode.value === "NOMBRE") {
+      suggestions.value = buildSuggestionsByName(v)
+      showSuggest.value = suggestions.value.length > 0
+      return
+    }
+
+    // Modo DNI: sugerencias local si matchea, y si no, intentamos endpoint SOLO si tiene muchos dígitos
+    const clean = String(v).replace(/\D/g, "")
+
+    // Tip: para no spamear 404, probamos recién con 7+ dígitos
+    if (clean.length >= 7) {
+      // primero tratamos local (por si ya cargaste clientes con dni)
+      const local = buildSuggestionsByName(clean)
+      if (local.length) {
+        suggestions.value = local
+        showSuggest.value = true
+        return
+      }
+
+      // si no hay local, intentamos endpoint silencioso (sin mostrar error si falla)
+      try {
+        searching.value = true
+        const { data } = await clientesApi.getByDni(clean)
+        const c = mapCliente(data)
+        if (c?.id) {
+          suggestions.value = [{ id: c.id, label: clienteLabel(c), cliente: c }]
+          showSuggest.value = true
+        } else {
+          suggestions.value = []
+          showSuggest.value = false
+        }
+      } catch (_) {
+        suggestions.value = []
+        showSuggest.value = false
+      } finally {
+        searching.value = false
+      }
+    } else {
+      suggestions.value = []
+      showSuggest.value = false
+    }
+  }, 250)
+}
+
+async function doSearch() {
+  const v = searchInput.value.trim()
+  if (!v) return
+
+  if (searchMode.value === "NOMBRE") {
+    const list = buildSuggestionsByName(v)
+    if (list.length === 1) {
+      selectCliente(list[0].cliente)
+    } else {
+      suggestions.value = list
+      showSuggest.value = list.length > 0
+      if (!list.length) searchError.value = "No hay coincidencias."
+    }
+    return
+  }
+
+  await searchByDni(v)
+}
+
+function onGlobalClick(e) {
+  const el = e.target
+  if (!el?.closest?.(".cc-search")) {
+    showSuggest.value = false
+  }
+}
+
+// =========================
 // Loaders
 // =========================
 async function fetchClientes() {
@@ -98,7 +248,6 @@ async function fetchCuenta(clienteId) {
 
     deuda.value = rDeuda.data ?? null
 
-    // el back suele devolver array de items ya con saldo acumulado
     const arr = Array.isArray(rEstado.data) ? rEstado.data : []
     estado.value = arr
   } catch (e) {
@@ -122,12 +271,10 @@ function normalizeRow(x) {
   const fecha = x.fecha ?? x.createdAt ?? x.created_at ?? null
   const ref = x.referencia ?? x.ref ?? x.descripcion ?? x.detalle ?? x.concepto ?? null
 
-  // suele venir debe/haber y saldo
   const debe = Number(x.debe ?? 0) || 0
   const haber = Number(x.haber ?? 0) || 0
   const saldo = x.saldo == null ? null : Number(x.saldo)
 
-  // tipo UI (si tiene debe/haber)
   let tipo = "OTRO"
   if (debe > 0) tipo = "DEBE"
   else if (haber > 0) tipo = "HABER"
@@ -177,7 +324,7 @@ function exportCSV() {
   const header = ["fecha", "referencia", "debe", "haber", "saldo"]
   const csv = [
     header.join(";"),
-    ...rows.map(obj => header.map(k => `"${String(obj[k] ?? "").replaceAll('"', '""')}"`).join(";")),
+    ...rows.map(obj => header.map(k => `"${String(obj[k] ?? "").replaceAll('"', '""')}"`).join(";")).join(";")
   ].join("\n")
 
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
@@ -196,6 +343,12 @@ onMounted(async () => {
   await fetchClientes()
   setClienteFromQuery()
   if (clienteIdSel.value) await fetchCuenta(Number(clienteIdSel.value))
+
+  window.addEventListener("click", onGlobalClick)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener("click", onGlobalClick)
 })
 
 watch(clienteIdSel, async (v) => {
@@ -219,7 +372,78 @@ watch(clienteIdSel, async (v) => {
     <div v-if="errorMsg" class="alert alert-danger py-2">{{ errorMsg }}</div>
     <div v-if="okMsg" class="alert alert-success py-2">{{ okMsg }}</div>
 
-    <!-- Toolbar -->
+    <!-- Buscador PRO -->
+    <div class="cc-search card bg-panel border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <div class="row g-3 align-items-end">
+          <div class="col-12 col-md-3">
+            <label class="form-label text-secondary">Buscar</label>
+            <select v-model="searchMode" class="form-select bg-dark text-white border-secondary" :disabled="loading">
+              <option value="DNI">Por DNI</option>
+              <option value="NOMBRE">Por nombre/apellido</option>
+            </select>
+          </div>
+
+          <div class="col-12 col-md-5" style="position: relative;">
+            <label class="form-label text-secondary">
+              {{ searchMode === "DNI" ? "DNI" : "Nombre / Apellido" }}
+            </label>
+
+            <input
+              v-model="searchInput"
+              class="form-control bg-dark text-white border-secondary"
+              :placeholder="searchMode === 'DNI' ? 'Ej: 40111222' : 'Ej: Juan Pérez'"
+              :inputmode="searchMode === 'DNI' ? 'numeric' : 'text'"
+              @input="onSearchInput"
+              @focus="onSearchInput"
+              @keyup.enter="doSearch"
+              :disabled="loading"
+            />
+
+            <!-- Dropdown sugerencias -->
+            <div
+              v-if="showSuggest"
+              class="border border-secondary bg-dark rounded mt-1"
+              style="position:absolute; z-index: 50; width: 100%; max-height: 260px; overflow:auto;"
+            >
+              <button
+                v-for="s in suggestions"
+                :key="s.id"
+                class="btn btn-dark w-100 text-start border-0"
+                type="button"
+                @click="selectCliente(s.cliente)"
+              >
+                <div class="small text-white">{{ s.label }}</div>
+              </button>
+            </div>
+
+            <div v-if="searchError" class="text-danger small mt-2">{{ searchError }}</div>
+          </div>
+
+          <div class="col-12 col-md-2 d-flex gap-2">
+            <button class="btn btn-outline-light w-100" @click="doSearch" :disabled="loading || searching">
+              {{ searching ? "Buscando..." : "Buscar" }}
+            </button>
+          </div>
+
+          <div class="col-12 col-md-2">
+            <button class="btn btn-outline-light w-100" @click="clienteIdSel && fetchCuenta(Number(clienteIdSel))" :disabled="loading || !clienteIdSel">
+              {{ loading ? "Cargando..." : "Refrescar" }}
+            </button>
+          </div>
+        </div>
+
+        <div class="text-secondary small mt-3" v-if="clienteIdSel">
+          Totales: Debe <b>$ {{ formatMoney(totDebe) }}</b> · Haber <b>$ {{ formatMoney(totHaber) }}</b> ·
+          Saldo <b>$ {{ formatMoney(saldoFinal) }}</b>
+          <span v-if="deuda?.deudaTotal != null" class="ms-2">
+            · Deuda (endpoint /deuda): <b>$ {{ formatMoney(deuda.deudaTotal) }}</b>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Selector (lo dejé porque es útil siempre) -->
     <div class="card bg-panel border-0 shadow-sm mb-4">
       <div class="card-body">
         <div class="row g-3 align-items-end">
@@ -234,22 +458,10 @@ watch(clienteIdSel, async (v) => {
           </div>
 
           <div class="col-12 col-md-6 d-flex justify-content-md-end gap-2">
-            <button class="btn btn-outline-light" @click="clienteIdSel && fetchCuenta(Number(clienteIdSel))" :disabled="loading || !clienteIdSel">
-              {{ loading ? "Cargando..." : "Refrescar" }}
-            </button>
-
             <button class="btn btn-outline-light" @click="exportCSV" :disabled="!estadoFiltrado.length">
               Exportar CSV
             </button>
           </div>
-        </div>
-
-        <div class="text-secondary small mt-3" v-if="clienteIdSel">
-          Totales: Debe <b>$ {{ formatMoney(totDebe) }}</b> · Haber <b>$ {{ formatMoney(totHaber) }}</b> ·
-          Saldo <b>$ {{ formatMoney(saldoFinal) }}</b>
-          <span v-if="deuda?.deudaTotal != null" class="ms-2">
-            · Deuda (endpoint /deuda): <b>$ {{ formatMoney(deuda.deudaTotal) }}</b>
-          </span>
         </div>
       </div>
     </div>
@@ -308,7 +520,7 @@ watch(clienteIdSel, async (v) => {
         </div>
 
         <div class="text-secondary small mt-2">
-          Esto es “negocio real”: saldo acumulado, export CSV, filtros.
+          Saldo acumulado desde backend + export CSV + filtros + buscador PRO.
         </div>
       </div>
     </div>

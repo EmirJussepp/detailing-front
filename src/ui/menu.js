@@ -29,7 +29,7 @@ export function buildMenu(role = getRole()) {
   { section: "Inventario", roles: ["ADMIN", "CASHIER"] },
 
   { label: "Productos", to: { name: "productos" }, icon: "📦", roles: ["ADMIN", "CASHIER"] },
-  { label: "Proveedores", to: { name: "compras.proveedores" }, icon: "🚚", roles: ["ADMIN", "CASHIER"] },
+  
 
   { label: "Métodos de pago", to: { name: "metodos-pago" }, icon: "💳", roles: ["ADMIN"] },
 

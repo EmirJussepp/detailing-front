@@ -2,32 +2,30 @@ import { ref } from "vue"
 import { getSession } from "../auth/session"
 import { cajaApi } from "../services/cajaApi"
 
-export function useCajaStatus() {
-  const estado = ref("SIN_CAJA") // ABIERTA | CERRADA | SIN_CAJA
+export function useCajaAbierta() {
+  const session = getSession() ?? null
+  const userId = Number(session?.userId ?? 1)
+
   const caja = ref(null)
 
-  async function fetchStatus() {
-    try {
-      const session = getSession()
-      const turno = session?.shift || "MAÑANA"
+  async function fetchCajaAbierta() {
+    const turnos = ["MANIANA", "TARDE"]
 
-      const { data } = await cajaApi.getActiva(turno)
-
-      if (!data) {
-        estado.value = "SIN_CAJA"
-        return
+    for (const turno of turnos) {
+      try {
+        const { data } = await cajaApi.abierta({ userId, turno })
+        if (data?.cajaId) {
+          caja.value = data
+          return data
+        }
+      } catch (e) {
+        if (e?.response?.status !== 404) throw e
       }
-
-      caja.value = data
-      estado.value = data.estado || "SIN_CAJA"
-    } catch (e) {
-      estado.value = "SIN_CAJA"
     }
+
+    caja.value = null
+    return null
   }
 
-  return {
-    estado,
-    caja,
-    fetchStatus,
-  }
+  return { userId, caja, fetchCajaAbierta }
 }

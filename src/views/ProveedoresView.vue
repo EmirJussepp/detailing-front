@@ -417,20 +417,6 @@
 </template>
 
 <script>
-import {
-  listProveedores,
-  createProveedor,
-  updateProveedor,
-  setProveedorActivo
-} from '../services/proveedoresStorage'
-
-import { getSaldoProveedor } from '../services/proveedoresCC'
-
-import {
-  listPagosByProveedor,
-  addPago,
-  removePago
-} from '../services/pagosProveedoresStorage'
 
 export default {
   name: 'ProveedoresView',
@@ -448,20 +434,17 @@ export default {
       mode: 'create',
       editingId: null,
       form: {
-        tipo: 'PERSONA', // PERSONA | EMPRESA
+        tipo: 'PERSONA',
 
-        // persona
         nombre: '',
         apellido: '',
         documentoTipo: 'DNI',
         documentoNro: '',
 
-        // empresa
         razonSocial: '',
         cuit: '',
         contacto: '',
 
-        // comunes
         telefono: '',
         email: '',
         direccion: '',
@@ -479,7 +462,7 @@ export default {
       pagoOk: '',
       pagosProveedor: [],
 
-      // cache saldos
+      // cache saldos (stub)
       saldosCache: new Map()
     }
   },
@@ -498,10 +481,7 @@ export default {
             p.email,
             p.direccion,
             p.notas
-          ]
-            .filter(Boolean)
-            .join(' ')
-            .toLowerCase()
+          ].filter(Boolean).join(' ').toLowerCase()
 
           return blob.includes(q)
         })
@@ -515,7 +495,7 @@ export default {
         arr.sort((a, b) => {
           const sa = this.getSaldo(a).saldo
           const sb = this.getSaldo(b).saldo
-          return (sb ?? 0) - (sa ?? 0) // mayor deuda primero
+          return (sb ?? 0) - (sa ?? 0)
         })
         return arr
       }
@@ -535,7 +515,6 @@ export default {
   },
 
   methods: {
-    // ---------- UI helpers ----------
     formatMoney(n) {
       const num = Number(n ?? 0)
       return num.toLocaleString('es-AR', { minimumFractionDigits: 0 })
@@ -543,13 +522,12 @@ export default {
 
     saldoClass(p) {
       const s = this.getSaldo(p).saldo
-      if (s > 0) return 'text-warning' // debe
-      if (s < 0) return 'text-info'    // a favor
-      return 'text-success'            // ok
+      if (s > 0) return 'text-warning'
+      if (s < 0) return 'text-info'
+      return 'text-success'
     },
 
     docBadgeClass(p) {
-      // solo para darle “punch” visual a doc/cuit
       if (p?.tipo === 'EMPRESA') return 'text-bg-dark border border-info'
       return 'text-bg-dark border border-secondary'
     },
@@ -559,11 +537,12 @@ export default {
       setTimeout(() => (this.success = ''), 2200)
     },
 
-    // ---------- saldo cache ----------
+    // ✅ STUB: como borraste proveedoresCC, devolvemos saldo 0 para que compile
     getSaldo(p) {
       if (!p?.id) return { deudaCompras: 0, pagosTotal: 0, saldo: 0 }
       if (this.saldosCache.has(p.id)) return this.saldosCache.get(p.id)
-      const res = getSaldoProveedor(p.id)
+
+      const res = { deudaCompras: 0, pagosTotal: 0, saldo: 0 }
       this.saldosCache.set(p.id, res)
       return res
     },
@@ -572,7 +551,6 @@ export default {
       this.saldosCache = new Map()
     },
 
-    // ---------- data ----------
     refresh() {
       this.error = ''
       try {
@@ -583,11 +561,9 @@ export default {
       }
     },
 
-    // ---------- proveedor modal ----------
     setTipo(tipo) {
       this.form.tipo = (tipo === 'EMPRESA') ? 'EMPRESA' : 'PERSONA'
 
-      // limpiar campos “del otro tipo” para evitar validaciones raras
       if (this.form.tipo === 'EMPRESA') {
         this.form.nombre = ''
         this.form.apellido = ''
@@ -630,22 +606,18 @@ export default {
       this.formError = ''
 
       const tipo = (p.tipo === 'EMPRESA') ? 'EMPRESA' : 'PERSONA'
-
       this.form = {
         tipo,
 
-        // persona
         nombre: p.nombre ?? '',
         apellido: p.apellido ?? '',
         documentoTipo: p.documentoTipo ?? 'DNI',
         documentoNro: p.documentoNro ?? '',
 
-        // empresa
         razonSocial: p.razonSocial ?? '',
         cuit: p.cuit ?? '',
         contacto: p.contacto ?? '',
 
-        // comunes
         telefono: p.telefono ?? '',
         email: p.email ?? '',
         direccion: p.direccion ?? '',
@@ -657,29 +629,13 @@ export default {
     saveProveedor() {
       this.formError = ''
       try {
-        // IMPORTANT: el storage valida, pero acá damos mensajes más “UX friendly”
         if (this.form.tipo === 'EMPRESA') {
-          if (!String(this.form.razonSocial || '').trim()) {
-            this.formError = 'La razón social es obligatoria.'
-            return
-          }
-          if (!String(this.form.cuit || '').replace(/\D/g, '').trim()) {
-            this.formError = 'El CUIT es obligatorio.'
-            return
-          }
+          if (!String(this.form.razonSocial || '').trim()) return (this.formError = 'La razón social es obligatoria.')
+          if (!String(this.form.cuit || '').replace(/\D/g, '').trim()) return (this.formError = 'El CUIT es obligatorio.')
         } else {
-          if (!String(this.form.nombre || '').trim()) {
-            this.formError = 'El nombre es obligatorio.'
-            return
-          }
-          if (!String(this.form.apellido || '').trim()) {
-            this.formError = 'El apellido es obligatorio.'
-            return
-          }
-          if (!String(this.form.documentoNro || '').replace(/\D/g, '').trim()) {
-            this.formError = 'El documento es obligatorio.'
-            return
-          }
+          if (!String(this.form.nombre || '').trim()) return (this.formError = 'El nombre es obligatorio.')
+          if (!String(this.form.apellido || '').trim()) return (this.formError = 'El apellido es obligatorio.')
+          if (!String(this.form.documentoNro || '').replace(/\D/g, '').trim()) return (this.formError = 'El documento es obligatorio.')
         }
 
         if (this.mode === 'create') {
@@ -692,7 +648,6 @@ export default {
 
         this.refresh()
 
-        // cerrar modal (sin depender del bootstrap instance)
         const modalEl = document.getElementById('proveedorModal')
         const closeBtn = modalEl?.querySelector('[data-bs-dismiss="modal"]')
         closeBtn?.click()
@@ -712,7 +667,6 @@ export default {
       }
     },
 
-    // ---------- pagos ----------
     preparePago(p) {
       this.pagoProveedor = p
       this.pagoMonto = ''
@@ -726,10 +680,7 @@ export default {
 
     loadPagosProveedor() {
       const pid = this.pagoProveedor?.id
-      if (!pid) {
-        this.pagosProveedor = []
-        return
-      }
+      if (!pid) return (this.pagosProveedor = [])
       this.pagosProveedor = listPagosByProveedor(pid)
     },
 
@@ -738,10 +689,7 @@ export default {
       this.pagoOk = ''
 
       const p = this.pagoProveedor
-      if (!p?.id) {
-        this.pagoError = 'Proveedor inválido'
-        return
-      }
+      if (!p?.id) return (this.pagoError = 'Proveedor inválido')
 
       try {
         addPago({

@@ -4,12 +4,14 @@ import { useRoute, useRouter } from "vue-router"
 import { setSession } from "../auth/session"
 import { usuariosApi } from "../services/usuariosService"
 import logo3byte from "../assets/img/logo3byte.png"
+import { decodeJwt } from "../auth/jwt"
 
 const router = useRouter()
 const route = useRoute()
 
 const form = reactive({
   email: "",
+  password: "",        // ✅ AGREGADO
   remember: false,
   shift: "MAÑANA",
 })
@@ -28,53 +30,64 @@ onMounted(() => {
 function normalizeEmail(v) {
   return String(v || "").trim().toLowerCase()
 }
+function normalizeShift(v) {
+  const t = String(v || "").toUpperCase()
+  if (t === "MAÑANA" || t === "MANIANA") return "MANIANA"
+  if (t === "TARDE") return "TARDE"
+  return "MANIANA"
+}
 
 function validate() {
   errorMsg.value = ""
   const email = normalizeEmail(form.email)
   if (!email) return (errorMsg.value = "Ingresá tu email"), false
   if (!email.includes("@")) return (errorMsg.value = "Email inválido"), false
+
+  // si estás usando login real, pedimos password
+  if (!String(form.password || "").trim()) return (errorMsg.value = "Ingresá tu contraseña"), false
   return true
 }
 
-// Aliases demo -> emails reales (mantenemos tu idea)
+// Aliases demo -> emails reales
 const ALIASES = {
   "maniana@demo.com": "juan.perez@example.com",
   "tarde@demo.com": "juan.montiel@example.com",
   "admin@demo.com": "juan.perez@example.com",
 }
 
-// ✅ Admin temporal mientras el back no devuelva roleId
-const ADMIN_EMAILS = new Set([
-  "juan.perez@example.com",
-  // agregá acá los emails reales que querés que entren como ADMIN
-])
+// fallback admin por email (solo si el back NO trae roles)
+const ADMIN_EMAILS = new Set(["juan.perez@example.com"])
+
+function toUpperRole(x) {
+  return String(x || "").trim().toUpperCase()
+}
 
 function normalizeUser(u) {
+  const userId = Number(u?.userId ?? u?.id ?? 0)
+  const rolesFromArray = Array.isArray(u?.roles) ? u.roles.map(toUpperRole).filter(Boolean) : []
+
+  const roleName = toUpperRole(u?.roleName ?? u?.role_name ?? "")
+  const roleId = Number(u?.roleId ?? u?.role_id ?? 0) || null
+
+  let roles = rolesFromArray
+  if (!roles.length && roleName) roles = [roleName]
+  if (!roles.length && roleId === 1) roles = ["ADMIN"]
+  if (!roles.length && roleId === 2) roles = ["CASHIER"]
+
   return {
-    userId: Number(u?.userId ?? u?.id ?? 0),
+    userId,
     name: u?.name ?? u?.nombre ?? null,
     email: normalizeEmail(u?.email),
-    // cuando tu compañero lo agregue, esto va a empezar a venir ✅
-    roleId: Number(u?.roleId ?? u?.role_id ?? 0) || null,
-    roleName: u?.roleName ?? u?.role_name ?? null,
+    roleId,
+    roleName: roleName || null,
+    roles,
   }
 }
 
-function resolveRole(user) {
-  // 1) Si viene roleName del back, lo usamos
-  const rn = user?.roleName ? String(user.roleName).toUpperCase() : null
-  if (rn) return { role: rn, roleId: user.roleId ?? null, roleName: rn }
-
-  // 2) Si viene roleId, derivamos
-  if (Number(user?.roleId) === 1) return { role: "ADMIN", roleId: 1, roleName: "ADMIN" }
-  if (Number(user?.roleId) === 2) return { role: "CASHIER", roleId: 2, roleName: "CASHIER" }
-
-  // 3) Si no viene nada (situación actual), admin por whitelist de email
-  if (ADMIN_EMAILS.has(user.email)) return { role: "ADMIN", roleId: 1, roleName: "ADMIN" }
-
-  // default
-  return { role: "CASHIER", roleId: 2, roleName: "CASHIER" }
+function resolveRoles(user) {
+  if (Array.isArray(user?.roles) && user.roles.length) return user.roles
+  if (ADMIN_EMAILS.has(user.email)) return ["ADMIN"]
+  return ["CASHIER"]
 }
 
 async function onSubmit() {
@@ -82,13 +95,67 @@ async function onSubmit() {
 
   loading.value = true
   errorMsg.value = ""
+
   try {
     const rawEmail = normalizeEmail(form.email)
     const email = normalizeEmail(ALIASES[rawEmail] ?? rawEmail)
 
+    // remember email
     if (form.remember) localStorage.setItem("remember_email", rawEmail)
     else localStorage.removeItem("remember_email")
 
+    // =========================
+    // ✅ INTENTO 1: LOGIN REAL (token)
+    // =========================
+    try {
+      const { data: loginResp } = await usuariosApi.login({
+        email,
+        password: form.password,
+      })
+
+      const token = loginResp?.token
+      if (!token) throw new Error("Token no recibido")
+
+      const payload = decodeJwt(token) || {}
+      const userIdFromJwt = Number(payload?.userId ?? payload?.id ?? 0) || null
+      const permissions = Array.isArray(payload?.permissions) ? payload.permissions : []
+
+      // para obtener roles/nombre, buscamos en /usuarios
+      const { data: all } = await usuariosApi.list()
+      const arr = Array.isArray(all) ? all : []
+      const meRaw = arr.find(u => normalizeEmail(u?.email) === email)
+      const me = meRaw ? normalizeUser(meRaw) : null
+
+      const roles = resolveRoles(me || { email })
+      const roleName = roles.includes("ADMIN") ? "ADMIN" : "CASHIER"
+      const roleId = roleName === "ADMIN" ? 1 : 2
+
+      setSession({
+        token,
+        userId: Number(me?.userId ?? userIdFromJwt ?? 0),
+        email,
+        name: me?.name ?? null,
+
+        roles,
+        roleName,
+        roleId,
+        role: roleName,
+
+        permissions,
+        shift: normalizeShift(form.shift),
+      })
+
+      const redirect = typeof route.query.redirect === "string" ? route.query.redirect : null
+      router.replace(redirect || { name: "dashboard" })
+      return
+    } catch (eLoginReal) {
+      // si no existe endpoint login / falla token, caemos al fallback
+      console.warn("Login real falló, fallback a list():", eLoginReal?.message || eLoginReal)
+    }
+
+    // =========================
+    // ✅ INTENTO 2: FALLBACK (sin back login)
+    // =========================
     const { data } = await usuariosApi.list()
     const arr = Array.isArray(data) ? data : []
     const users = arr.map(normalizeUser).filter(u => u.userId > 0 && u.email)
@@ -99,21 +166,23 @@ async function onSubmit() {
       return
     }
 
-    const r = resolveRole(user)
+    const roles = resolveRoles(user)
+    const roleName = roles.includes("ADMIN") ? "ADMIN" : "CASHIER"
+    const roleId = roleName === "ADMIN" ? 1 : 2
 
-    const session = {
+    setSession({
       userId: user.userId,
       email: user.email,
       name: user.name,
-      roleId: r.roleId,
-      roleName: r.roleName,
-      role: r.role,
-      shift: form.shift,
-    }
 
-    setSession(session)
+      roles,
+      roleId,
+      roleName,
+      role: roleName,
 
-    // ✅ respetar redirect del guard (si existe)
+      shift: normalizeShift(form.shift),
+    })
+
     const redirect = typeof route.query.redirect === "string" ? route.query.redirect : null
     router.replace(redirect || { name: "dashboard" })
   } catch (e) {
@@ -121,7 +190,7 @@ async function onSubmit() {
       e?.response?.data?.error ||
       e?.response?.data?.message ||
       e?.message ||
-      "Error consultando usuarios"
+      "Error en login"
   } finally {
     loading.value = false
   }
@@ -161,6 +230,10 @@ async function onSubmit() {
               :disabled="loading"
             />
           </div>
+          <div class="field">
+  <label>Contraseña</label>
+  <input v-model="form.password" type="password" placeholder="••••••••" :disabled="loading" />
+</div>
 
           <!-- Turno (si lo querés activar, descomentá) -->
           <!--
