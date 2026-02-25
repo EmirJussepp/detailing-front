@@ -5,6 +5,7 @@ import AuthLayout from "../layouts/AuthLayout.vue"
 
 import LoginView from "../views/LoginView.vue"
 import HomeView from "../views/HomeView.vue"
+import ComprasView from "../views/ComprasView.vue"
 
 import CajaView from "../views/CajaView.vue"
 import VentasView from "../views/VentasView.vue"
@@ -21,7 +22,7 @@ const routes = [
     path: "/login",
     component: AuthLayout,
     children: [{ path: "", name: "login", component: LoginView }],
-    meta: { public: true }, // ✅
+    meta: { public: true },
   },
 
   // App
@@ -42,22 +43,28 @@ const routes = [
         component: () => import("../views/MovimientosCajaView.vue"),
         meta: { requiresAuth: true },
       },
-      
+      {
+        path: "caja/cuenta-corriente",
+        name: "caja.cuenta",
+        component: () => import("../views/CuentaCorrienteView.vue"),
+        meta: { requiresAuth: true },
+      },
 
-      // Compras / Proveedores
+      // Compras
+      { path: "compras", name: "compras", component: ComprasView, meta: { requiresAuth: true, roles: ["ADMIN"] } },
       {
         path: "compras/proveedores",
         name: "compras.proveedores",
         component: ProveedoresView,
-        meta: { requiresAuth: true },
+        meta: { requiresAuth: true, roles: ["ADMIN"] },
       },
 
       // Maestros
       { path: "clientes", name: "clientes", component: ClientesView, meta: { requiresAuth: true } },
       { path: "productos", name: "productos", component: ProductosView, meta: { requiresAuth: true } },
 
-      // Métodos de pago (pantalla directa)
-      { path: "metodos-pago", name: "metodos-pago", component: MetodoPagoView, meta: { requiresAuth: true } },
+      // Métodos de pago
+      { path: "metodos-pago", name: "metodos-pago", component: MetodoPagoView, meta: { requiresAuth: true, roles: ["ADMIN"] } },
 
       // Config (solo ADMIN)
       {
@@ -84,21 +91,11 @@ const routes = [
         component: () => import("../views/MetodoPagoView.vue"),
         meta: { requiresAuth: true, roles: ["ADMIN"] },
       },
-      // src/router/index.js (solo el agregado)
-{
-  path: "caja/cuenta-corriente",
-  name: "caja.cuenta",
-  component: () => import("../views/CuentaCorrienteView.vue"),
-},
 
-
-
-
-      // Redirects “cortos”
+      // Redirects cortos
       { path: "ventas", redirect: "/caja/ventas" },
       { path: "proveedores", redirect: "/compras/proveedores" },
-      { path: "cuenta", redirect: "/cuenta-corriente" },
-
+      { path: "cuenta", redirect: "/caja/cuenta-corriente" },
     ],
   },
 
@@ -114,25 +111,19 @@ const router = createRouter({
 router.beforeEach((to) => {
   const session = getSession()
 
-  // ✅ Si la ruta es pública (login), dejar pasar
   if (to.meta?.public) {
-    // si ya está logueado, que no vuelva al login
     if (to.name === "login" && session) return { name: "dashboard" }
     return true
   }
 
-  // ✅ Requiere auth
   if (to.meta?.requiresAuth && !session) {
     return { name: "login", query: { redirect: to.fullPath } }
   }
 
-  // ✅ Roles
   const roles = to.meta?.roles
   if (Array.isArray(roles) && roles.length > 0) {
     const userRole = session?.role
-    if (!userRole || !roles.includes(userRole)) {
-      return { name: "dashboard" } // o una vista 403
-    }
+    if (!userRole || !roles.includes(userRole)) return { name: "dashboard" }
   }
 
   return true

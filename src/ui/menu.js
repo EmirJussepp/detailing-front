@@ -12,35 +12,30 @@ export function canAccess(item, role = getRole()) {
 
 export function buildMenu(role = getRole()) {
   const items = [
-  { label: "Dashboard", to: { name: "dashboard" }, icon: "🏠", roles: ["ADMIN", "CASHIER"] },
+    { label: "Dashboard", to: { name: "dashboard" }, icon: "🏠", roles: ["ADMIN", "CASHIER"] },
 
-  { section: "Operación", roles: ["ADMIN", "CASHIER"] },
+    { section: "Operación", roles: ["ADMIN", "CASHIER"] },
+    { label: "Caja", to: { name: "caja.dashboard" }, icon: "💰", roles: ["ADMIN", "CASHIER"] },
+    { label: "Ventas", to: { name: "caja.ventas" }, icon: "🧾", roles: ["ADMIN", "CASHIER"] },
+    { label: "Movimientos", to: { name: "caja.movimientos" }, icon: "📊", roles: ["ADMIN", "CASHIER"] },
 
-  { label: "Caja", to: { name: "caja.dashboard" }, icon: "💰", roles: ["ADMIN", "CASHIER"] },
-  { label: "Ventas", to: { name: "caja.ventas" }, icon: "🧾", roles: ["ADMIN", "CASHIER"] },
-  { label: "Movimientos", to: { name: "caja.movimientos" }, icon: "📊", roles: ["ADMIN", "CASHIER"] },
+    { section: "Clientes", roles: ["ADMIN", "CASHIER"] },
+    { label: "Clientes", to: { name: "clientes" }, icon: "👤", roles: ["ADMIN", "CASHIER"] },
+    { label: "Cuenta Corriente", to: { name: "caja.cuenta" }, icon: "📒", roles: ["ADMIN", "CASHIER"] },
 
-  { section: "Clientes", roles: ["ADMIN", "CASHIER"] },
+    { section: "Inventario", roles: ["ADMIN", "CASHIER"] },
+    { label: "Productos", to: { name: "productos" }, icon: "📦", roles: ["ADMIN", "CASHIER"] },
 
-  { label: "Clientes", to: { name: "clientes" }, icon: "👤", roles: ["ADMIN", "CASHIER"] },
-  { label: "Cuenta Corriente", to: { name: "caja.cuenta" }, icon: "📒", roles: ["ADMIN", "CASHIER"] },
+    { section: "Compras", roles: ["ADMIN"] },
+    { label: "Compras", to: { name: "compras" }, icon: "🧾", roles: ["ADMIN"] },
+    { label: "Proveedores", to: { name: "compras.proveedores" }, icon: "🏭", roles: ["ADMIN"] },
 
+    { section: "Configuración", roles: ["ADMIN"] },
+    { label: "Panel Config", to: { name: "configuracion" }, icon: "⚙️", roles: ["ADMIN"] },
+    { label: "Localidades", to: { name: "config-localidades" }, icon: "📍", roles: ["ADMIN"] },
+    { label: "Tipos de cliente", to: { name: "config-tipos-cliente" }, icon: "🏷️", roles: ["ADMIN"] },
+    { label: "Métodos de pago (Config)", to: { name: "config-metodos-pago" }, icon: "💳", roles: ["ADMIN"] },
+  ]
 
-  { section: "Inventario", roles: ["ADMIN", "CASHIER"] },
-
-  { label: "Productos", to: { name: "productos" }, icon: "📦", roles: ["ADMIN", "CASHIER"] },
-  
-
-  { label: "Métodos de pago", to: { name: "metodos-pago" }, icon: "💳", roles: ["ADMIN"] },
-
-  { section: "Configuración", roles: ["ADMIN"] },
-  { label: "Panel Config", to: { name: "configuracion" }, icon: "⚙️", roles: ["ADMIN"] },
-  { label: "Localidades", to: { name: "config-localidades" }, icon: "📍", roles: ["ADMIN"] },
-  { label: "Tipos de cliente", to: { name: "config-tipos-cliente" }, icon: "🏷️", roles: ["ADMIN"] },
-  { label: "Métodos de pago (Config)", to: { name: "config-metodos-pago" }, icon: "💳", roles: ["ADMIN"] },
-]
-
-
-  // devolver solo lo visible
   return items.filter((it) => canAccess(it, role))
 }
