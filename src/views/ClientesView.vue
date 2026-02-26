@@ -1,6 +1,6 @@
 <!-- src/views/ClientesView.vue -->
 <script setup>
-import { onMounted, ref, computed } from "vue"
+import { onMounted, ref, computed, watch } from "vue"
 import { useRouter } from "vue-router"
 
 import { clientesApi } from "../services/clientesApi"
@@ -9,6 +9,26 @@ import { localidadesApi } from "../services/localidadService"
 
 const router = useRouter()
 
+// =========================
+// Page unwrap (paginación)
+// =========================
+function unwrapPage(data) {
+  if (Array.isArray(data)) {
+    return { content: data, page: 0, size: data.length, totalElements: data.length, totalPages: 1 }
+  }
+  const content = data?.content ?? data?.items ?? data?.data ?? []
+  return {
+    content: Array.isArray(content) ? content : [],
+    page: Number(data?.page ?? data?.number ?? 0),
+    size: Number(data?.size ?? data?.pageSize ?? 10),
+    totalElements: Number(data?.totalElements ?? data?.total ?? (Array.isArray(content) ? content.length : 0)),
+    totalPages: Number(data?.totalPages ?? data?.pages ?? 1),
+  }
+}
+
+// =========================
+// State
+// =========================
 const items = ref([])
 const tipos = ref([])
 const localidades = ref([])
@@ -17,6 +37,12 @@ const loading = ref(false)
 const saving = ref(false)
 const error = ref("")
 const ok = ref("")
+
+// paginación
+const page = ref(0)
+const size = ref(10)
+const totalElements = ref(0)
+const totalPages = ref(1)
 
 // form
 const nombre = ref("")
@@ -27,7 +53,7 @@ const email = ref("")
 const localidadId = ref("") // "" => null
 const tipoClienteId = ref("") // requerido
 
-// filtro simple
+// búsqueda (server-side + debounce)
 const search = ref("")
 
 function mapCliente(c) {
@@ -67,8 +93,11 @@ const locById = computed(() => {
   return m
 })
 
+// activos SOLO sobre la página actual (porque paginamos server-side)
 const activos = computed(() => items.value.filter((c) => c.activo !== false))
 
+// filtrado local liviano (por si el back no filtra perfecto)
+// OJO: esto filtra sobre la página actual, no sobre todos los clientes.
 const filtrados = computed(() => {
   const q = search.value.trim().toLowerCase()
   if (!q) return activos.value
@@ -81,16 +110,16 @@ const filtrados = computed(() => {
 async function fetchMaestros() {
   try {
     const { data } = await tipoClientesApi.list()
-    const arr = Array.isArray(data) ? data : []
-    tipos.value = arr.map(mapTipo)
+    const p = unwrapPage(data)
+    tipos.value = p.content.map(mapTipo)
   } catch {
     tipos.value = []
   }
 
   try {
     const { data } = await localidadesApi.list()
-    const arr = Array.isArray(data) ? data : []
-    localidades.value = arr.map(mapLoc)
+    const p = unwrapPage(data)
+    localidades.value = p.content.map(mapLoc)
   } catch {
     localidades.value = []
   }
@@ -100,10 +129,23 @@ async function fetchAll() {
   loading.value = true
   error.value = ""
   try {
-    const { data } = await clientesApi.list()
-    const arr = Array.isArray(data) ? data : []
-    items.value = arr.map(mapCliente)
+    const { data } = await clientesApi.list({
+      page: page.value,
+      size: size.value,
+      search: search.value.trim() || null,
+    })
+
+    const p = unwrapPage(data)
+    items.value = p.content.map(mapCliente)
+
+    totalElements.value = p.totalElements
+    totalPages.value = p.totalPages
+    page.value = p.page
+    size.value = p.size
   } catch (e) {
+    items.value = []
+    totalElements.value = 0
+    totalPages.value = 1
     error.value = e?.response?.data?.error || e?.message || "Error cargando clientes"
   } finally {
     loading.value = false
@@ -144,6 +186,8 @@ async function create() {
 
     ok.value = "Cliente creado ✅"
     resetForm()
+
+    page.value = 0
     await fetchAll()
   } catch (e) {
     error.value = e?.response?.data?.error || e?.message || "Error creando cliente"
@@ -155,6 +199,30 @@ async function create() {
 function goCuentaCorriente(clienteId) {
   router.push({ name: "caja.cuenta", query: { clienteId: String(clienteId) } })
 }
+
+// paginación UI
+const canPrev = computed(() => page.value > 0)
+const canNext = computed(() => page.value < totalPages.value - 1)
+
+function prevPage() {
+  if (!canPrev.value) return
+  page.value--
+}
+function nextPage() {
+  if (!canNext.value) return
+  page.value++
+}
+
+// watchers optimizados (sin doble fetch)
+watch([page, size], () => fetchAll())
+
+let t = null
+watch(search, () => {
+  clearTimeout(t)
+  t = setTimeout(() => {
+    page.value = 0 // ✅ el fetch lo dispara el watch de page/size
+  }, 250)
+})
 
 onMounted(async () => {
   await fetchMaestros()
@@ -178,7 +246,7 @@ onMounted(async () => {
       <div class="card-body">
         <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between">
           <div class="text-secondary small">
-            Total activos: <b>{{ activos.length }}</b>
+           Total: <b>{{ totalElements }}</b> · Mostrando: <b>{{ filtrados.length }}</b>
           </div>
 
           <div class="d-flex gap-2 flex-wrap">
@@ -302,6 +370,18 @@ onMounted(async () => {
               </tr>
             </tbody>
           </table>
+
+          <div class="d-flex justify-content-end align-items-center gap-2 mt-3 text-secondary small">
+  <button class="btn btn-sm btn-outline-light" @click="prevPage" :disabled="loading || !canPrev">◀</button>
+  <span>Página {{ page + 1 }} / {{ totalPages }}</span>
+  <button class="btn btn-sm btn-outline-light" @click="nextPage" :disabled="loading || !canNext">▶</button>
+
+  <select v-model.number="size" class="form-select form-select-sm bg-dark text-white border-secondary" style="width: 90px">
+    <option :value="10">10</option>
+    <option :value="20">20</option>
+    <option :value="50">50</option>
+  </select>
+</div>
 
           <div class="text-secondary small mt-2">
             ✅ “Ver cuenta” abre la cuenta corriente real del backend.

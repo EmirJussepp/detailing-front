@@ -1,9 +1,9 @@
-// src/services/clientesApi.js
 import { http } from "./http"
 
 export const clientesApi = {
-  list() {
-    return http.get("/clientes")
+  list(params = {}) {
+    const { page = 0, size = 10, search = "" } = params
+    return http.get("/clientes", { params: { page, size, search } })
   },
   create(payload) {
     return http.post("/clientes", payload)
@@ -12,7 +12,6 @@ export const clientesApi = {
     return http.get(`/clientes/dni/${encodeURIComponent(dni)}`)
   },
 
-  // (si tu back lo tiene)
   deuda(clienteId) {
     return http.get(`/clientes/${clienteId}/deuda`)
   },
@@ -20,7 +19,6 @@ export const clientesApi = {
     return http.get("/clientes/deudas")
   },
 
-  // ✅ CUENTA CORRIENTE REAL (back)
   estadoCuenta(clienteId) {
     return http.get(`/clientes/${clienteId}/estado-cuenta`)
   },

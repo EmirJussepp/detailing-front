@@ -42,7 +42,7 @@
           </div>
 
           <div class="text-secondary small">
-            Total compras: <b>{{ comprasFiltradas.length }}</b>
+       Total compras: <b>{{ totalElements }}</b> · Mostrando: <b>{{ comprasFiltradas.length }}</b>
           </div>
         </div>
 
@@ -189,6 +189,17 @@
                   </tr>
                 </tbody>
               </table>
+              <div class="d-flex justify-content-end align-items-center gap-2 mt-3 text-secondary small">
+  <button class="btn btn-sm btn-outline-light" @click="prevPage" :disabled="loading || !canPrev">◀</button>
+  <span>Página {{ page + 1 }} / {{ totalPages }}</span>
+  <button class="btn btn-sm btn-outline-light" @click="nextPage" :disabled="loading || !canNext">▶</button>
+
+  <select v-model.number="size" class="form-select form-select-sm bg-dark text-white border-secondary" style="width: 90px">
+    <option :value="10">10</option>
+    <option :value="20">20</option>
+    <option :value="50">50</option>
+  </select>
+</div>
             </div>
 
             <div v-else class="text-secondary small mt-2">Agregá al menos 1 ítem.</div>
@@ -337,6 +348,20 @@ import { cajaApi } from "../services/cajaApi"
 import { metodosPagoApi } from "../services/metodopagoService"
 import { getSession, getShift } from "../auth/session"
 
+function unwrapPage(data) {
+  if (Array.isArray(data)) {
+    return { content: data, page: 0, size: data.length, totalElements: data.length, totalPages: 1 }
+  }
+  const content = data?.content ?? data?.items ?? data?.data ?? []
+  return {
+    content: Array.isArray(content) ? content : [],
+    page: Number(data?.page ?? data?.number ?? 0),
+    size: Number(data?.size ?? data?.pageSize ?? 10),
+    totalElements: Number(data?.totalElements ?? data?.total ?? (Array.isArray(content) ? content.length : 0)),
+    totalPages: Number(data?.totalPages ?? data?.pages ?? 1),
+  }
+}
+
 export default {
   name: "ComprasView",
   data() {
@@ -346,6 +371,13 @@ export default {
       success: "",
 
       q: "",
+
+      // paginación
+      page: 0,
+      size: 10,
+      totalElements: 0,
+      totalPages: 1,
+
       proveedores: [],
       productos: [],
       compras: [],
@@ -364,6 +396,8 @@ export default {
       pagosDetalle: [],
 
       pagoForm: { compraId: null, monto: 0, metodoPagoId: null, referencia: "" },
+
+      _t: null, // debounce timer
     }
   },
 
@@ -375,6 +409,7 @@ export default {
       )
     },
 
+    // OJO: con paginación, esto filtra sobre la página actual (perfecto para UX)
     comprasFiltradas() {
       const t = String(this.q || "").trim().toLowerCase()
       if (!t) return this.compras
@@ -385,10 +420,34 @@ export default {
         return id.includes(t) || prov.includes(t)
       })
     },
+
+    canPrev() {
+      return this.page > 0
+    },
+    canNext() {
+      return this.page < this.totalPages - 1
+    },
   },
 
   mounted() {
     this.refreshAll()
+  },
+
+  watch: {
+    // debounce de búsqueda: seteamos page=0, el watcher de page dispara refresh
+    q() {
+      clearTimeout(this._t)
+      this._t = setTimeout(() => {
+        this.page = 0
+      }, 250)
+    },
+    page() {
+      this.refreshCompras()
+    },
+    size() {
+      this.page = 0
+      // refreshCompras lo dispara page watcher luego
+    },
   },
 
   methods: {
@@ -398,15 +457,22 @@ export default {
       return num.toLocaleString("es-AR", { style: "currency", currency: "ARS" })
     },
 
-    productoName(id) {
-      const pid = Number(id)
-      const p = this.productos.find((x) => Number(x.productoId) === pid)
-      return p?.nombre ?? `#${id}`
-    },
-
     toastSuccess(msg) {
       this.success = msg
       setTimeout(() => (this.success = ""), 2200)
+    },
+
+    productoName(id) {
+      const pid = Number(id)
+      const p = this.productos.find((x) => Number(x.productoId ?? x.id) === pid)
+      return p?.nombre ?? `#${id}`
+    },
+
+    proveedorName(id) {
+      const pid = Number(id)
+      const p = this.proveedores.find((x) => Number(x.proveedorId ?? x.id) === pid)
+      if (!p) return pid ? `#${pid}` : "#—"
+      return p.displayName || `#${pid}`
     },
 
     // ===== Mappers (API -> VM) =====
@@ -418,43 +484,22 @@ export default {
       const nombre = raw?.nombre ?? ""
       const apellido = raw?.apellido ?? ""
       const razonSocial = raw?.razonSocial ?? ""
-      const cuit = raw?.cuit ?? ""
-      const dni = raw?.dni ?? ""
 
       const displayName =
         tipo === "EMPRESA" ? (razonSocial || "—") : `${nombre} ${apellido}`.trim() || "—"
 
-      return {
-        proveedorId,
-        tipo,
-        displayName,
-        nombre,
-        apellido,
-        razonSocial,
-        cuit,
-        dni,
-      }
+      return { proveedorId, tipo, displayName }
     },
 
     mapCompraApiToVM(raw) {
-      // BACK: /compras -> [{ compra: {...}, detalles:[...] }]
       const c = raw?.compra ?? raw ?? {}
-
-      const compraId = Number(c?.compraId ?? c?.id ?? 0)
-      const proveedorId = Number(c?.proveedorId ?? 0)
-
-      const fecha = c?.fecha ?? c?.createdAt ?? ""
-      const total = Number(c?.total ?? 0)
-      const estado = c?.estado ?? "—"
-
-      return { compraId, proveedorId, fecha, total, estado }
-    },
-
-    proveedorName(id) {
-      const pid = Number(id)
-      const p = this.proveedores.find((x) => Number(x.proveedorId) === pid)
-      if (!p) return pid ? `#${pid}` : "#—"
-      return p.displayName || `#${pid}`
+      return {
+        compraId: Number(c?.compraId ?? c?.id ?? 0),
+        proveedorId: Number(c?.proveedorId ?? 0),
+        fecha: c?.fecha ?? c?.createdAt ?? "",
+        total: Number(c?.total ?? 0),
+        estado: c?.estado ?? "—",
+      }
     },
 
     // ===== Data =====
@@ -466,32 +511,70 @@ export default {
         const userId = Number(session?.userId ?? 1)
         const turno = getShift()
 
-        const [provRes, prodRes, comprasRes, cajaRes, mpRes] = await Promise.all([
+        // maestros + caja + metodos
+        const [provRes, prodRes, cajaRes, mpRes] = await Promise.all([
           proveedoresApi.list(),
-          productosApi.list(),
-          comprasApi.list(),
-          cajaApi.abierta({ userId, turno }).catch(() => ({ data: null })),
+          productosApi.list({ page: 0, size: 9999 }).catch(() => ({ data: [] })), // por si productos ahora es paginado
+         cajaApi.abierta({ userId }).catch(() => ({ data: null })),
           metodosPagoApi.list().catch(() => ({ data: [] })),
         ])
 
-        const provData = provRes?.data ?? []
-        this.proveedores = provData.map(this.mapProveedorApiToVM)
+        const provPage = unwrapPage(provRes?.data)
+        this.proveedores = provPage.content.map(this.mapProveedorApiToVM)
 
-        this.productos = prodRes?.data ?? []
-
-        const comprasData = comprasRes?.data ?? []
-        this.compras = comprasData.map(this.mapCompraApiToVM)
+        const prodPage = unwrapPage(prodRes?.data)
+        this.productos = prodPage.content ?? prodRes?.data ?? []
 
         this.cajaAbierta = cajaRes?.data ?? null
-        this.metodosPago = (mpRes?.data ?? []).map((m) => ({
+
+        const mpPage = unwrapPage(mpRes?.data)
+        this.metodosPago = (mpPage.content ?? mpRes?.data ?? []).map((m) => ({
           metodoPagoId: Number(m?.metodoPagoId ?? m?.id ?? 0),
           nombre: m?.nombre ?? m?.descripcion ?? "—",
         }))
+
+        // compras paginadas
+        await this.refreshCompras()
       } catch (e) {
         this.error = e?.response?.data?.error || e?.message || "Error cargando compras"
       } finally {
         this.loading = false
       }
+    },
+
+    async refreshCompras() {
+      this.loading = true
+      this.error = ""
+      try {
+        const res = await comprasApi.list({
+          page: this.page,
+          size: this.size,
+          search: this.q.trim() || null,
+        })
+        const p = unwrapPage(res?.data)
+        this.compras = p.content.map(this.mapCompraApiToVM)
+
+        this.totalElements = p.totalElements
+        this.totalPages = p.totalPages
+        this.page = p.page
+        this.size = p.size
+      } catch (e) {
+        this.compras = []
+        this.totalElements = 0
+        this.totalPages = 1
+        this.error = e?.response?.data?.error || e?.message || "Error cargando compras"
+      } finally {
+        this.loading = false
+      }
+    },
+
+    prevPage() {
+      if (!this.canPrev) return
+      this.page--
+    },
+    nextPage() {
+      if (!this.canNext) return
+      this.page++
     },
 
     // ===== Crear compra =====
@@ -540,13 +623,15 @@ export default {
           detalles: this.form.detalles.map((d) => ({
             productoId: d.productoId,
             cantidad: d.cantidad,
-            precioUnitario: d.precioUnitario, // back lo recalcula igual
+            precioUnitario: d.precioUnitario,
           })),
         }
 
         await comprasApi.create(payload)
         this.toastSuccess("Compra creada ✅")
-        await this.refreshAll()
+
+        this.page = 0
+        await this.refreshCompras()
       } catch (e) {
         this.error = e?.response?.data?.error || e?.message || "Error creando compra"
       } finally {
@@ -565,8 +650,12 @@ export default {
           comprasApi.porId(compraId),
           pagosProveedorApi.porCompra(compraId),
         ])
+
         this.detalle = cRes?.data ?? null
-        this.pagosDetalle = pRes?.data ?? []
+
+        // pagos puede venir paginado
+        const pagosPage = unwrapPage(pRes?.data)
+        this.pagosDetalle = pagosPage.content ?? pRes?.data ?? []
       } catch (e) {
         this.error = e?.response?.data?.error || e?.message || "Error cargando detalle"
       } finally {
@@ -605,7 +694,8 @@ export default {
 
         await pagosProveedorApi.create(payload)
         this.toastSuccess("Pago registrado ✅")
-        await this.refreshAll()
+
+        await this.refreshCompras()
 
         if (this.detalle?.compra?.compraId === compraId) {
           await this.openDetalle(compraId)

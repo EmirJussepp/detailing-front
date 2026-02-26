@@ -606,13 +606,15 @@ export default {
         const turno = getShift()
 
         const [provRes, deudasRes, cajaRes, mpRes] = await Promise.all([
-          proveedoresApi.list(),
-          proveedoresApi.deudas().catch(() => ({ data: [] })),
-          cajaApi.abierta({ userId, turno }).catch(() => ({ data: null })),
-          metodosPagoApi.list().catch(() => ({ data: [] })),
-        ])
+  proveedoresApi.list(),
+  proveedoresApi.deudas().catch(() => ({ data: [] })),
+  // ✅ sin turno: trae la caja abierta real del usuario
+  cajaApi.abierta({ userId }).catch(() => ({ data: null })),
+  metodosPagoApi.list().catch(() => ({ data: [] })),
+])
 
-        this.proveedores = (provRes?.data ?? []).map(this.mapProveedorApiToVM)
+        const provData = provRes?.data?.content ?? []
+this.proveedores = provData.map(this.mapProveedorApiToVM)
 
         const deudas = deudasRes?.data ?? []
         this.deudasMap = new Map(

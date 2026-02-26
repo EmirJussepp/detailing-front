@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, onMounted, watch } from "vue"
 import { RouterLink } from "vue-router"
-import { getSession } from "../auth/session"
+import { getSession, getShift } from "../auth/session"
 import { emitCajaChanged } from "../ui/cajaEvents"
 import { cajaApi } from "../services/cajaApi"
 import { movimientosCajaApi } from "../services/movimientosCajaApi"
@@ -25,16 +25,52 @@ function formatMoney(n) {
 }
 
 function toMoneyNumber(v) {
-  const x = Number(String(v ?? "").replace(",", "."))
+  const x = Number(String(v ?? "").replace(",", ".").replace(/[^\d.-]/g, ""))
   return Number.isFinite(x) ? x : NaN
 }
 
+function safeDateLabel(v) {
+  if (!v) return "—"
+  try {
+    return new Date(v).toLocaleString("es-AR")
+  } catch {
+    return String(v)
+  }
+}
+
+// Concepto -> tipo esperado (para alta manual)
 function tipoPorConcepto(concepto) {
   if (concepto === "GASTO" || concepto === "RETIRO") return "EGRESO"
   if (concepto === "APORTE") return "INGRESO"
   return "EGRESO"
 }
 
+// =========================
+// Turno (persistido)
+// =========================
+const turnoKey = `caja_turno_v1:${userId}`
+const selectedTurno = ref(getShift?.() || "MANIANA") // backend: MANIANA | TARDE
+
+// =========================
+// UI State
+// =========================
+const loading = ref(false)
+const errorMsg = ref("")
+const okMsg = ref("")
+const infoMsg = ref("")
+
+const caja = ref(null) // caja abierta o null
+const saldoActual = ref(0)
+const movimientos = ref([])
+
+// abrir caja
+const abrirMontoInicial = ref("")
+
+// arqueo/cierre
+const montoContado = ref("")
+
+// modal movimiento manual
+const showMovModal = ref(false)
 const movForm = ref({
   concepto: "GASTO",
   tipoManual: "EGRESO", // solo si concepto=AJUSTE
@@ -48,44 +84,57 @@ function tipoMovimientoParaForm() {
 }
 
 // =========================
-// Filtros (fecha / turno)
+// Derived (KPIs)
 // =========================
-const selectedFecha = ref(todayISO())
+const movimientosOrdenados = computed(() => {
+  const arr = Array.isArray(movimientos.value) ? [...movimientos.value] : []
+  arr.sort((a, b) => {
+    const da = new Date(a?.fecha ?? 0).getTime()
+    const db = new Date(b?.fecha ?? 0).getTime()
+    return db - da
+  })
+  return arr
+})
 
-const turnoKey = `caja_turno_v1:${userId}`
-const selectedTurno = ref("MANIANA") // BE: MANIANA | TARDE
+const ultimosMovs = computed(() => movimientosOrdenados.value.slice(0, 12))
 
-// =========================
-// Estado UI
-// =========================
-// arqueo
-const montoContado = ref("")
+const kpiIngresos = computed(() => {
+  return movimientosOrdenados.value
+    .filter((m) => String(m?.tipo || "").toUpperCase() === "INGRESO")
+    .reduce((acc, m) => acc + Number(m?.monto ?? 0), 0)
+})
+
+const kpiEgresos = computed(() => {
+  return movimientosOrdenados.value
+    .filter((m) => String(m?.tipo || "").toUpperCase() === "EGRESO")
+    .reduce((acc, m) => acc + Number(m?.monto ?? 0), 0)
+})
+
+const kpiVentas = computed(() => {
+  return movimientosOrdenados.value
+    .filter((m) => String(m?.concepto || "").toUpperCase() === "VENTA")
+    .reduce((acc, m) => acc + Number(m?.monto ?? 0), 0)
+})
+
+const kpiPagosProveedor = computed(() => {
+  return movimientosOrdenados.value
+    .filter((m) => String(m?.concepto || "").toUpperCase() === "PAGO_PROVEEDOR")
+    .reduce((acc, m) => acc + Number(m?.monto ?? 0), 0)
+})
 
 const contadoNum = computed(() => toMoneyNumber(montoContado.value))
+
 const diferencia = computed(() => {
   const c = contadoNum.value
   if (!Number.isFinite(c)) return null
   return c - Number(saldoActual.value ?? 0)
 })
-const loading = ref(false)
-const errorMsg = ref("")
-const okMsg = ref("")
 
-const caja = ref(null)
-const saldoActual = ref(0)
-const movimientos = ref([])
-
-// abrir
-const abrirMontoInicial = ref("")
-
-// modal movimientos
-const showMovModal = ref(false)
-
-
-const ultimosMovs = computed(() => movimientos.value.slice(0, 10))
+const canCerrar = computed(() => Boolean(caja.value?.cajaId) && !loading.value)
+const canAbrir = computed(() => !caja.value?.cajaId && !loading.value)
 
 // =========================
-// Fetch
+// Data Fetch
 // =========================
 async function loadMovimientos() {
   if (!caja.value?.cajaId) {
@@ -100,61 +149,46 @@ async function refresh() {
   loading.value = true
   errorMsg.value = ""
   okMsg.value = ""
-
-  const fetchAbierta = async (turno) => {
-    const { data } = await cajaApi.abierta({ userId, turno })
-    return data ?? null
-  }
+  infoMsg.value = ""
 
   try {
-    // 1) Intento con el turno seleccionado
-    let found = await fetchAbierta(selectedTurno.value)
-
-    // 2) Si no hay (404), intento con el otro turno
-    if (!found) {
-      const otroTurno = selectedTurno.value === "MANIANA" ? "TARDE" : "MANIANA"
-      try {
-        found = await fetchAbierta(otroTurno)
-        if (found?.cajaId) selectedTurno.value = found.turno // alinear UI
-      } catch (e2) {
-        // si también falla, lo dejamos en null (y abajo maneja)
-      }
-    }
-
-    caja.value = found
-    saldoActual.value = 0
-    movimientos.value = []
+    // /cajas/abierta?userId&turno
+    const { data } = await cajaApi.abierta({ userId }) // ✅ trae la abierta del usuario
+    caja.value = data ?? null
 
     if (!caja.value?.cajaId) {
-      errorMsg.value = "No hay caja ABIERTA."
+      // Si el back devuelve 200 con null, dejamos info.
+      saldoActual.value = 0
+      movimientos.value = []
+      infoMsg.value = "No hay caja abierta para este turno. Podés abrirla abajo."
       return
     }
 
-    // alinear fecha/turno a lo real
-    if (caja.value?.turno) selectedTurno.value = caja.value.turno
-    if (caja.value?.fecha) selectedFecha.value = String(caja.value.fecha).slice(0, 10)
-
+    // saldo actual (server)
     const { data: saldoDto } = await cajaApi.saldo(caja.value.cajaId)
     saldoActual.value = Number(saldoDto?.saldoActual ?? 0)
 
+    // movimientos (para KPIs/tabla)
     try {
       await loadMovimientos()
-    } catch (_) {
+    } catch {
       movimientos.value = []
     }
   } catch (e) {
-    caja.value = null
-    saldoActual.value = 0
-    movimientos.value = []
-
+    // 404 acá NO es “error”: significa “no hay caja”
     const status = e?.response?.status
     if (status === 404) {
-      errorMsg.value = "No hay caja ABIERTA."
+      caja.value = null
+      saldoActual.value = 0
+      movimientos.value = []
+      infoMsg.value = "No hay caja abierta para este turno. Podés abrirla abajo."
     } else {
+      caja.value = null
+      saldoActual.value = 0
+      movimientos.value = []
       errorMsg.value =
         e?.response?.data?.error ||
         e?.response?.data?.message ||
-        e?.response?.data ||
         e?.message ||
         "Error consultando la caja."
     }
@@ -164,19 +198,12 @@ async function refresh() {
 }
 
 // =========================
-// Acciones
+// Actions
 // =========================
-
-
 async function abrirCaja() {
   errorMsg.value = ""
   okMsg.value = ""
-
-  const hoy = todayISO()
-  if (selectedFecha.value !== hoy) {
-    errorMsg.value = "Solo podés abrir caja para HOY. Cambiá la fecha a hoy."
-    return
-  }
+  infoMsg.value = ""
 
   const monto = toMoneyNumber(abrirMontoInicial.value)
   if (!Number.isFinite(monto) || monto < 0) {
@@ -201,22 +228,18 @@ async function abrirCaja() {
       errorMsg.value = e?.response?.data?.error || "Ya existe una caja ABIERTA para este usuario."
       return
     }
-
     errorMsg.value =
       e?.response?.data?.error ||
       e?.response?.data?.message ||
-      e?.response?.data ||
       e?.message ||
       "Error abriendo caja."
   }
 }
 
-
-
-
 async function cerrarCaja() {
   errorMsg.value = ""
   okMsg.value = ""
+  infoMsg.value = ""
 
   if (!caja.value?.cajaId) {
     errorMsg.value = "No hay caja ABIERTA para cerrar."
@@ -227,7 +250,7 @@ async function cerrarCaja() {
   const hayContado = Number.isFinite(contado)
 
   try {
-    // 1) si hay contado, genero AJUSTE si corresponde
+    // 1) si hay contado y hay diferencia, registramos AJUSTE automático
     if (hayContado) {
       const esperado = Number(saldoActual.value ?? 0)
       const diff = contado - esperado
@@ -247,11 +270,13 @@ async function cerrarCaja() {
     // 2) refresco para que el saldo muestre el ajuste antes de cerrar
     await refresh()
 
-    // 3) cierro (back: CerrarCajaCommand solo usa userId)
+    // 3) cierro caja
     await cajaApi.cerrar(caja.value.cajaId, { userId })
 
     okMsg.value = hayContado
-      ? `Caja cerrada ✅ (contado: $ ${formatMoney(contado)} / esperado: $ ${formatMoney(saldoActual.value)})`
+      ? `Caja cerrada ✅ (contado: $ ${formatMoney(contado)} / esperado: $ ${formatMoney(
+          saldoActual.value
+        )})`
       : `Caja cerrada ✅ (monto final auto: $ ${formatMoney(saldoActual.value)})`
 
     montoContado.value = ""
@@ -261,17 +286,15 @@ async function cerrarCaja() {
     errorMsg.value =
       e?.response?.data?.error ||
       e?.response?.data?.message ||
-      e?.response?.data ||
       e?.message ||
       "Error cerrando caja."
   }
 }
 
-
-
 async function crearMovimientoManual() {
   errorMsg.value = ""
   okMsg.value = ""
+  infoMsg.value = ""
 
   if (!caja.value?.cajaId) {
     errorMsg.value = "Abrí una caja primero."
@@ -288,7 +311,7 @@ async function crearMovimientoManual() {
     await movimientosCajaApi.crear({
       cajaId: caja.value.cajaId,
       userId,
-     tipo: tipoMovimientoParaForm(),
+      tipo: tipoMovimientoParaForm(),
       concepto: movForm.value.concepto,
       descripcion: movForm.value.descripcion?.trim() || null,
       monto,
@@ -305,7 +328,6 @@ async function crearMovimientoManual() {
     errorMsg.value =
       e?.response?.data?.error ||
       e?.response?.data?.message ||
-      e?.response?.data ||
       e?.message ||
       "Error registrando movimiento."
   }
@@ -325,86 +347,133 @@ watch(selectedTurno, (v) => localStorage.setItem(turnoKey, v))
 
 <template>
   <div>
-    <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+    <!-- Header -->
+    <div class="d-flex align-items-start justify-content-between gap-3 mb-3 flex-wrap">
       <div>
-        <h1 class="h4 mb-1">Caja</h1>
+        <h1 class="h4 mb-1">Caja (POS)</h1>
         <div class="text-secondary small">
-          User: <b>{{ userId }}</b>
+          Usuario: <b>{{ userId }}</b> · Hoy: <b>{{ todayISO() }}</b>
         </div>
 
         <div class="d-flex gap-2 mt-2 flex-wrap align-items-end">
           <div>
-            <label class="form-label text-secondary mb-1">Fecha</label>
-            <input
-              type="date"
-              v-model="selectedFecha"
-              class="form-control bg-dark text-white border-secondary"
-              :disabled="loading"
-            />
-          </div>
-
-          <div>
             <label class="form-label text-secondary mb-1">Turno</label>
-            <select v-model="selectedTurno" class="form-control bg-dark text-white border-secondary" :disabled="Boolean(caja)">
+            <select
+              v-model="selectedTurno"
+              class="form-control bg-dark text-white border-secondary"
+              :disabled="Boolean(caja?.cajaId) || loading"
+            >
               <option value="MANIANA">MAÑANA</option>
               <option value="TARDE">TARDE</option>
             </select>
+            <div class="text-secondary small mt-1" v-if="caja?.cajaId">
+              Turno bloqueado mientras la caja está abierta.
+            </div>
           </div>
         </div>
       </div>
 
-      <div class="d-flex gap-2">
+      <div class="d-flex gap-2 flex-wrap align-items-center">
         <button class="btn btn-sm btn-outline-light" @click="refresh" :disabled="loading">
           {{ loading ? "Actualizando..." : "Actualizar" }}
         </button>
 
-        <RouterLink class="btn btn-sm btn-primary btn-accent" to="/caja/ventas">
-          Ir a Ventas
+        <RouterLink class="btn btn-sm btn-outline-light" to="/movimientos-caja">
+          Movimientos
+        </RouterLink>
+
+        <RouterLink class="btn btn-sm btn-outline-light" to="/compras">
+          Compras
+        </RouterLink>
+
+        <RouterLink class="btn btn-sm btn-primary btn-accent" to="/ventas">
+          Ventas
         </RouterLink>
       </div>
     </div>
 
+    <!-- Alerts -->
     <div v-if="errorMsg" class="alert alert-danger py-2">{{ errorMsg }}</div>
     <div v-if="okMsg" class="alert alert-success py-2">{{ okMsg }}</div>
+    <div v-if="infoMsg" class="alert alert-secondary py-2">{{ infoMsg }}</div>
 
+    <!-- Estado + KPIs -->
     <div class="row g-3 mb-3">
-      <div class="col-12 col-lg-5">
+      <div class="col-12 col-lg-4">
         <div class="card bg-panel border-0 shadow-sm h-100">
           <div class="card-body">
             <div class="text-secondary small">Estado</div>
 
             <div v-if="caja?.cajaId" class="mt-2">
               <span class="badge text-bg-success">ABIERTA</span>
-              <div class="text-secondary small mt-2">
-                Caja ID: <b>{{ caja.cajaId }}</b>
+              <div class="text-secondary small mt-2">Caja ID: <b>{{ caja.cajaId }}</b></div>
+              <div class="text-secondary small">Turno: <b>{{ caja.turno }}</b></div>
+              <div class="text-secondary small">
+                Apertura: <b>{{ safeDateLabel(caja.apertura || caja.fecha) }}</b>
               </div>
 
               <hr class="border-secondary my-3" />
 
               <div class="d-flex justify-content-between">
-                <div class="text-secondary small">Monto inicial</div>
+                <div class="text-secondary small">Inicial</div>
                 <div class="fw-bold">$ {{ formatMoney(caja.montoInicial) }}</div>
               </div>
 
               <div class="d-flex justify-content-between mt-2">
-                <div class="text-secondary small">Saldo actual (auto)</div>
+                <div class="text-secondary small">Saldo (auto)</div>
                 <div class="fw-bold">$ {{ formatMoney(saldoActual) }}</div>
               </div>
             </div>
 
             <div v-else class="mt-2 text-secondary">
-              No hay caja abierta para esta fecha/turno.
+              No hay caja abierta.
+              <div class="text-secondary small mt-1">Abrí caja para empezar a vender / pagar.</div>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="col-12 col-lg-7">
+      <div class="col-12 col-lg-8">
         <div class="card bg-panel border-0 shadow-sm h-100">
           <div class="card-body">
-            <h2 class="h6 mb-3">Acciones</h2>
+            <div class="d-flex justify-content-between flex-wrap gap-2 align-items-center mb-2">
+              <h2 class="h6 mb-0">Resumen del turno</h2>
+              <div class="text-secondary small">Basado en movimientos de caja</div>
+            </div>
+
+            <div class="row g-2">
+              <div class="col-6 col-md-3">
+                <div class="kpi">
+                  <div class="kpi-label">Ingresos</div>
+                  <div class="kpi-value text-success">$ {{ formatMoney(kpiIngresos) }}</div>
+                </div>
+              </div>
+              <div class="col-6 col-md-3">
+                <div class="kpi">
+                  <div class="kpi-label">Egresos</div>
+                  <div class="kpi-value text-danger">$ {{ formatMoney(kpiEgresos) }}</div>
+                </div>
+              </div>
+              <div class="col-6 col-md-3">
+                <div class="kpi">
+                  <div class="kpi-label">Ventas</div>
+                  <div class="kpi-value">$ {{ formatMoney(kpiVentas) }}</div>
+                </div>
+              </div>
+              <div class="col-6 col-md-3">
+                <div class="kpi">
+                  <div class="kpi-label">Pagos prov.</div>
+                  <div class="kpi-value">$ {{ formatMoney(kpiPagosProveedor) }}</div>
+                </div>
+              </div>
+            </div>
+
+            <hr class="border-secondary my-3" />
+
+            <h2 class="h6 mb-3">Acciones rápidas</h2>
 
             <div class="row g-3">
+              <!-- Abrir -->
               <div class="col-12 col-md-6">
                 <label class="form-label text-secondary">Monto inicial (abrir)</label>
                 <input
@@ -412,88 +481,80 @@ watch(selectedTurno, (v) => localStorage.setItem(turnoKey, v))
                   class="form-control bg-dark text-white border-secondary"
                   placeholder="Ej: 20000"
                   inputmode="numeric"
-                  :disabled="loading"
+                  :disabled="loading || !!caja?.cajaId"
                 />
                 <button
                   class="btn btn-primary btn-accent w-100 mt-2"
                   @click="abrirCaja"
-                  :disabled="loading || !!caja?.cajaId"
+                  :disabled="!canAbrir"
                 >
                   Abrir caja
                 </button>
+                <div class="text-secondary small mt-2">
+                  Abrí caja antes de registrar ventas/pagos del turno.
+                </div>
               </div>
 
+              <!-- Cerrar -->
               <div class="col-12 col-md-6">
-  <label class="form-label text-secondary">Cierre / Arqueo</label>
+                <label class="form-label text-secondary">Cierre / Arqueo</label>
 
-  <div class="d-flex justify-content-between small text-secondary">
-    <span>Esperado (auto)</span>
-    <b>$ {{ formatMoney(saldoActual) }}</b>
-  </div>
+                <div class="d-flex justify-content-between small text-secondary">
+                  <span>Esperado (auto)</span>
+                  <b>$ {{ formatMoney(saldoActual) }}</b>
+                </div>
 
-  <input
-    v-model="montoContado"
-    class="form-control bg-dark text-white border-secondary mt-2"
-    placeholder="Contado (opcional) ej: 148000"
-    inputmode="numeric"
-    :disabled="loading || !caja?.cajaId"
-  />
+                <input
+                  v-model="montoContado"
+                  class="form-control bg-dark text-white border-secondary mt-2"
+                  placeholder="Contado (opcional) ej: 148000"
+                  inputmode="numeric"
+                  :disabled="loading || !caja?.cajaId"
+                />
 
-  <div class="d-flex justify-content-between small mt-2">
-    <span class="text-secondary">Diferencia</span>
+                <div class="d-flex justify-content-between small mt-2">
+                  <span class="text-secondary">Diferencia</span>
 
-    <b
-      v-if="diferencia !== null"
-      :class="diferencia === 0 ? 'text-success' : (diferencia > 0 ? 'text-success' : 'text-danger')"
-    >
-      {{ diferencia > 0 ? "+" : "" }}$ {{ formatMoney(diferencia) }}
-    </b>
+                  <b
+                    v-if="diferencia !== null"
+                    :class="diferencia === 0 ? 'text-success' : (diferencia > 0 ? 'text-success' : 'text-danger')"
+                  >
+                    {{ diferencia > 0 ? "+" : "" }}$ {{ formatMoney(diferencia) }}
+                  </b>
 
-    <span v-else class="text-secondary">—</span>
-  </div>
+                  <span v-else class="text-secondary">—</span>
+                </div>
 
-  <button
-    class="btn btn-outline-light w-100 mt-2"
-    @click="cerrarCaja"
-    :disabled="loading || !caja?.cajaId"
-  >
-    Cerrar caja
-  </button>
+                <button class="btn btn-outline-light w-100 mt-2" @click="cerrarCaja" :disabled="!canCerrar">
+                  Cerrar caja
+                </button>
 
-  <div class="text-secondary small mt-2">
-    Si cargás “Contado”, el sistema registra un AJUSTE automático si hay diferencia.
-  </div>
-</div>
+                <div class="text-secondary small mt-2">
+                  Si cargás “Contado”, el sistema registra un <b>AJUSTE</b> automático si hay diferencia.
+                </div>
+              </div>
             </div>
 
-            <div class="d-flex gap-2 mt-3">
-              <button
-                class="btn btn-sm btn-primary btn-accent"
-                :disabled="!caja?.cajaId"
-                @click="showMovModal = true"
-              >
-                + Movimiento
+            <div class="d-flex gap-2 mt-3 flex-wrap">
+              <button class="btn btn-sm btn-primary btn-accent" :disabled="!caja?.cajaId" @click="showMovModal = true">
+                + Movimiento manual
               </button>
-            </div>
 
-            <div class="text-secondary small mt-3">
-              Caja = dashboard por fecha/turno. Ventas = pantalla dedicada.
+              <RouterLink class="btn btn-sm btn-outline-light" :class="{ disabled: !caja?.cajaId }" to="/movimientos-caja">
+                Ver historial completo
+              </RouterLink>
             </div>
           </div>
-          <div class="text-secondary small mt-2">
-  debug: loading={{ loading }} cajaId={{ caja?.cajaId ?? "null" }}
-</div>
         </div>
       </div>
     </div>
 
+    <!-- Últimos movimientos -->
     <div class="card bg-panel border-0 shadow-sm" v-if="caja?.cajaId">
       <div class="card-body">
         <h2 class="h6 mb-3">Últimos movimientos</h2>
 
-        <div v-if="ultimosMovs.length === 0" class="text-secondary">
-          No hay movimientos todavía.
-        </div>
+        <div v-if="ultimosMovs.length === 0" class="text-secondary">No hay movimientos todavía.</div>
 
         <div v-else class="table-responsive">
           <table class="table table-dark table-hover align-middle mb-0">
@@ -501,18 +562,16 @@ watch(selectedTurno, (v) => localStorage.setItem(turnoKey, v))
               <tr>
                 <th style="width: 180px">Fecha</th>
                 <th style="width: 110px">Tipo</th>
-                <th style="width: 140px">Concepto</th>
+                <th style="width: 150px">Concepto</th>
                 <th>Descripción</th>
                 <th style="width: 140px" class="text-end">Monto</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="m in ultimosMovs" :key="m.movimientoCajaId ?? m.id">
-                <td class="text-secondary">
-                  {{ m.fecha ? new Date(m.fecha).toLocaleString("es-AR") : "—" }}
-                </td>
+                <td class="text-secondary">{{ safeDateLabel(m.fecha) }}</td>
                 <td>
-                  <span class="badge" :class="m.tipo === 'INGRESO' ? 'text-bg-success' : 'text-bg-danger'">
+                  <span class="badge" :class="String(m.tipo).toUpperCase() === 'INGRESO' ? 'text-bg-success' : 'text-bg-danger'">
                     {{ m.tipo }}
                   </span>
                 </td>
@@ -523,71 +582,75 @@ watch(selectedTurno, (v) => localStorage.setItem(turnoKey, v))
             </tbody>
           </table>
         </div>
+
+        <div class="text-secondary small mt-2">
+          Tip: ventas/pagos proveedor deberían generar movimientos automáticos (no manuales).
+        </div>
       </div>
     </div>
 
-   <!-- Modal movimiento -->
-<div v-if="showMovModal" class="modal-backdrop" @click.self="showMovModal = false">
-  <div class="modal-card">
-    <div class="d-flex justify-content-between align-items-center mb-2">
-      <div class="fw-bold">Nuevo movimiento</div>
-      <button class="btn btn-sm btn-outline-light" @click="showMovModal = false">X</button>
+    <!-- Modal movimiento -->
+    <div v-if="showMovModal" class="modal-backdrop" @click.self="showMovModal = false">
+      <div class="modal-card">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="fw-bold">Nuevo movimiento manual</div>
+          <button class="btn btn-sm btn-outline-light" @click="showMovModal = false">X</button>
+        </div>
+
+        <div class="row g-2">
+          <div class="col-12">
+            <label class="form-label text-secondary">Concepto</label>
+            <select v-model="movForm.concepto" class="form-control bg-dark text-white border-secondary">
+              <option value="GASTO">GASTO (egreso)</option>
+              <option value="RETIRO">RETIRO (egreso)</option>
+              <option value="APORTE">APORTE (ingreso)</option>
+              <option value="AJUSTE">AJUSTE</option>
+            </select>
+            <div class="text-secondary small mt-1">
+              VENTA y PAGO_PROVEEDOR no se registran manualmente (los crea el sistema).
+            </div>
+          </div>
+
+          <div class="col-12" v-if="movForm.concepto === 'AJUSTE'">
+            <label class="form-label text-secondary">Tipo de ajuste</label>
+            <select v-model="movForm.tipoManual" class="form-control bg-dark text-white border-secondary">
+              <option value="INGRESO">INGRESO (suma)</option>
+              <option value="EGRESO">EGRESO (resta)</option>
+            </select>
+          </div>
+
+          <div class="col-12">
+            <label class="form-label text-secondary">Monto</label>
+            <input v-model="movForm.monto" class="form-control bg-dark text-white border-secondary" inputmode="numeric" />
+          </div>
+
+          <div class="col-12">
+            <label class="form-label text-secondary">Descripción</label>
+            <input v-model="movForm.descripcion" class="form-control bg-dark text-white border-secondary" />
+          </div>
+        </div>
+
+        <button class="btn btn-primary btn-accent w-100 mt-3" @click="crearMovimientoManual">
+          Guardar
+        </button>
+      </div>
     </div>
-
-    <div class="row g-2">
-      <!-- Concepto -->
-      <div class="col-12">
-        <label class="form-label text-secondary">Concepto</label>
-        <select v-model="movForm.concepto" class="form-control bg-dark text-white border-secondary">
-          <option value="GASTO">GASTO (egreso)</option>
-          <option value="RETIRO">RETIRO (egreso)</option>
-          <option value="APORTE">APORTE (ingreso)</option>
-          <option value="AJUSTE">AJUSTE</option>
-        </select>
-      </div>
-
-      <!-- Tipo de ajuste (solo si concepto = AJUSTE) -->
-      <div class="col-12" v-if="movForm.concepto === 'AJUSTE'">
-        <label class="form-label text-secondary">Tipo de ajuste</label>
-        <select v-model="movForm.tipoManual" class="form-control bg-dark text-white border-secondary">
-          <option value="INGRESO">INGRESO (suma)</option>
-          <option value="EGRESO">EGRESO (resta)</option>
-        </select>
-      </div>
-
-      <!-- Monto -->
-      <div class="col-12">
-        <label class="form-label text-secondary">Monto</label>
-        <input
-          v-model="movForm.monto"
-          class="form-control bg-dark text-white border-secondary"
-          inputmode="numeric"
-        />
-      </div>
-
-      <!-- Descripción -->
-      <div class="col-12">
-        <label class="form-label text-secondary">Descripción</label>
-        <input v-model="movForm.descripcion" class="form-control bg-dark text-white border-secondary" />
-      </div>
-    </div>
-
-    <button class="btn btn-primary btn-accent w-100 mt-3" @click="crearMovimientoManual">
-      Guardar
-    </button>
-
-    <div class="text-secondary small mt-2">
-      Nota: ventas/pagos de proveedor generan movimientos automáticos.
-    </div>
-  </div>
-</div>
   </div>
 </template>
 
 <style scoped>
-.bg-panel{ background: rgba(18, 22, 32, .92); }
-.btn-accent{ background: #6f5cff; border: none; }
-.btn-accent:hover{ background: #5f4de6; }
+.bg-panel { background: rgba(18, 22, 32, .92); }
+.btn-accent { background: #6f5cff; border: none; }
+.btn-accent:hover { background: #5f4de6; }
+
+.kpi{
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(0,0,0,.15);
+}
+.kpi-label{ color: rgba(255,255,255,.65); font-size: 12px; }
+.kpi-value{ font-weight: 800; font-size: 16px; }
 
 .modal-backdrop{
   position: fixed;
