@@ -48,7 +48,9 @@
           </div>
 
           <div class="col-12 col-md-4 d-flex justify-content-md-end">
-            <span class="text-secondary small">{{ filtered.length }} proveedor(es)</span>
+            <span class="text-secondary small">
+              {{ filtered.length }} proveedor(es)
+            </span>
           </div>
         </div>
       </div>
@@ -73,25 +75,36 @@
 
           <tbody>
             <tr v-if="filtered.length === 0">
-              <td colspan="5" class="text-center text-secondary py-4">No hay proveedores para mostrar.</td>
+              <td colspan="5" class="text-center text-secondary py-4">
+                No hay proveedores para mostrar.
+              </td>
             </tr>
 
             <tr v-for="p in filtered" :key="p.id">
               <td>
-                <div class="fw-semibold d-flex gap-2 align-items-center flex-wrap">
-                  <span>{{ p.displayName || "—" }}</span>
+                <div class="d-flex gap-2 align-items-start">
+                  <div class="flex-grow-1">
+                    <div class="fw-semibold d-flex gap-2 align-items-center flex-wrap">
+                      <span>{{ p.displayName || "—" }}</span>
 
-                  <span class="badge" :class="p.tipo === 'EMPRESA' ? 'text-bg-info' : 'text-bg-secondary'">
-                    {{ p.tipo === "EMPRESA" ? "EMPRESA" : "PERSONA" }}
-                  </span>
+                      <span class="badge" :class="p.tipo === 'EMPRESA' ? 'text-bg-info' : 'text-bg-secondary'">
+                        {{ p.tipo === "EMPRESA" ? "EMPRESA" : "PERSONA" }}
+                      </span>
 
-                  <span class="badge" :class="docBadgeClass(p)">
-                    {{ p.documentoLabel || (p.tipo === "EMPRESA" ? "CUIT —" : "DOC —") }}
-                  </span>
+                      <span class="badge" :class="docBadgeClass(p)">
+                        {{ p.documentoLabel || (p.tipo === "EMPRESA" ? "CUIT —" : "DOC —") }}
+                      </span>
+                    </div>
+
+                    <div class="text-secondary small" v-if="p.direccion">
+                      {{ p.direccion }}
+                    </div>
+
+                    <div class="text-secondary small" v-if="p.notas">
+                      <span class="opacity-75">📝</span> {{ p.notas }}
+                    </div>
+                  </div>
                 </div>
-
-                <div class="text-secondary small" v-if="p.direccion">{{ p.direccion }}</div>
-                <div class="text-secondary small" v-if="p.notas"><span class="opacity-75">📝</span> {{ p.notas }}</div>
               </td>
 
               <td class="text-secondary">
@@ -146,7 +159,7 @@
       </div>
 
       <div class="card-footer border-secondary text-secondary small">
-        Tip: saldo = <b>compras</b> - <b>pagos</b>. Si queda negativo, te queda “a favor”.
+        Tip: el saldo es <b>compras</b> menos <b>pagos</b>. Si queda negativo, el proveedor te queda “a favor”.
       </div>
     </div>
 
@@ -155,35 +168,52 @@
       <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content bg-dark border-secondary modal-round">
           <div class="modal-header border-secondary">
-            <h5 class="modal-title">{{ mode === "create" ? "Nuevo proveedor" : "Editar proveedor" }}</h5>
+            <h5 class="modal-title">
+              {{ mode === "create" ? "Nuevo proveedor" : "Editar proveedor" }}
+            </h5>
             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
           </div>
 
           <div class="modal-body">
             <div v-if="formError" class="alert alert-danger py-2">{{ formError }}</div>
 
+            <!-- Tipo -->
             <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
               <span class="text-secondary small">Tipo:</span>
+
               <div class="btn-group">
-                <button class="btn btn-sm" :class="form.tipo === 'PERSONA' ? 'btn-accent' : 'btn-outline-light'" @click="setTipo('PERSONA')" type="button">
+                <button
+                  class="btn btn-sm"
+                  :class="form.tipo === 'PERSONA' ? 'btn-accent' : 'btn-outline-light'"
+                  @click="setTipo('PERSONA')"
+                  type="button"
+                >
                   Persona
                 </button>
-                <button class="btn btn-sm" :class="form.tipo === 'EMPRESA' ? 'btn-accent' : 'btn-outline-light'" @click="setTipo('EMPRESA')" type="button">
+                <button
+                  class="btn btn-sm"
+                  :class="form.tipo === 'EMPRESA' ? 'btn-accent' : 'btn-outline-light'"
+                  @click="setTipo('EMPRESA')"
+                  type="button"
+                >
                   Empresa
                 </button>
               </div>
             </div>
 
             <div class="row g-3">
+              <!-- PERSONA -->
               <template v-if="form.tipo !== 'EMPRESA'">
                 <div class="col-12 col-md-6">
                   <label class="form-label text-secondary">Nombre *</label>
                   <input v-model="form.nombre" class="form-control" placeholder="Ej: Juan" />
                 </div>
+
                 <div class="col-12 col-md-6">
                   <label class="form-label text-secondary">Apellido</label>
                   <input v-model="form.apellido" class="form-control" placeholder="Ej: Pérez" />
                 </div>
+
                 <div class="col-12 col-md-4">
                   <label class="form-label text-secondary">Tipo doc.</label>
                   <select v-model="form.documentoTipo" class="form-select">
@@ -193,27 +223,32 @@
                     <option value="OTRO">OTRO</option>
                   </select>
                 </div>
+
                 <div class="col-12 col-md-8">
                   <label class="form-label text-secondary">Nro doc.</label>
                   <input v-model="form.documentoNro" class="form-control" inputmode="numeric" placeholder="Ej: 40111222" />
                 </div>
               </template>
 
+              <!-- EMPRESA -->
               <template v-else>
                 <div class="col-12">
                   <label class="form-label text-secondary">Razón social *</label>
                   <input v-model="form.razonSocial" class="form-control" placeholder="Ej: Distribuidora X S.A." />
                 </div>
+
                 <div class="col-12 col-md-6">
                   <label class="form-label text-secondary">CUIT *</label>
                   <input v-model="form.cuit" class="form-control" inputmode="numeric" placeholder="Ej: 30712345678" />
                 </div>
+
                 <div class="col-12 col-md-6">
                   <label class="form-label text-secondary">Contacto (opcional)</label>
                   <input v-model="form.contacto" class="form-control" placeholder="Ej: Mariana / Compras" />
                 </div>
               </template>
 
+              <!-- Comunes -->
               <div class="col-12 col-md-6">
                 <label class="form-label text-secondary">Teléfono</label>
                 <input v-model="form.telefono" class="form-control" placeholder="Ej: 3564..." />
@@ -242,7 +277,9 @@
               </div>
             </div>
 
-            <div class="text-secondary small mt-3">Se valida unicidad por DNI/CUIT y por razón social.</div>
+            <div class="text-secondary small mt-3">
+              Se valida unicidad por DNI/CUIT y por razón social.
+            </div>
           </div>
 
           <div class="modal-footer border-secondary">
@@ -265,7 +302,9 @@
               <div class="text-secondary small" v-if="pagoProveedor">
                 Proveedor: <b>{{ pagoProveedor.displayName }}</b>
                 · Saldo actual:
-                <b :class="saldoClass(pagoProveedor)">$ {{ formatMoney(getSaldo(pagoProveedor).saldo) }}</b>
+                <b :class="saldoClass(pagoProveedor)">
+                  $ {{ formatMoney(getSaldo(pagoProveedor).saldo) }}
+                </b>
               </div>
             </div>
             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
@@ -279,6 +318,7 @@
             <div v-if="pagoError" class="alert alert-danger py-2">{{ pagoError }}</div>
             <div v-if="pagoOk" class="alert alert-success py-2">{{ pagoOk }}</div>
 
+            <!-- Seleccionar compra -->
             <div class="row g-3">
               <div class="col-12 col-md-6">
                 <label class="form-label text-secondary">Compra a pagar *</label>
@@ -356,7 +396,9 @@
               </table>
             </div>
 
-            <div class="text-secondary small mt-3">Nota: el pago se registra contra una compra (por diseño del backend).</div>
+            <div class="text-secondary small mt-3">
+              Nota: el pago se registra contra una compra (por diseño del backend).
+            </div>
           </div>
 
           <div class="modal-footer border-secondary">
@@ -373,9 +415,9 @@
 import { proveedoresApi } from "../services/proveedoresApi"
 import { comprasApi } from "../services/comprasApi"
 import { pagosProveedorApi } from "../services/pagosProveedorApi"
-import { metodosPagoService } from "../services/metodosPagoService"
+import { metodosPagoApi } from "../services/metodopagoService"
 import { cajaApi } from "../services/cajaApi"
-import { getSession } from "../auth/session"
+import { getSession, getShift } from "../auth/session"
 
 export default {
   name: "ProveedoresView",
@@ -414,8 +456,8 @@ export default {
       pagoProveedor: null,
       pagoCompraId: null,
       pagoMonto: "",
-      pagoMetodoPagoId: null,
       pagoNotas: "",
+      pagoMetodoPagoId: null,
       pagoError: "",
       pagoOk: "",
       comprasPendientes: [],
@@ -517,7 +559,8 @@ export default {
       const cuit = raw?.cuit ?? ""
 
       const displayName = tipo === "EMPRESA" ? (razonSocial || "—") : `${nombre} ${apellido}`.trim() || "—"
-      const documentoLabel = tipo === "EMPRESA" ? (cuit ? `CUIT ${cuit}` : "CUIT —") : (dni ? `DNI ${dni}` : "DOC —")
+      const documentoLabel =
+        tipo === "EMPRESA" ? (cuit ? `CUIT ${cuit}` : "CUIT —") : (dni ? `DNI ${dni}` : "DOC —")
 
       return {
         id,
@@ -546,11 +589,12 @@ export default {
       const id = Number(p?.id ?? 0)
       const d = this.deudasMap.get(id)
       if (!id || !d) return { deudaCompras: 0, pagosTotal: 0, saldo: 0 }
-      return {
-        deudaCompras: Number(d.deudaCompras ?? 0),
-        pagosTotal: Number(d.pagosTotal ?? 0),
-        saldo: Number(d.saldo ?? 0),
-      }
+
+      const deudaCompras = Number(d.deudaCompras ?? d.deuda ?? 0)
+      const pagosTotal = Number(d.pagosTotal ?? d.pagos ?? 0)
+      const saldo = Number(d.saldo ?? (deudaCompras - pagosTotal))
+
+      return { deudaCompras, pagosTotal, saldo }
     },
 
     async refresh() {
@@ -559,33 +603,35 @@ export default {
       try {
         const session = getSession() ?? null
         const userId = Number(session?.userId ?? 1)
-        const turno = String(session?.shift ?? "MANIANA").toUpperCase()
+        const turno = getShift()
 
         const [provRes, deudasRes, cajaRes, mpRes] = await Promise.all([
           proveedoresApi.list(),
           proveedoresApi.deudas().catch(() => ({ data: [] })),
-          cajaApi.abierta(userId, turno).catch(() => ({ data: null })),
-          metodosPagoService.list().catch(() => ({ data: [] })),
+          cajaApi.abierta({ userId, turno }).catch(() => ({ data: null })),
+          metodosPagoApi.list().catch(() => ({ data: [] })),
         ])
 
         this.proveedores = (provRes?.data ?? []).map(this.mapProveedorApiToVM)
 
-        // BACK: DeudaProveedorDTO(totalCompras,totalPagado,deuda)
         const deudas = deudasRes?.data ?? []
         this.deudasMap = new Map(
           deudas.map((d) => [
-            Number(d.proveedorId ?? 0),
+            Number(d.proveedorId ?? d.id),
             {
-              proveedorId: Number(d.proveedorId ?? 0),
-              deudaCompras: Number(d.totalCompras ?? 0),
-              pagosTotal: Number(d.totalPagado ?? 0),
-              saldo: Number(d.deuda ?? 0),
+              proveedorId: Number(d.proveedorId ?? d.id),
+              deudaCompras: Number(d.totalCompras ?? d.deudaCompras ?? 0),
+              pagosTotal: Number(d.totalPagado ?? d.pagosTotal ?? 0),
+              saldo: Number(d.deuda ?? d.saldo ?? 0),
             },
           ])
         )
 
         this.cajaAbierta = cajaRes?.data ?? null
-        this.metodosPago = mpRes?.data ?? []
+        this.metodosPago = (mpRes?.data ?? []).map((m) => ({
+          metodoPagoId: Number(m?.metodoPagoId ?? m?.id ?? 0),
+          nombre: m?.nombre ?? m?.descripcion ?? "—",
+        }))
       } catch (e) {
         this.error = e?.response?.data?.error || e?.message || "Error cargando proveedores"
       } finally {
@@ -699,15 +745,19 @@ export default {
           const payload = {
             proveedorId: Number(this.editingId),
             tipoProveedor,
+
             nombre: safeNombre,
             apellido: tipoProveedor === "PERSONA" ? (this.form.apellido || "").trim() || null : null,
             dni: tipoProveedor === "PERSONA" ? this.onlyDigits(this.form.documentoNro) : null,
+
             razonSocial: tipoProveedor === "EMPRESA" ? (this.form.razonSocial || "").trim() : null,
             cuit: tipoProveedor === "EMPRESA" ? this.onlyDigits(this.form.cuit) : null,
+
             telefono: (this.form.telefono || "").trim() || null,
             email: (this.form.email || "").trim() || null,
             direccion: (this.form.direccion || "").trim() || null,
             notas: (this.form.notas || "").trim() || null,
+
             activo: !!this.form.activo,
           }
 
@@ -740,15 +790,19 @@ export default {
         const payload = {
           proveedorId: Number(p.id),
           tipoProveedor,
+
           nombre: safeNombre,
           apellido: tipoProveedor === "PERSONA" ? (p.apellido || "").trim() || null : null,
           dni: tipoProveedor === "PERSONA" ? this.onlyDigits(p.documentoNro) : null,
+
           razonSocial: tipoProveedor === "EMPRESA" ? (p.razonSocial || "").trim() : null,
           cuit: tipoProveedor === "EMPRESA" ? this.onlyDigits(p.cuit) : null,
+
           telefono: (p.telefono || "").trim() || null,
           email: (p.email || "").trim() || null,
           direccion: (p.direccion || "").trim() || null,
           notas: (p.notas || "").trim() || null,
+
           activo: !p.activo,
         }
 
@@ -766,8 +820,8 @@ export default {
       this.pagoProveedor = p
       this.pagoCompraId = null
       this.pagoMonto = ""
-      this.pagoMetodoPagoId = null
       this.pagoNotas = ""
+      this.pagoMetodoPagoId = null
       this.pagoError = ""
       this.pagoOk = ""
       this.comprasPendientes = []
@@ -779,7 +833,6 @@ export default {
         const allRaw = res?.data ?? []
         const pid = Number(p.id)
 
-        // BACK /compras => [{ compra, detalles }]
         const all = allRaw.map((x) => {
           const c = x?.compra ?? x ?? {}
           return {

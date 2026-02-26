@@ -4,7 +4,9 @@
     <div class="d-flex flex-wrap gap-2 align-items-end justify-content-between mb-3">
       <div>
         <h2 class="mb-1">Compras</h2>
-        <div class="text-secondary small">Crear compra · ver detalle · registrar pagos a proveedor.</div>
+        <div class="text-secondary small">
+          Crear compra · ver detalle · registrar pagos a proveedor.
+        </div>
       </div>
 
       <div class="d-flex gap-2">
@@ -34,7 +36,7 @@
             <input
               v-model="q"
               class="form-control form-control-sm"
-              style="min-width:260px"
+              style="min-width: 260px"
               placeholder="Buscar por proveedor / id"
             />
           </div>
@@ -48,12 +50,12 @@
           <table class="table table-dark table-hover align-middle">
             <thead>
               <tr>
-                <th style="width:90px">ID</th>
+                <th style="width: 90px">ID</th>
                 <th>Proveedor</th>
-                <th style="width:140px">Fecha</th>
-                <th style="width:140px" class="text-end">Total</th>
-                <th style="width:120px">Estado</th>
-                <th style="width:160px"></th>
+                <th style="width: 140px">Fecha</th>
+                <th style="width: 140px" class="text-end">Total</th>
+                <th style="width: 120px">Estado</th>
+                <th style="width: 160px"></th>
               </tr>
             </thead>
 
@@ -127,7 +129,9 @@
 
             <div class="d-flex align-items-center justify-content-between">
               <h6 class="mb-2">Ítems</h6>
-              <span class="text-secondary small">Total: <b>{{ formatMoney(totalDraft) }}</b></span>
+              <span class="text-secondary small"
+                >Total: <b>{{ formatMoney(totalDraft) }}</b></span
+              >
             </div>
 
             <div class="row g-2 align-items-end">
@@ -147,8 +151,14 @@
               </div>
 
               <div class="col-md-2">
-                <label class="form-label small text-secondary">PU (solo UI)</label>
-                <input v-model.number="itemDraft.precioUnitario" type="number" min="0" step="0.01" class="form-control" />
+                <label class="form-label small text-secondary">PU</label>
+                <input
+                  v-model.number="itemDraft.precioUnitario"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  class="form-control"
+                />
               </div>
 
               <div class="col-md-2 d-grid">
@@ -161,10 +171,10 @@
                 <thead>
                   <tr>
                     <th>Producto</th>
-                    <th style="width:90px">Cant</th>
-                    <th style="width:140px" class="text-end">PU</th>
-                    <th style="width:140px" class="text-end">Subt</th>
-                    <th style="width:70px"></th>
+                    <th style="width: 90px">Cant</th>
+                    <th style="width: 140px" class="text-end">PU</th>
+                    <th style="width: 140px" class="text-end">Subt</th>
+                    <th style="width: 70px"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -223,9 +233,9 @@
                   <thead>
                     <tr>
                       <th>Producto</th>
-                      <th style="width:90px">Cant</th>
-                      <th style="width:140px" class="text-end">PU</th>
-                      <th style="width:140px" class="text-end">Subt</th>
+                      <th style="width: 90px">Cant</th>
+                      <th style="width: 140px" class="text-end">PU</th>
+                      <th style="width: 140px" class="text-end">Subt</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -246,8 +256,8 @@
                 <table class="table table-dark table-hover align-middle">
                   <thead>
                     <tr>
-                      <th style="width:90px">ID</th>
-                      <th style="width:140px">Fecha</th>
+                      <th style="width: 90px">ID</th>
+                      <th style="width: 140px">Fecha</th>
                       <th class="text-end">Monto</th>
                       <th>Referencia</th>
                     </tr>
@@ -255,7 +265,7 @@
                   <tbody>
                     <tr v-for="p in pagosDetalle" :key="p.pagoProveedorId || p.id">
                       <td class="text-secondary">#{{ p.pagoProveedorId || p.id }}</td>
-                      <td class="text-secondary">{{ (p.fecha || '').slice(0, 10) }}</td>
+                      <td class="text-secondary">{{ (p.fecha || "").slice(0, 10) }}</td>
                       <td class="text-end">{{ formatMoney(p.monto) }}</td>
                       <td class="text-secondary">{{ p.referencia || "—" }}</td>
                     </tr>
@@ -285,9 +295,7 @@
           </div>
 
           <div class="modal-body">
-            <div class="text-secondary small mb-2">
-              Compra: <b>#{{ pagoForm.compraId }}</b>
-            </div>
+            <div class="text-secondary small mb-2">Compra: <b>#{{ pagoForm.compraId }}</b></div>
 
             <div class="alert alert-warning py-2" v-if="!cajaAbierta?.cajaId">
               No hay caja abierta para tu turno. Abrí caja antes de registrar pagos.
@@ -317,7 +325,6 @@
         </div>
       </div>
     </div>
-
   </div>
 </template>
 
@@ -327,8 +334,8 @@ import { pagosProveedorApi } from "../services/pagosProveedorApi"
 import { proveedoresApi } from "../services/proveedoresApi"
 import { productosApi } from "../services/productosApi"
 import { cajaApi } from "../services/cajaApi"
-import { metodosPagoApi } from "../services/metodosPagoApi"
-import { getSession } from "../auth/session"
+import { metodosPagoApi } from "../services/metodopagoService"
+import { getSession, getShift } from "../auth/session"
 
 export default {
   name: "ComprasView",
@@ -353,7 +360,7 @@ export default {
       },
       itemDraft: { productoId: null, cantidad: 1, precioUnitario: 0 },
 
-      detalle: null,
+      detalle: null, // { compra, detalles }
       pagosDetalle: [],
 
       pagoForm: { compraId: null, monto: 0, metodoPagoId: null, referencia: "" },
@@ -435,6 +442,7 @@ export default {
 
       const compraId = Number(c?.compraId ?? c?.id ?? 0)
       const proveedorId = Number(c?.proveedorId ?? 0)
+
       const fecha = c?.fecha ?? c?.createdAt ?? ""
       const total = Number(c?.total ?? 0)
       const estado = c?.estado ?? "—"
@@ -456,24 +464,29 @@ export default {
       try {
         const session = getSession() ?? null
         const userId = Number(session?.userId ?? 1)
-        const turno = String(session?.shift ?? "MANIANA").toUpperCase()
+        const turno = getShift()
 
         const [provRes, prodRes, comprasRes, cajaRes, mpRes] = await Promise.all([
           proveedoresApi.list(),
           productosApi.list(),
           comprasApi.list(),
-          cajaApi.abierta(userId, turno).catch(() => ({ data: null })),
+          cajaApi.abierta({ userId, turno }).catch(() => ({ data: null })),
           metodosPagoApi.list().catch(() => ({ data: [] })),
         ])
 
-        this.proveedores = (provRes?.data ?? []).map(this.mapProveedorApiToVM)
+        const provData = provRes?.data ?? []
+        this.proveedores = provData.map(this.mapProveedorApiToVM)
+
         this.productos = prodRes?.data ?? []
 
         const comprasData = comprasRes?.data ?? []
         this.compras = comprasData.map(this.mapCompraApiToVM)
 
         this.cajaAbierta = cajaRes?.data ?? null
-        this.metodosPago = mpRes?.data ?? []
+        this.metodosPago = (mpRes?.data ?? []).map((m) => ({
+          metodoPagoId: Number(m?.metodoPagoId ?? m?.id ?? 0),
+          nombre: m?.nombre ?? m?.descripcion ?? "—",
+        }))
       } catch (e) {
         this.error = e?.response?.data?.error || e?.message || "Error cargando compras"
       } finally {
@@ -527,7 +540,7 @@ export default {
           detalles: this.form.detalles.map((d) => ({
             productoId: d.productoId,
             cantidad: d.cantidad,
-            precioUnitario: d.precioUnitario, // el back lo recalcula igual por costo, esto es UI
+            precioUnitario: d.precioUnitario, // back lo recalcula igual
           })),
         }
 
@@ -572,7 +585,7 @@ export default {
       this.error = ""
       try {
         const cajaId = Number(this.cajaAbierta?.cajaId ?? 0)
-        if (!cajaId) throw new Error("No hay caja abierta para este turno. Abrí caja antes de pagar.")
+        if (!cajaId) throw new Error("No hay caja abierta para tu turno. Abrí caja antes de pagar.")
 
         const compraId = Number(this.pagoForm.compraId || 0)
         const monto = Number(this.pagoForm.monto || 0)
@@ -608,11 +621,23 @@ export default {
 </script>
 
 <style scoped>
-.bg-panel{ background: rgba(18, 22, 32, .92); }
-.modal-round{ border-radius: 14px; }
+.bg-panel {
+  background: rgba(18, 22, 32, 0.92);
+}
+.modal-round {
+  border-radius: 14px;
+}
 
-.btn-accent { background: #7c3aed; border-color: #7c3aed; }
-.btn-accent:hover { filter: brightness(1.05); }
+.btn-accent {
+  background: #7c3aed;
+  border-color: #7c3aed;
+}
+.btn-accent:hover {
+  filter: brightness(1.05);
+}
 
-.table td, .table th { vertical-align: middle; }
+.table td,
+.table th {
+  vertical-align: middle;
+}
 </style>
