@@ -17,30 +17,63 @@ import { mapCliente } from "../mappers/clientes"
 function todayISO() {
   return new Date().toISOString().slice(0, 10)
 }
+
 function formatMoney(n) {
   const num = Number(n ?? 0)
-  return num.toLocaleString("es-AR", { minimumFractionDigits: 0 })
+  return Number.isFinite(num) ? num.toLocaleString("es-AR", { maximumFractionDigits: 0 }) : "0"
 }
-function toMoneyNumber(v) {
-  const x = Number(String(v ?? "").replace(",", "."))
+
+function parseArNumber(v) {
+  const s = String(v ?? "")
+    .trim()
+    .replace(/\$/g, "")
+    .replace(/\s/g, "")
+    .replace(/\./g, "")
+    .replace(",", ".")
+  const x = Number(s)
   return Number.isFinite(x) ? x : NaN
 }
+
 function toIntSafe(v, fallback = 0) {
-  const x = Math.floor(Number(String(v ?? "").replace(",", ".")))
+  const s = String(v ?? "").trim().replace(/\s/g, "").replace(",", ".")
+  const x = Math.floor(Number(s))
   return Number.isFinite(x) ? x : fallback
 }
+
 function turnoUI(t) {
   const s = String(t ?? "").toUpperCase()
   if (s === "MANIANA" || s === "MAÑANA") return "MAÑANA"
   if (s === "TARDE") return "TARDE"
   return "MAÑANA"
 }
+
 function turnoBE(t) {
   return turnoUI(t) === "MAÑANA" ? "MANIANA" : "TARDE"
 }
+
 function resolveUserId(sess) {
   const n = Number(sess?.userId)
   return Number.isFinite(n) && n > 0 ? n : 1
+}
+
+function pickErr(e, fallback = "Error") {
+  return e?.response?.data?.error || e?.response?.data?.message || e?.response?.data || e?.message || fallback
+}
+
+function unwrapPageArray(data) {
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data?.content)) return data.content
+  if (Array.isArray(data?.items)) return data.items
+  if (Array.isArray(data?.data)) return data.data
+  return []
+}
+
+function debounce(fn, wait = 250) {
+  let t = null
+  return (...args) => {
+    clearTimeout(t)
+    t = setTimeout(() => fn(...args), wait)
+  }
 }
 
 // =========================
@@ -75,6 +108,15 @@ const saving = ref(false)
 const errorMsg = ref("")
 const okMsg = ref("")
 
+function setOk(msg) {
+  okMsg.value = msg
+  errorMsg.value = ""
+}
+function setErr(msg) {
+  errorMsg.value = msg
+  okMsg.value = ""
+}
+
 // =========================
 // Caja (bloqueo real)
 // =========================
@@ -92,8 +134,7 @@ async function refreshCaja() {
     cajaCheck.value = { ok: true, error: "" }
   } catch (e) {
     cajaAbierta.value = null
-    const msg = e?.response?.data?.message || e?.response?.data?.error || e?.response?.data || ""
-    cajaCheck.value = { ok: false, error: msg || "No hay caja ABIERTA para esta fecha/turno." }
+    cajaCheck.value = { ok: false, error: pickErr(e, "No hay caja ABIERTA para esta fecha/turno.") }
   }
 }
 
@@ -104,12 +145,15 @@ function goCaja() {
 }
 
 // =========================
-// Datos maestros
+// Datos maestros (server-side search)
 // =========================
 const productos = ref([])
 const clientes = ref([])
 const metodosPago = ref([])
 const loadedMetodos = ref(false)
+
+const productSearch = ref("")
+const clientesSearch = ref("")
 
 function normalizeProducto(p) {
   return {
@@ -122,40 +166,48 @@ function normalizeProducto(p) {
     precioMayorista: p.precioMayorista == null ? null : Number(p.precioMayorista),
   }
 }
+
 function normalizeMetodoPago(x) {
   return {
     id: Number(x?.metodoPagoId ?? x?.id ?? 0),
     nombre: String(x?.nombre ?? x?.name ?? x?.descripcion ?? "SIN NOMBRE"),
   }
 }
+
 function metodoNombreById(id) {
   const m = metodosPago.value.find((x) => Number(x.id) === Number(id))
   return m?.nombre ?? String(id ?? "-")
 }
 
-async function refreshProductos() {
+async function refreshProductos(searchTerm = null) {
   try {
-    const { data } = await productosApi.list()
-    const arr = Array.isArray(data) ? data : []
+    const params = { page: 0, size: 300, search: searchTerm || null, q: searchTerm || null }
+    const { data } = await productosApi.list(params)
+    const arr = unwrapPageArray(data)
     productos.value = arr.map(normalizeProducto).filter((p) => p.id > 0)
-  } catch {
+  } catch (e) {
     productos.value = []
+    console.error("refreshProductos:", e?.response?.status, e?.response?.data || e?.message)
   }
 }
-async function refreshClientes() {
+
+async function refreshClientes(searchTerm = null) {
   try {
-    const { data } = await clientesApi.list()
-    const arr = Array.isArray(data) ? data : []
+    const params = { page: 0, size: 300, search: searchTerm || null, q: searchTerm || null }
+    const { data } = await clientesApi.list(params)
+    const arr = unwrapPageArray(data)
     clientes.value = arr.map(mapCliente).filter((c) => c.activo !== false)
-  } catch {
+  } catch (e) {
     clientes.value = []
+    console.error("refreshClientes:", e?.response?.status, e?.response?.data || e?.message)
   }
 }
+
 async function fetchMetodosOnce() {
   if (loadedMetodos.value) return
   try {
     const { data } = await metodosPagoApi.list()
-    const arr = Array.isArray(data) ? data : []
+    const arr = Array.isArray(data) ? data : unwrapPageArray(data)
     metodosPago.value = arr.map(normalizeMetodoPago).filter((m) => m.id > 0)
   } catch {
     metodosPago.value = []
@@ -165,30 +217,31 @@ async function fetchMetodosOnce() {
 }
 
 // =========================
-// Carrito (simple)
+// Cobros PRO (por cliente)
+// =========================
+const cobrarClienteId = ref("")
+const cobrarCliente = computed(() => clientes.value.find((c) => String(c.id) === String(cobrarClienteId.value)) ?? null)
+const showAdvancedId = ref(false)
+
+function goCuentaCorriente() {
+  if (!cobrarClienteId.value) return setErr("Seleccioná un cliente para ir a Cuenta Corriente.")
+  // ⬇️ Cambiá el name si tu router usa otro
+  router.push({ name: "cuentaCorriente", query: { clienteId: String(cobrarClienteId.value) } })
+}
+
+// =========================
+// Carrito (venta nueva)
 // =========================
 const clienteSelId = ref("")
 const clienteSel = computed(() => clientes.value.find((c) => String(c.id) === String(clienteSelId.value)) ?? null)
 
-const productSearch = ref("")
 const selProductoId = ref("")
 const itemQty = ref("1")
 const codeInputRef = ref(null)
 
-const productosFiltrados = computed(() => {
-  const term = String(productSearch.value ?? "").trim().toLowerCase()
-  if (!term) return productos.value
-  return productos.value.filter((p) => {
-    const n = String(p.nombre ?? "").toLowerCase()
-    const c = String(p.codigoProducto ?? "").toLowerCase()
-    return n.includes(term) || c.includes(term)
-  })
-})
-
 const selectedProducto = computed(() => productos.value.find((p) => String(p.id) === String(selProductoId.value)) ?? null)
 
 function getPrecioSugerido(p) {
-  // si después metés mayorista/minorista, lo resolvemos acá
   return Number(p.precioVenta ?? 0)
 }
 
@@ -199,35 +252,39 @@ function recalcItem(it) {
   const cost = Number(it.cost ?? 0)
   const qty = Number.isFinite(Number(it.qty)) ? Number(it.qty) : 0
   const subtotal = price * qty
-  const invalidReason = price < cost ? `Vende a pérdida` : ""
+
+  let invalidReason = ""
+  if (qty <= 0) invalidReason = "Cantidad inválida"
+  else if (price < cost) invalidReason = "Vende a pérdida"
+
+  if (it.stock != null && Number.isFinite(Number(it.stock)) && qty > Number(it.stock)) {
+    invalidReason = `Stock insuficiente (disp: ${it.stock})`
+  }
+
   return { ...it, qty, subtotal, invalidReason }
 }
 
-function addItem() {
-  errorMsg.value = ""
+function addItem(qtyOverride = null) {
   okMsg.value = ""
+  errorMsg.value = ""
 
-  if (!canSell.value) {
-    errorMsg.value = cajaCheck.value?.error || "Caja no disponible."
-    return
-  }
+  if (!canSell.value) return setErr(cajaCheck.value?.error || "Caja no disponible.")
 
   const p = selectedProducto.value
-  if (!p) {
-    errorMsg.value = "Seleccioná un producto."
-    return
-  }
+  if (!p) return setErr("Seleccioná un producto.")
 
-  const qty = toIntSafe(itemQty.value, 0)
-  if (!qty || qty <= 0) {
-    errorMsg.value = "Cantidad inválida."
-    return
+  const qty = qtyOverride != null ? Number(qtyOverride) : toIntSafe(itemQty.value, 0)
+  if (!qty || qty <= 0) return setErr("Cantidad inválida.")
+
+  if (p.stockActual != null && Number.isFinite(Number(p.stockActual))) {
+    const existingQty = items.value.find((x) => Number(x.productId) === Number(p.id))?.qty ?? 0
+    if (existingQty + qty > Number(p.stockActual)) return setErr(`Stock insuficiente: disp ${p.stockActual}.`)
   }
 
   const existing = items.value.find((x) => Number(x.productId) === Number(p.id))
   if (existing) {
-    existing.qty = Number(existing.qty) + qty
-    items.value = items.value.map((x) => (x.id === existing.id ? recalcItem(existing) : x))
+    const updated = recalcItem({ ...existing, qty: Number(existing.qty) + qty })
+    items.value = items.value.map((x) => (x.id === existing.id ? updated : x))
   } else {
     const it = {
       id: `${Date.now()}_${Math.floor(Math.random() * 1e9)}`,
@@ -236,6 +293,7 @@ function addItem() {
       price: getPrecioSugerido(p),
       cost: Number(p.precioCosto ?? 0),
       qty,
+      stock: p.stockActual == null ? null : Number(p.stockActual),
     }
     items.value = [...items.value, recalcItem(it)]
   }
@@ -248,10 +306,12 @@ function addItem() {
 function removeItem(itemId) {
   items.value = items.value.filter((i) => i.id !== itemId)
 }
+
 function updateItemQty(itemId, v) {
   const q = toIntSafe(v, 1)
   items.value = items.value.map((it) => (it.id === itemId ? recalcItem({ ...it, qty: q <= 0 ? 1 : q }) : it))
 }
+
 function clearForm() {
   items.value = []
   clienteSelId.value = ""
@@ -265,18 +325,47 @@ const totalCalc = computed(() => items.value.reduce((acc, it) => acc + Number(it
 const hasInvalidItems = computed(() => items.value.some((it) => it.invalidReason))
 const canRegister = computed(() => canSell.value && items.value.length > 0 && !hasInvalidItems.value)
 
+function trySelectByExactCode(termRaw) {
+  const term = String(termRaw ?? "").trim().toLowerCase()
+  if (!term) return false
+  const match = productos.value.find((p) => String(p.codigoProducto ?? "").trim().toLowerCase() === term)
+  if (match) {
+    selProductoId.value = String(match.id)
+    return true
+  }
+  return false
+}
+
+function onSearchKeydown(e) {
+  if (e?.key !== "Enter") return
+  const selected = trySelectByExactCode(productSearch.value)
+  if (selected) nextTick(() => addItem(1))
+}
+
+function onQtyKeydown(e) {
+  if (e?.key === "Enter") addItem()
+}
+
 // =========================
-// Registrar venta (simple, real)
+// Venta: normalizador y registro
 // =========================
-const lastVenta = ref(null) // {ventaId,total,estado,clienteTxt}
+const lastVenta = ref(null)
 
 function normalizeVentaFromApi(payload) {
   const v = payload?.venta ?? payload?.ventaActualizada ?? payload ?? null
   if (!v) return null
+
   const ventaId = Number(v.ventaId ?? v.id ?? payload?.ventaId ?? payload?.id ?? 0) || null
   const total = Number(v.total ?? payload?.total ?? 0) || 0
   const estado = String(v.estado ?? payload?.estado ?? "PENDIENTE").toUpperCase()
-  return { ventaId, total, estado, raw: v }
+
+  const clienteId =
+    v.clienteId != null ? Number(v.clienteId) :
+    v.cliente?.id != null ? Number(v.cliente.id) :
+    v.cliente?.clienteId != null ? Number(v.cliente.clienteId) :
+    null
+
+  return { ventaId, total, estado, clienteId, raw: v }
 }
 
 async function registrarVenta() {
@@ -287,6 +376,7 @@ async function registrarVenta() {
 
   try {
     if (!canSell.value) throw new Error(cajaCheck.value?.error || "No hay caja ABIERTA.")
+
     const uid = Number(userIdInt.value)
     if (!Number.isFinite(uid) || uid <= 0) throw new Error("userId inválido.")
 
@@ -303,47 +393,46 @@ async function registrarVenta() {
     }
 
     const { data } = await ventasApi.create(command)
-    const ventaN = normalizeVentaFromApi(data) ?? { ventaId: null, total: totalCalc.value, estado: "PENDIENTE" }
+    const ventaN = normalizeVentaFromApi(data) ?? { ventaId: null, total: totalCalc.value, estado: "PENDIENTE", clienteId: null }
+
+    const c =
+      ventaN.clienteId != null
+        ? clientes.value.find((x) => Number(x.id) === Number(ventaN.clienteId))
+        : null
 
     lastVenta.value = {
       ventaId: ventaN.ventaId,
       total: ventaN.total,
       estado: ventaN.estado,
-      clienteTxt: clienteSel.value ? `${clienteSel.value.nombre} ${clienteSel.value.apellido || ""}` : "Sin cliente",
+      clienteTxt: c ? `${c.nombre} ${c.apellido || ""}`.trim() : (clienteSel.value ? `${clienteSel.value.nombre} ${clienteSel.value.apellido || ""}`.trim() : "Sin cliente"),
     }
 
-    okMsg.value = ventaN.ventaId
-      ? `Venta #${ventaN.ventaId} registrada ✅ Total: $ ${formatMoney(ventaN.total)}`
-      : `Venta registrada ✅ Total: $ ${formatMoney(ventaN.total)}`
+    setOk(
+      ventaN.ventaId
+        ? `Venta #${ventaN.ventaId} registrada ✅ Total: $ ${formatMoney(ventaN.total)}`
+        : `Venta registrada ✅ Total: $ ${formatMoney(ventaN.total)}`
+    )
 
-    // limpiar carrito
     items.value = []
     selProductoId.value = ""
     itemQty.value = "1"
     productSearch.value = ""
 
-    // refrescar stock/caja
     await refreshCaja()
-    await refreshProductos()
+    await refreshProductos(productSearch.value?.trim() || null)
 
-    // abrir modal de pago si hay id
     if (ventaN.ventaId) await openPagoModal(ventaN.ventaId, ventaN.total)
 
     nextTick(() => codeInputRef.value?.focus?.())
   } catch (e) {
-    errorMsg.value =
-      e?.response?.data?.error ||
-      e?.response?.data?.message ||
-      e?.response?.data ||
-      e?.message ||
-      "Error creando venta."
+    setErr(pickErr(e, "Error creando venta."))
   } finally {
     saving.value = false
   }
 }
 
 // =========================
-// Buscar venta por ID (fiados)
+// Buscar venta por ID (ADVANCED)
 // =========================
 const buscarVentaId = ref("")
 const buscarLoading = ref(false)
@@ -353,37 +442,32 @@ async function buscarVenta() {
   okMsg.value = ""
 
   const id = toIntSafe(buscarVentaId.value, 0)
-  if (!id || id <= 0) {
-    errorMsg.value = "Ingresá un ID de venta válido."
-    return
-  }
+  if (!id || id <= 0) return setErr("Ingresá un N° de venta válido.")
 
   buscarLoading.value = true
   try {
-    // si tenés ventasApi.porId(id), usalo. Si no, hacelo en tu service.
+    if (!clientes.value.length) await refreshClientes(clientesSearch.value?.trim() || null)
+
     const { data } = await ventasApi.porId(id)
     const ventaN = normalizeVentaFromApi(data) ?? null
-    if (!ventaN?.ventaId) {
-      errorMsg.value = "No se encontró la venta."
-      return
-    }
+    if (!ventaN?.ventaId) return setErr("No se encontró la venta.")
+
+    const c =
+      ventaN.clienteId != null
+        ? clientes.value.find((x) => Number(x.id) === Number(ventaN.clienteId))
+        : null
 
     lastVenta.value = {
       ventaId: ventaN.ventaId,
       total: ventaN.total,
       estado: ventaN.estado,
-      clienteTxt: "—",
+      clienteTxt: c ? `${c.nombre} ${c.apellido || ""}`.trim() : "Sin cliente",
     }
 
-    okMsg.value = `Venta #${ventaN.ventaId} cargada ✅ Estado: ${ventaN.estado}`
+    setOk(`Venta #${ventaN.ventaId} cargada ✅ Estado: ${ventaN.estado}`)
     await openPagoModal(ventaN.ventaId, ventaN.total)
   } catch (e) {
-    errorMsg.value =
-      e?.response?.data?.error ||
-      e?.response?.data?.message ||
-      e?.response?.data ||
-      e?.message ||
-      "Error buscando venta."
+    setErr(pickErr(e, "Error buscando venta."))
   } finally {
     buscarLoading.value = false
   }
@@ -411,7 +495,7 @@ const pagosDeVenta = ref([])
 async function loadPagosVenta(ventaId) {
   try {
     const { data } = await pagosApi.porVentaId(ventaId)
-    const arr = Array.isArray(data) ? data : []
+    const arr = Array.isArray(data) ? data : unwrapPageArray(data)
     pagosDeVenta.value = arr.map(normalizePago).filter((x) => x.id > 0)
   } catch {
     pagosDeVenta.value = []
@@ -439,6 +523,8 @@ async function openPagoModal(ventaId, total = 0) {
   showPagoModal.value = true
 
   await loadPagosVenta(ventaId)
+
+  if (estadoPagoVenta.value === "PAGADA") setOk("Esta venta ya está PAGADA ✅")
 }
 
 function closePagoModal() {
@@ -459,12 +545,14 @@ async function registrarPago() {
   try {
     if (!canSell.value) throw new Error(cajaCheck.value?.error || "No hay caja ABIERTA para registrar pagos.")
     if (!pagoVentaId.value) throw new Error("Venta inválida.")
+    if (estadoPagoVenta.value === "PAGADA") throw new Error("Esta venta ya está PAGADA.")
 
     const mp = Number(pagoMetodoPagoId.value)
     if (!Number.isFinite(mp) || mp <= 0) throw new Error("Seleccioná un método de pago.")
 
-    const monto = toMoneyNumber(pagoMonto.value)
+    const monto = parseArNumber(pagoMonto.value)
     if (!Number.isFinite(monto) || monto <= 0) throw new Error("Monto inválido.")
+    if (monto > restanteVenta.value) throw new Error(`El monto supera el restante ($ ${formatMoney(restanteVenta.value)}).`)
 
     const payload = {
       ventaId: Number(pagoVentaId.value),
@@ -479,66 +567,92 @@ async function registrarPago() {
     await loadPagosVenta(pagoVentaId.value)
     await refreshCaja()
 
-    okMsg.value = `Pago registrado ✅ $ ${formatMoney(monto)} (${metodoNombreById(mp)})`
+    window.dispatchEvent(new Event("cuentaCorriente:changed"))
 
-    // si quedó pagada, avisamos
-    if (estadoPagoVenta.value === "PAGADA") {
-      okMsg.value += " · Venta PAGADA ✅"
-    }
+    let msg = `Pago registrado ✅ $ ${formatMoney(monto)} (${metodoNombreById(mp)})`
+    if (estadoPagoVenta.value === "PAGADA") msg += " · Venta PAGADA ✅"
+    setOk(msg)
 
-    // sugerir restante
     if (restanteVenta.value > 0) pagoMonto.value = String(restanteVenta.value)
     else pagoMonto.value = ""
   } catch (e) {
-    errorMsg.value =
-      e?.response?.data?.error ||
-      e?.response?.data?.message ||
-      e?.response?.data ||
-      e?.message ||
-      "Error registrando pago."
+    setErr(pickErr(e, "Error registrando pago."))
   } finally {
     pagoLoading.value = false
   }
 }
 
+// modal ESC
+function onKeydown(e) {
+  if (e?.key === "Escape" && showPagoModal.value) closePagoModal()
+}
+
 // =========================
-// Refresh + evento caja:changed
+// Refresh + watchers
 // =========================
+let refreshSeq = 0
+
 async function refreshAll() {
+  const seq = ++refreshSeq
   loading.value = true
   try {
     await fetchMetodosOnce()
+    if (seq !== refreshSeq) return
+
     await refreshCaja()
-    await Promise.all([refreshProductos(), refreshClientes()])
+    if (seq !== refreshSeq) return
+
+    await Promise.all([
+      refreshProductos(productSearch.value?.trim() || null),
+      refreshClientes(clientesSearch.value?.trim() || null),
+    ])
   } finally {
-    loading.value = false
+    if (seq === refreshSeq) loading.value = false
   }
 }
 
 function onCajaChanged() {
-  // cuando abren/cierran caja o crean movimientos
   refreshCaja()
 }
 
+const refreshProductosDebounced = debounce(() => refreshProductos(productSearch.value?.trim() || null), 250)
+const refreshClientesDebounced = debounce(() => refreshClientes(clientesSearch.value?.trim() || null), 250)
+
+watch(productSearch, () => {
+  trySelectByExactCode(productSearch.value)
+  refreshProductosDebounced()
+})
+
+watch(clientesSearch, () => {
+  refreshClientesDebounced()
+})
+
+watch([fecha, turnoSel], () => refreshAll(), { flush: "post" })
+
+// =========================
+// Lifecycle
+// =========================
 onMounted(async () => {
   await refreshAll()
 
-  // query ?ventaId=
   const qVentaId = route.query.ventaId
   if (qVentaId) {
+    showAdvancedId.value = true
     buscarVentaId.value = String(qVentaId)
     router.replace({ query: { ...route.query, ventaId: undefined } })
     await buscarVenta()
   }
 
   window.addEventListener("caja:changed", onCajaChanged)
+  window.addEventListener("keydown", onKeydown)
+
+  nextTick(() => codeInputRef.value?.focus?.())
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener("caja:changed", onCajaChanged)
+  window.removeEventListener("keydown", onKeydown)
 })
-
-watch([fecha, turnoSel, admin], refreshAll)
 </script>
 
 <template>
@@ -596,34 +710,7 @@ watch([fecha, turnoSel, admin], refreshAll)
       </div>
     </div>
 
-    <!-- BUSCAR VENTA (FIADOS) -->
-    <div class="card bg-panel border-0 shadow-sm mb-3">
-      <div class="card-body">
-        <h2 class="h6 mb-3">Cobrar venta existente (fiados)</h2>
-
-        <div class="row g-2 align-items-end">
-          <div class="col-12 col-md-4">
-            <label class="form-label text-secondary">ID de venta</label>
-            <input v-model="buscarVentaId" class="form-control bg-dark text-white border-secondary" placeholder="Ej: 123" />
-          </div>
-
-          <div class="col-12 col-md-3">
-            <button class="btn btn-outline-light w-100" @click="buscarVenta" :disabled="buscarLoading">
-              {{ buscarLoading ? "Buscando..." : "Buscar y cobrar" }}
-            </button>
-          </div>
-
-          <div class="col-12 col-md-5 text-secondary small">
-            Tip: podés entrar con <b>?ventaId=123</b> desde otra pantalla (Cuenta Corriente).
-          </div>
-        </div>
-
-        <div v-if="lastVenta?.ventaId" class="text-secondary small mt-3">
-          Última cargada: <b>#{{ lastVenta.ventaId }}</b> · Total: <b>$ {{ formatMoney(lastVenta.total) }}</b> · Estado:
-          <b>{{ lastVenta.estado }}</b>
-        </div>
-      </div>
-    </div>
+   
 
     <!-- NUEVA VENTA -->
     <div class="card bg-panel border-0 shadow-sm mb-3">
@@ -631,7 +718,17 @@ watch([fecha, turnoSel, admin], refreshAll)
         <h2 class="h6 mb-3">Nueva venta</h2>
 
         <!-- Cliente -->
-        <div class="row g-3 mb-3">
+        <div class="row g-2 mb-2">
+          <div class="col-12 col-md-4">
+            <label class="form-label text-secondary">Buscar cliente</label>
+            <input
+              v-model="clientesSearch"
+              class="form-control bg-dark text-white border-secondary"
+              placeholder="nombre / dni / teléfono"
+              :disabled="!canSell"
+            />
+          </div>
+
           <div class="col-12 col-md-8">
             <label class="form-label text-secondary">Cliente (opcional)</label>
             <select v-model="clienteSelId" class="form-select bg-dark text-white border-secondary" :disabled="!canSell">
@@ -641,22 +738,25 @@ watch([fecha, turnoSel, admin], refreshAll)
               </option>
             </select>
           </div>
-          <div class="col-12 col-md-4 text-secondary small d-flex align-items-end">
-            Registrá la venta y cobrá ahora o después.
-          </div>
         </div>
 
-        <!-- Buscar -->
+        <div class="text-secondary small mb-3">Registrá la venta y cobrá ahora o después (fiado).</div>
+
+        <!-- Buscar producto -->
         <div class="row g-2 mb-2">
           <div class="col-12">
-            <label class="form-label text-secondary">Buscar producto</label>
+            <label class="form-label text-secondary">Buscar producto (nombre o código)</label>
             <input
               ref="codeInputRef"
               v-model="productSearch"
               class="form-control bg-dark text-white border-secondary"
-              placeholder="nombre o código"
+              placeholder="Ej: shampoo / 779123..."
               :disabled="!canSell"
+              @keydown="onSearchKeydown"
             />
+            <div class="text-secondary small mt-1">
+              Tip: si tipeás el <b>código exacto</b> y apretás <b>Enter</b>, agrega 1 unidad.
+            </div>
           </div>
         </div>
 
@@ -666,7 +766,7 @@ watch([fecha, turnoSel, admin], refreshAll)
             <label class="form-label text-secondary">Producto</label>
             <select v-model="selProductoId" class="form-select bg-dark text-white border-secondary" :disabled="!canSell">
               <option value="" disabled>Seleccionar…</option>
-              <option v-for="p in productosFiltrados" :key="p.id" :value="String(p.id)">
+              <option v-for="p in productos" :key="p.id" :value="String(p.id)">
                 {{ p.nombre }} ({{ p.codigoProducto || "SIN CÓD" }}) — $ {{ formatMoney(getPrecioSugerido(p)) }}
                 · Stock: {{ p.stockActual ?? "-" }}
               </option>
@@ -675,11 +775,17 @@ watch([fecha, turnoSel, admin], refreshAll)
 
           <div class="col-6 col-md-2">
             <label class="form-label text-secondary">Cant.</label>
-            <input v-model="itemQty" class="form-control bg-dark text-white border-secondary" inputmode="numeric" :disabled="!canSell" />
+            <input
+              v-model="itemQty"
+              class="form-control bg-dark text-white border-secondary"
+              inputmode="numeric"
+              :disabled="!canSell"
+              @keydown="onQtyKeydown"
+            />
           </div>
 
           <div class="col-12 col-md-3">
-            <button class="btn btn-outline-light w-100" @click="addItem" :disabled="!canSell || !selProductoId">
+            <button class="btn btn-outline-light w-100" @click="addItem()" :disabled="!canSell || !selProductoId">
               Agregar
             </button>
           </div>
@@ -727,7 +833,7 @@ watch([fecha, turnoSel, admin], refreshAll)
         <div v-else class="text-secondary mt-3">Agregá productos para armar la venta.</div>
 
         <div v-if="hasInvalidItems" class="alert alert-danger py-2 mt-3 mb-0">
-          Hay ítems a pérdida. Ajustá el precio/costo.
+          Hay ítems inválidos (pérdida o stock insuficiente). Corregí y volvé a intentar.
         </div>
 
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-3">
@@ -743,14 +849,12 @@ watch([fecha, turnoSel, admin], refreshAll)
           </div>
         </div>
 
-        <div class="text-secondary small mt-2">
-          ✅ Caja debe estar ABIERTA · ✅ Venta descuenta stock · ✅ Cobro parcial/total desde el modal
-        </div>
+        <div class="text-secondary small mt-2">✅ Caja debe estar ABIERTA · ✅ Venta descuenta stock · ✅ Cobro parcial/total desde el modal</div>
       </div>
     </div>
 
     <!-- MODAL PAGO -->
-    <div v-if="showPagoModal" class="modal-backdrop-custom">
+    <div v-if="showPagoModal" class="modal-backdrop-custom" @click.self="closePagoModal">
       <div class="modal-card">
         <div class="d-flex justify-content-between align-items-center mb-2">
           <div>
@@ -784,7 +888,7 @@ watch([fecha, turnoSel, admin], refreshAll)
             <label class="form-label text-secondary">Monto</label>
             <div class="d-flex gap-2">
               <input v-model="pagoMonto" class="form-control bg-dark text-white border-secondary" placeholder="Ej: 20000" />
-              <button class="btn btn-outline-light" @click="setPagarRestante" :disabled="pagoLoading">
+              <button class="btn btn-outline-light" @click="setPagarRestante" :disabled="pagoLoading || estadoPagoVenta === 'PAGADA'">
                 Pagar restante
               </button>
             </div>
@@ -792,7 +896,7 @@ watch([fecha, turnoSel, admin], refreshAll)
 
           <div class="col-12 col-md-6">
             <label class="form-label text-secondary">Método de pago</label>
-            <select v-model="pagoMetodoPagoId" class="form-select bg-dark text-white border-secondary">
+            <select v-model="pagoMetodoPagoId" class="form-select bg-dark text-white border-secondary" :disabled="estadoPagoVenta === 'PAGADA'">
               <option disabled value="">Seleccionar método…</option>
               <option v-if="!metodosPago.length" disabled value="">No hay métodos cargados</option>
               <option v-for="m in metodosPago" :key="m.id" :value="String(m.id)">{{ m.nombre }}</option>
@@ -801,14 +905,17 @@ watch([fecha, turnoSel, admin], refreshAll)
 
           <div class="col-12">
             <label class="form-label text-secondary">Referencia (opcional)</label>
-            <input v-model="pagoReferencia" class="form-control bg-dark text-white border-secondary" placeholder="Ej: comprobante / alias" />
+            <input v-model="pagoReferencia" class="form-control bg-dark text-white border-secondary" placeholder="Ej: comprobante / alias" :disabled="estadoPagoVenta === 'PAGADA'" />
           </div>
         </div>
 
         <div class="d-flex justify-content-end mt-3">
           <div class="d-flex gap-2">
-            <button class="btn btn-outline-light" @click="closePagoModal" :disabled="pagoLoading">Cancelar</button>
-            <button class="btn btn-primary btn-accent" @click="registrarPago" :disabled="pagoLoading || !canSell">
+            <button class="btn btn-outline-light" @click="closePagoModal" :disabled="pagoLoading">
+              Dejar fiado
+            </button>
+
+            <button class="btn btn-primary btn-accent" @click="registrarPago" :disabled="pagoLoading || !canSell || estadoPagoVenta === 'PAGADA'">
               {{ pagoLoading ? "Guardando..." : "Registrar pago" }}
             </button>
           </div>
@@ -840,9 +947,7 @@ watch([fecha, turnoSel, admin], refreshAll)
             </table>
           </div>
 
-          <div class="text-secondary small mt-2">
-            ✅ Los pagos impactan caja porque el backend crea un MovimientoCaja (INGRESO / VENTA).
-          </div>
+          <div class="text-secondary small mt-2">✅ Los pagos impactan caja porque el backend crea un MovimientoCaja (INGRESO / VENTA).</div>
         </div>
       </div>
     </div>

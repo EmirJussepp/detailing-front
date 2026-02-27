@@ -1,567 +1,425 @@
-<script>
-import { proveedoresApi } from "../services/proveedoresApi"
-import { comprasApi } from "../services/comprasApi"
-import { pagosProveedorApi } from "../services/pagosProveedorApi"
-import { metodosPagoApi } from "../services/metodopagoService"
-import { cajaApi } from "../services/cajaApi"
-import { getSession, getShift } from "../auth/session"
-
-export default {
-  name: "ProveedoresView",
-
-  data() {
-    return {
-      loading: false,
-
-      // paginación
-      page: 0,
-      size: 10,
-      totalElements: 0,
-      totalPages: 1,
-
-      proveedores: [],
-      q: "",
-      sortBy: "displayName",
-      includeInactive: false,
-
-      error: "",
-      success: "",
-
-      mode: "create",
-      editingId: null,
-      form: {
-        tipo: "PERSONA",
-        nombre: "",
-        apellido: "",
-        documentoTipo: "DNI",
-        documentoNro: "",
-        razonSocial: "",
-        cuit: "",
-        contacto: "",
-        telefono: "",
-        email: "",
-        direccion: "",
-        notas: "",
-        activo: true,
-      },
-      formError: "",
-
-      // pagos
-      pagoProveedor: null,
-      pagoCompraId: null,
-      pagoMonto: "",
-      pagoNotas: "",
-      pagoMetodoPagoId: null,
-      pagoError: "",
-      pagoOk: "",
-      comprasPendientes: [],
-      pagosCompra: [],
-
-      // caja + metodos
-      cajaAbierta: null,
-      metodosPago: [],
-
-      // saldos
-      deudasMap: new Map(),
-    }
-  },
-
-  computed: {
-    // filtros + sort se aplican sobre la PÁGINA actual (porque paginamos server-side)
-    filtered() {
-      const q = this.q.trim().toLowerCase()
-      let arr = [...this.proveedores]
-
-      // filtro texto (por si el back no filtra perfecto)
-      if (q) {
-        arr = arr.filter((p) => {
-          const blob = [p.displayName, p.documentoLabel, p.telefono, p.email, p.direccion, p.notas]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase()
-          return blob.includes(q)
-        })
-      }
-
-      if (!this.includeInactive) arr = arr.filter((p) => p.activo !== false)
-
-      if (this.sortBy === "saldoDesc") {
-        arr.sort((a, b) => (this.getSaldo(b).saldo ?? 0) - (this.getSaldo(a).saldo ?? 0))
-        return arr
-      }
-
-      if (this.sortBy === "displayName") {
-        arr.sort((a, b) => (a.displayName || "").localeCompare(b.displayName || "", "es"))
-      } else {
-        arr.sort((a, b) => String(b[this.sortBy] || "").localeCompare(String(a[this.sortBy] || "")))
-      }
-
-      return arr
-    },
-
-    canPrev() {
-      return this.page > 0
-    },
-    canNext() {
-      return this.page < this.totalPages - 1
-    },
-  },
-
-  mounted() {
-    this.refresh()
-  },
-
-  watch: {
-    // debounce búsqueda → server-side
-    q() {
-      clearTimeout(this._t)
-      this._t = setTimeout(() => {
-        this.page = 0
-        this.refresh()
-      }, 250)
-    },
-
-    page() {
-      this.refresh()
-    },
-    size() {
-      this.page = 0
-      this.refresh()
-    },
-
-    async pagoCompraId(newId) {
-      this.pagosCompra = []
-      if (!newId) return
-      try {
-        const res = await pagosProveedorApi.porCompra(newId)
-        this.pagosCompra = res?.data?.content ?? res?.data ?? []
-      } catch {
-        this.pagosCompra = []
-      }
-    },
-  },
-
-  methods: {
-    // -------- utils --------
-    formatMoney(n) {
-      const num = Number(n ?? 0)
-      return num.toLocaleString("es-AR", { minimumFractionDigits: 0 })
-    },
-
-    unwrapPage(data) {
-      if (Array.isArray(data)) {
-        return { content: data, page: 0, size: data.length, totalElements: data.length, totalPages: 1 }
-      }
-      const content = data?.content ?? data?.items ?? data?.data ?? []
-      return {
-        content: Array.isArray(content) ? content : [],
-        page: Number(data?.page ?? data?.number ?? 0),
-        size: Number(data?.size ?? data?.pageSize ?? 10),
-        totalElements: Number(data?.totalElements ?? data?.total ?? (Array.isArray(content) ? content.length : 0)),
-        totalPages: Number(data?.totalPages ?? data?.pages ?? 1),
-      }
-    },
-
-    onlyDigits(v) {
-      return String(v || "").replace(/\D/g, "") || null
-    },
-
-    saldoClass(p) {
-      const s = this.getSaldo(p).saldo
-      if (s > 0) return "text-warning"
-      if (s < 0) return "text-info"
-      return "text-success"
-    },
-
-    docBadgeClass(p) {
-      if (p?.tipo === "EMPRESA") return "text-bg-dark border border-info"
-      return "text-bg-dark border border-secondary"
-    },
-
-    toastSuccess(msg) {
-      this.success = msg
-      setTimeout(() => (this.success = ""), 2200)
-    },
-
-    mapProveedorApiToVM(raw) {
-      const id = Number(raw?.proveedorId ?? raw?.id ?? 0)
-      const tipo = (raw?.tipoProveedor ?? "PERSONA") === "EMPRESA" ? "EMPRESA" : "PERSONA"
-
-      const nombre = raw?.nombre ?? ""
-      const apellido = raw?.apellido ?? ""
-      const dni = raw?.dni ?? ""
-      const razonSocial = raw?.razonSocial ?? ""
-      const cuit = raw?.cuit ?? ""
-
-      const displayName = tipo === "EMPRESA" ? (razonSocial || "—") : `${nombre} ${apellido}`.trim() || "—"
-      const documentoLabel =
-        tipo === "EMPRESA" ? (cuit ? `CUIT ${cuit}` : "CUIT —") : (dni ? `DNI ${dni}` : "DOC —")
-
-      return {
-        id,
-        tipo,
-        displayName,
-        documentoLabel,
-
-        nombre,
-        apellido,
-        documentoTipo: "DNI",
-        documentoNro: dni,
-
-        razonSocial,
-        cuit,
-        contacto: "",
-
-        telefono: raw?.telefono ?? "",
-        email: raw?.email ?? "",
-        direccion: raw?.direccion ?? "",
-        notas: raw?.notas ?? "",
-        activo: raw?.activo !== false,
-
-        createdAt: raw?.createdAt ?? raw?.created_at ?? null,
-        updatedAt: raw?.updatedAt ?? raw?.updated_at ?? null,
-      }
-    },
-
-    getSaldo(p) {
-      const id = Number(p?.id ?? 0)
-      const d = this.deudasMap.get(id)
-      if (!id || !d) return { deudaCompras: 0, pagosTotal: 0, saldo: 0 }
-
-      const deudaCompras = Number(d.deudaCompras ?? d.deuda ?? 0)
-      const pagosTotal = Number(d.pagosTotal ?? d.pagos ?? 0)
-      const saldo = Number(d.saldo ?? (deudaCompras - pagosTotal))
-      return { deudaCompras, pagosTotal, saldo }
-    },
-
-    prevPage() {
-      if (!this.canPrev) return
-      this.page--
-    },
-
-    nextPage() {
-      if (!this.canNext) return
-      this.page++
-    },
-
-    // -------- refresh (paginado) --------
-    async refresh() {
-      this.loading = true
-      this.error = ""
-      try {
-        const session = getSession() ?? null
-        const userId = Number(session?.userId ?? 1)
-        const turno = getShift()
-
-        const [provRes, deudasRes, cajaRes, mpRes] = await Promise.all([
-          proveedoresApi.list({
-            page: this.page,
-            size: this.size,
-            search: this.q.trim() || null,
-          }),
-          proveedoresApi.deudas().catch(() => ({ data: [] })),
-          cajaApi.abierta({ userId, turno }).catch(() => ({ data: null })),
-          metodosPagoApi.list().catch(() => ({ data: [] })),
-        ])
-
-        const provPage = this.unwrapPage(provRes?.data)
-
-        this.proveedores = provPage.content.map(this.mapProveedorApiToVM)
-        this.totalElements = provPage.totalElements
-        this.totalPages = provPage.totalPages
-        this.page = provPage.page
-        this.size = provPage.size
-
-        const deudas = deudasRes?.data?.content ?? deudasRes?.data ?? []
-        this.deudasMap = new Map(
-          deudas.map((d) => [
-            Number(d.proveedorId ?? d.id),
-            {
-              proveedorId: Number(d.proveedorId ?? d.id),
-              deudaCompras: Number(d.totalCompras ?? d.deudaCompras ?? 0),
-              pagosTotal: Number(d.totalPagado ?? d.pagosTotal ?? 0),
-              saldo: Number(d.deuda ?? d.saldo ?? 0),
-            },
-          ])
-        )
-
-        this.cajaAbierta = cajaRes?.data ?? null
-
-        const mp = mpRes?.data?.content ?? mpRes?.data ?? []
-        this.metodosPago = mp.map((m) => ({
-          metodoPagoId: Number(m?.metodoPagoId ?? m?.id ?? 0),
-          nombre: m?.nombre ?? m?.descripcion ?? "—",
-        }))
-      } catch (e) {
-        this.error = e?.response?.data?.error || e?.message || "Error cargando proveedores"
-      } finally {
-        this.loading = false
-      }
-    },
-
-    // -------- form --------
-    setTipo(tipo) {
-      this.form.tipo = tipo === "EMPRESA" ? "EMPRESA" : "PERSONA"
-
-      if (this.form.tipo === "EMPRESA") {
-        this.form.nombre = ""
-        this.form.apellido = ""
-        this.form.documentoTipo = "DNI"
-        this.form.documentoNro = ""
-      } else {
-        this.form.razonSocial = ""
-        this.form.cuit = ""
-        this.form.contacto = ""
-      }
-    },
-
-    prepareCreate() {
-      this.mode = "create"
-      this.editingId = null
-      this.formError = ""
-      this.form = {
-        tipo: "PERSONA",
-        nombre: "",
-        apellido: "",
-        documentoTipo: "DNI",
-        documentoNro: "",
-        razonSocial: "",
-        cuit: "",
-        contacto: "",
-        telefono: "",
-        email: "",
-        direccion: "",
-        notas: "",
-        activo: true,
-      }
-    },
-
-    prepareEdit(p) {
-      this.mode = "edit"
-      this.editingId = p.id
-      this.formError = ""
-
-      const tipo = p.tipo === "EMPRESA" ? "EMPRESA" : "PERSONA"
-      this.form = {
-        tipo,
-        nombre: p.nombre ?? "",
-        apellido: p.apellido ?? "",
-        documentoTipo: "DNI",
-        documentoNro: p.documentoNro ?? "",
-        razonSocial: p.razonSocial ?? "",
-        cuit: p.cuit ?? "",
-        contacto: "",
-        telefono: p.telefono ?? "",
-        email: p.email ?? "",
-        direccion: p.direccion ?? "",
-        notas: p.notas ?? "",
-        activo: p.activo !== false,
-      }
-    },
-
-    validateForm() {
-      if (this.form.tipo === "EMPRESA") {
-        if (!String(this.form.razonSocial || "").trim()) return "La razón social es obligatoria."
-        if (!String(this.form.cuit || "").replace(/\D/g, "").trim()) return "El CUIT es obligatorio."
-      } else {
-        if (!String(this.form.nombre || "").trim()) return "El nombre es obligatorio."
-      }
-
-      const email = String(this.form.email || "").trim()
-      if (email && !email.includes("@")) return "El email no tiene un formato válido."
-      return ""
-    },
-
-    async saveProveedor() {
-      this.formError = ""
-      const err = this.validateForm()
-      if (err) return (this.formError = err)
-
-      this.loading = true
-      try {
-        const tipoProveedor = this.form.tipo === "EMPRESA" ? "EMPRESA" : "PERSONA"
-
-        if (this.mode === "create") {
-          const payload = {
-            tipoProveedor,
-            nombre: tipoProveedor === "PERSONA" ? (this.form.nombre || "").trim() : null,
-            apellido: tipoProveedor === "PERSONA" ? (this.form.apellido || "").trim() : null,
-            dni: tipoProveedor === "PERSONA" ? this.onlyDigits(this.form.documentoNro) : null,
-            razonSocial: tipoProveedor === "EMPRESA" ? (this.form.razonSocial || "").trim() : null,
-            cuit: tipoProveedor === "EMPRESA" ? this.onlyDigits(this.form.cuit) : null,
-            telefono: (this.form.telefono || "").trim() || null,
-            email: (this.form.email || "").trim() || null,
-            direccion: (this.form.direccion || "").trim() || null,
-            notas: (this.form.notas || "").trim() || null,
-          }
-
-          await proveedoresApi.create(payload)
-          this.toastSuccess("Proveedor creado ✅")
-        } else {
-          const safeNombre =
-            tipoProveedor === "PERSONA"
-              ? (this.form.nombre || "").trim()
-              : ((this.form.razonSocial || "").trim() || "Empresa")
-
-          const payload = {
-            proveedorId: Number(this.editingId),
-            tipoProveedor,
-
-            nombre: safeNombre,
-            apellido: tipoProveedor === "PERSONA" ? (this.form.apellido || "").trim() || null : null,
-            dni: tipoProveedor === "PERSONA" ? this.onlyDigits(this.form.documentoNro) : null,
-
-            razonSocial: tipoProveedor === "EMPRESA" ? (this.form.razonSocial || "").trim() : null,
-            cuit: tipoProveedor === "EMPRESA" ? this.onlyDigits(this.form.cuit) : null,
-
-            telefono: (this.form.telefono || "").trim() || null,
-            email: (this.form.email || "").trim() || null,
-            direccion: (this.form.direccion || "").trim() || null,
-            notas: (this.form.notas || "").trim() || null,
-
-            activo: !!this.form.activo,
-          }
-
-          await proveedoresApi.update(this.editingId, payload)
-          this.toastSuccess("Proveedor actualizado ✅")
-        }
-
-        await this.refresh()
-
-        const modalEl = document.getElementById("proveedorModal")
-        const closeBtn = modalEl?.querySelector("[data-bs-dismiss='modal']")
-        closeBtn?.click()
-      } catch (e) {
-        this.formError = e?.response?.data?.error || e?.message || "No se pudo guardar"
-      } finally {
-        this.loading = false
-      }
-    },
-
-    async toggleActivo(p) {
-      this.error = ""
-      this.loading = true
-      try {
-        const tipoProveedor = p.tipo === "EMPRESA" ? "EMPRESA" : "PERSONA"
-        const safeNombre =
-          tipoProveedor === "PERSONA"
-            ? (p.nombre || "").trim()
-            : ((p.razonSocial || "").trim() || "Empresa")
-
-        const payload = {
-          proveedorId: Number(p.id),
-          tipoProveedor,
-
-          nombre: safeNombre,
-          apellido: tipoProveedor === "PERSONA" ? (p.apellido || "").trim() || null : null,
-          dni: tipoProveedor === "PERSONA" ? this.onlyDigits(p.documentoNro) : null,
-
-          razonSocial: tipoProveedor === "EMPRESA" ? (p.razonSocial || "").trim() : null,
-          cuit: tipoProveedor === "EMPRESA" ? this.onlyDigits(p.cuit) : null,
-
-          telefono: (p.telefono || "").trim() || null,
-          email: (p.email || "").trim() || null,
-          direccion: (p.direccion || "").trim() || null,
-          notas: (p.notas || "").trim() || null,
-
-          activo: !p.activo,
-        }
-
-        await proveedoresApi.update(p.id, payload)
-        await this.refresh()
-        this.toastSuccess(p.activo ? "Proveedor desactivado" : "Proveedor activado")
-      } catch (e) {
-        this.error = e?.response?.data?.error || e?.message || "No se pudo cambiar el estado"
-      } finally {
-        this.loading = false
-      }
-    },
-
-    // -------- pagos (solo arreglo de paginación en compras list) --------
-    async preparePago(p) {
-      this.pagoProveedor = p
-      this.pagoCompraId = null
-      this.pagoMonto = ""
-      this.pagoNotas = ""
-      this.pagoMetodoPagoId = null
-      this.pagoError = ""
-      this.pagoOk = ""
-      this.comprasPendientes = []
-      this.pagosCompra = []
-
-      this.loading = true
-      try {
-        const res = await comprasApi.list()
-        const allRaw = res?.data?.content ?? res?.data ?? [] // ✅ soporta paginación
-        const pid = Number(p.id)
-
-        const all = allRaw.map((x) => {
-          const c = x?.compra ?? x ?? {}
-          return {
-            compraId: Number(c.compraId ?? c.id ?? 0),
-            proveedorId: Number(c.proveedorId ?? 0),
-            fecha: c.fecha ?? "",
-            total: Number(c.total ?? 0),
-            estado: c.estado ?? "—",
-          }
-        })
-
-        this.comprasPendientes = all
-          .filter((c) => Number(c.proveedorId) === pid)
-          .filter((c) => !["PAGADA", "ANULADA"].includes(String(c.estado || "").toUpperCase()))
-          .sort((a, b) => Number(b.compraId) - Number(a.compraId))
-      } catch {
-        this.comprasPendientes = []
-      } finally {
-        this.loading = false
-      }
-    },
-
-    async registrarPago() {
-      this.pagoError = ""
-      this.pagoOk = ""
-
-      const p = this.pagoProveedor
-      if (!p?.id) return (this.pagoError = "Proveedor inválido")
-
-      const cajaId = Number(this.cajaAbierta?.cajaId ?? 0)
-      if (!cajaId) return (this.pagoError = "No hay caja abierta para tu turno.")
-
-      const compraId = Number(this.pagoCompraId || 0)
-      if (!compraId) return (this.pagoError = "Seleccioná una compra")
-
-      const metodoPagoId = Number(this.pagoMetodoPagoId || 0)
-      if (!metodoPagoId) return (this.pagoError = "Seleccioná un método de pago")
-
-      const monto = Number(String(this.pagoMonto || "").replace(/[^\d.]/g, "") || 0)
-      if (monto <= 0) return (this.pagoError = "Monto inválido")
-
-      this.loading = true
-      try {
-        const payload = {
-          compraId,
-          cajaId,
-          metodoPagoId,
-          monto,
-          referencia: (this.pagoNotas || "").trim() || null,
-        }
-
-        await pagosProveedorApi.create(payload)
-
-        this.pagoOk = "Pago registrado ✅"
-        this.pagoMonto = ""
-        this.pagoNotas = ""
-
-        const pagosRes = await pagosProveedorApi.porCompra(compraId)
-        this.pagosCompra = pagosRes?.data?.content ?? pagosRes?.data ?? []
-
-        await this.refresh()
-      } catch (e) {
-        this.pagoError = e?.response?.data?.error || e?.message || "No se pudo registrar el pago"
-      } finally {
-        this.loading = false
-      }
-    },
-  },
+<script setup>
+import { computed, onMounted, ref, watch } from "vue"
+import { productosApi } from "../services/productosApi"
+
+// =========================
+// Utils
+// =========================
+function formatMoney(n) {
+  const num = Number(n ?? 0)
+  return num.toLocaleString("es-AR", { minimumFractionDigits: 0 })
 }
+
+function unwrapPage(data) {
+  if (Array.isArray(data)) {
+    return { content: data, page: 0, size: data.length, totalElements: data.length, totalPages: 1 }
+  }
+  const content = data?.content ?? data?.items ?? data?.data ?? []
+  return {
+    content: Array.isArray(content) ? content : [],
+    page: Number(data?.page ?? data?.number ?? 0),
+    size: Number(data?.size ?? data?.pageSize ?? 10),
+    totalElements: Number(
+      data?.totalElements ?? data?.total ?? (Array.isArray(content) ? content.length : 0)
+    ),
+    totalPages: Number(data?.totalPages ?? data?.pages ?? 1),
+  }
+}
+
+function mapProducto(row) {
+  return {
+    id: row?.productoId ?? row?.id ?? row?.producto_id ?? null,
+    nombre: row?.nombre ?? "",
+    codigoProducto: row?.codigoProducto ?? row?.codigo ?? row?.codigo_producto ?? null,
+    categoria: row?.categoria ?? null,
+
+    stockActual: Number(row?.stockActual ?? row?.stock_actual ?? 0),
+    stockMinimo: row?.stockMinimo ?? row?.stock_minimo ?? null,
+    stockMaximo: row?.stockMaximo ?? row?.stock_maximo ?? null,
+
+    precioCosto: Number(row?.precioCosto ?? row?.precio_costo ?? 0),
+    precioVenta: Number(row?.precioVenta ?? row?.precio_venta ?? 0),
+    precioMayorista: row?.precioMayorista ?? row?.precio_mayorista ?? null,
+  }
+}
+
+function toNumber(v) {
+  const x = Number(String(v ?? "").replace(",", "."))
+  return Number.isFinite(x) ? x : NaN
+}
+
+// =========================
+// State
+// =========================
+const loading = ref(false)
+const saving = ref(false)
+const error = ref("")
+const ok = ref("")
+
+// filtros
+const q = ref("")
+const onlyLowStock = ref(false)
+
+// paginación
+const page = ref(0)
+const size = ref(10)
+const totalElements = ref(0)
+const totalPages = ref(1)
+
+// data
+const rows = ref([])
+
+// =========================
+// Form create
+// =========================
+const nombre = ref("")
+const codigoProducto = ref("")
+const categoria = ref("")
+const stockMinimo = ref(0)
+const stockMaximo = ref(0)
+const stockInicial = ref(0)
+const precioCosto = ref("")
+const precioVenta = ref("")
+const precioMayorista = ref("")
+
+function resetForm() {
+  nombre.value = ""
+  codigoProducto.value = ""
+  categoria.value = ""
+  stockMinimo.value = 0
+  stockMaximo.value = 0
+  stockInicial.value = 0
+  precioCosto.value = ""
+  precioVenta.value = ""
+  precioMayorista.value = ""
+}
+
+// =========================
+// Fetch
+// =========================
+async function fetchAll() {
+  loading.value = true
+  error.value = ""
+  ok.value = ""
+
+  try {
+    const { data } = await productosApi.list({
+      page: page.value,
+      size: size.value,
+      search: q.value?.trim() || null,
+    })
+
+    const p = unwrapPage(data)
+
+    rows.value = p.content.map(mapProducto)
+    totalElements.value = p.totalElements
+    totalPages.value = p.totalPages
+    page.value = p.page
+    size.value = p.size
+  } catch (e) {
+    rows.value = []
+    totalElements.value = 0
+    totalPages.value = 1
+    error.value =
+      e?.response?.data?.error ||
+      e?.response?.data?.message ||
+      e?.message ||
+      "Error cargando productos."
+  } finally {
+    loading.value = false
+  }
+}
+
+// filtered sobre la página actual
+const filtered = computed(() => {
+  const arr = rows.value
+  if (!onlyLowStock.value) return arr
+  return arr.filter((p) => p.stockMinimo != null && p.stockActual <= p.stockMinimo)
+})
+
+const canPrev = computed(() => page.value > 0)
+const canNext = computed(() => page.value < totalPages.value - 1)
+
+function prevPage() {
+  if (!canPrev.value) return
+  page.value--
+}
+function nextPage() {
+  if (!canNext.value) return
+  page.value++
+}
+
+// cuando cambian page/size → recarga
+watch(page, () => fetchAll())
+watch(size, () => {
+  page.value = 0
+  fetchAll()
+})
+
+// debounce de búsqueda
+let t = null
+watch(q, () => {
+  clearTimeout(t)
+  t = setTimeout(() => {
+    page.value = 0
+    fetchAll()
+  }, 250)
+})
+
+// =========================
+// Create
+// =========================
+async function create() {
+  error.value = ""
+  ok.value = ""
+
+  if (!nombre.value.trim()) return (error.value = "Nombre es obligatorio.")
+
+  const pc = toNumber(precioCosto.value)
+  const pv = toNumber(precioVenta.value)
+  const pm = precioMayorista.value?.trim() ? toNumber(precioMayorista.value) : null
+
+  if (!Number.isFinite(pc) || pc <= 0) return (error.value = "Precio costo inválido.")
+  if (!Number.isFinite(pv) || pv <= 0) return (error.value = "Precio venta inválido.")
+  if (pm !== null && (!Number.isFinite(pm) || pm <= 0)) return (error.value = "Precio mayorista inválido.")
+
+  saving.value = true
+  try {
+    await productosApi.create({
+      nombre: nombre.value.trim(),
+      codigoProducto: codigoProducto.value?.trim() || null,
+      categoria: categoria.value?.trim() || null,
+      stockMinimo: Number(stockMinimo.value ?? 0),
+      stockMaximo: Number(stockMaximo.value ?? 0),
+      stockInicial: Number(stockInicial.value ?? 0),
+      precioCosto: pc,
+      precioVenta: pv,
+      precioMayorista: pm,
+    })
+
+    ok.value = "Producto creado ✅"
+    resetForm()
+    page.value = 0
+    await fetchAll()
+  } catch (e) {
+    error.value =
+      e?.response?.data?.error ||
+      e?.response?.data?.message ||
+      e?.message ||
+      "Error creando producto."
+  } finally {
+    saving.value = false
+  }
+}
+
+onMounted(fetchAll)
 </script>
+
+<template>
+  <div>
+    <!-- Header -->
+    <div class="mb-3">
+      <h1 class="h4 mb-1">Productos</h1>
+      <div class="text-secondary">Listar + Crear (Backend)</div>
+    </div>
+
+    <!-- Alerts -->
+    <div v-if="error" class="alert alert-danger py-2">{{ error }}</div>
+    <div v-if="ok" class="alert alert-success py-2">{{ ok }}</div>
+
+    <!-- Toolbar -->
+    <div class="card bg-panel border-0 shadow-sm mb-4">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
+          <div class="text-secondary small">
+            Total: <b>{{ totalElements }}</b> · Mostrando: <b>{{ filtered.length }}</b>
+          </div>
+
+          <div class="d-flex gap-2 flex-wrap">
+            <button class="btn btn-outline-light" @click="fetchAll" :disabled="loading">
+              {{ loading ? "Cargando..." : "Refrescar" }}
+            </button>
+
+            <button class="btn btn-primary btn-accent" @click="create" :disabled="saving">
+              {{ saving ? "Guardando..." : "+ Crear producto" }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filtros -->
+    <div class="card bg-panel border-0 shadow-sm mb-4">
+      <div class="card-body">
+        <div class="row g-3 align-items-end">
+          <div class="col-12 col-md-6">
+            <label class="form-label text-secondary">Buscar</label>
+            <input
+              v-model="q"
+              class="form-control bg-dark text-white border-secondary"
+              placeholder="nombre / código / categoría"
+            />
+          </div>
+
+          <div class="col-12 col-md-3">
+            <div class="form-check mt-4">
+              <input class="form-check-input" type="checkbox" v-model="onlyLowStock" id="low" />
+              <label class="form-check-label text-secondary" for="low">Solo bajo stock</label>
+            </div>
+          </div>
+
+          <div class="col-12 col-md-3 text-secondary small">
+            Tip: marcamos en amarillo los que están <b>bajo stock mínimo</b>.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Nuevo producto -->
+    <div class="card bg-panel border-0 shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h6 mb-3">Nuevo producto</h2>
+
+        <div class="row g-3">
+          <div class="col-12 col-md-4">
+            <label class="form-label text-secondary">Nombre *</label>
+            <input v-model="nombre" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-2">
+            <label class="form-label text-secondary">Código</label>
+            <input v-model="codigoProducto" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-3">
+            <label class="form-label text-secondary">Categoría</label>
+            <input v-model="categoria" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-6 col-md-1">
+            <label class="form-label text-secondary">Min</label>
+            <input v-model.number="stockMinimo" type="number" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-6 col-md-1">
+            <label class="form-label text-secondary">Max</label>
+            <input v-model.number="stockMaximo" type="number" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-1">
+            <label class="form-label text-secondary">Inicial</label>
+            <input v-model.number="stockInicial" type="number" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-3">
+            <label class="form-label text-secondary">Precio costo *</label>
+            <input v-model="precioCosto" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-3">
+            <label class="form-label text-secondary">Precio venta *</label>
+            <input v-model="precioVenta" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-3">
+            <label class="form-label text-secondary">Precio mayorista</label>
+            <input v-model="precioMayorista" class="form-control bg-dark text-white border-secondary" />
+          </div>
+
+          <div class="col-12 col-md-3 d-flex align-items-end">
+            <button class="btn btn-outline-light w-100" @click="resetForm">Limpiar</button>
+          </div>
+        </div>
+
+        <div class="text-secondary small mt-2">
+          El backend guarda <b>stock_actual</b> y registra movimiento inicial si corresponde.
+        </div>
+      </div>
+    </div>
+
+    <!-- Lista -->
+    <div class="card bg-panel border-0 shadow-sm">
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table table-dark table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Producto</th>
+                <th>Código</th>
+                <th>Categoría</th>
+                <th>Stock</th>
+                <th>Venta</th>
+                <th>Mayorista</th>
+                <th>Costo</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              <tr
+                v-for="p in filtered"
+                :key="p.id"
+                :class="p.stockMinimo != null && p.stockActual <= p.stockMinimo ? 'table-warning' : ''"
+              >
+                <td class="text-secondary">{{ p.id }}</td>
+
+                <td class="fw-semibold">
+                  {{ p.nombre }}
+                  <div class="text-secondary small" v-if="p.stockMinimo != null">
+                    Min: {{ p.stockMinimo }} · Max: {{ p.stockMaximo ?? "-" }}
+                  </div>
+                </td>
+
+                <td class="text-secondary">{{ p.codigoProducto || "-" }}</td>
+                <td class="text-secondary">{{ p.categoria || "-" }}</td>
+
+                <td class="fw-bold">
+                  {{ p.stockActual }}
+                  <span
+                    v-if="p.stockMinimo != null && p.stockActual <= p.stockMinimo"
+                    class="badge text-bg-warning ms-2"
+                  >
+                    Bajo
+                  </span>
+                </td>
+
+                <td class="text-secondary">$ {{ formatMoney(p.precioVenta) }}</td>
+                <td class="text-secondary">
+                  {{ p.precioMayorista != null ? "$ " + formatMoney(p.precioMayorista) : "-" }}
+                </td>
+                <td class="text-secondary">$ {{ formatMoney(p.precioCosto) }}</td>
+              </tr>
+
+              <tr v-if="filtered.length === 0">
+                <td colspan="8" class="text-secondary">No hay productos para mostrar.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- ✅ paginator fuera del table -->
+        <div class="d-flex justify-content-end align-items-center gap-2 mt-3 text-secondary small">
+          <button class="btn btn-sm btn-outline-light" @click="prevPage" :disabled="loading || !canPrev">◀</button>
+          <span>Página {{ page + 1 }} / {{ totalPages }}</span>
+          <button class="btn btn-sm btn-outline-light" @click="nextPage" :disabled="loading || !canNext">▶</button>
+
+          <select
+            v-model.number="size"
+            class="form-select form-select-sm bg-dark text-white border-secondary"
+            style="width: 90px"
+          >
+            <option :value="10">10</option>
+            <option :value="20">20</option>
+            <option :value="50">50</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.bg-panel { background: rgba(18, 22, 32, .92); }
+.btn-accent { background: #6f5cff; border: none; }
+.btn-accent:hover { background: #5f4de6; }
+</style>

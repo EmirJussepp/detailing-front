@@ -22,6 +22,12 @@ function formatDateTime(v) {
   return d.toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
 }
 
+function unwrapPage(data) {
+  if (Array.isArray(data)) return data
+  const content = data?.content ?? data?.items ?? data?.data ?? []
+  return Array.isArray(content) ? content : []
+}
+
 // =========================
 // State
 // =========================
@@ -32,8 +38,8 @@ const okMsg = ref("")
 const clientes = ref([])
 const clienteIdSel = ref("") // string para select
 
-const deuda = ref(null) // lo que devuelva el back
-const estado = ref([])  // movimientos del estado-cuenta
+const deuda = ref(null)
+const estado = ref([])
 
 // filtros pro
 const filtroTexto = ref("")
@@ -49,11 +55,11 @@ function mapCliente(c) {
   }
 }
 
-const clientesActivos = computed(() => (clientes.value || []).filter(c => c.activo !== false))
+const clientesActivos = computed(() => (clientes.value || []).filter((c) => c.activo !== false))
 
 const clienteSel = computed(() => {
   const id = Number(clienteIdSel.value)
-  return clientesActivos.value.find(c => Number(c.id) === id) ?? null
+  return clientesActivos.value.find((c) => Number(c.id) === id) ?? null
 })
 
 const clienteTitulo = computed(() => {
@@ -64,14 +70,14 @@ const clienteTitulo = computed(() => {
 })
 
 // =========================
-// Bonus PRO: buscador inteligente
+// Buscador PRO
 // =========================
 const searchMode = ref("DNI") // DNI | NOMBRE
 const searchInput = ref("")
 const searching = ref(false)
 const searchError = ref("")
 const showSuggest = ref(false)
-const suggestions = ref([]) // [{ id, label, cliente }]
+const suggestions = ref([])
 let debounceTimer = null
 
 function clienteLabel(c) {
@@ -80,40 +86,45 @@ function clienteLabel(c) {
   return `${full} (ID #${c.id})${dni}`
 }
 
-function buildSuggestionsByName(txt) {
+function buildSuggestions(txt) {
   const t = txt.trim().toLowerCase()
   if (!t) return []
-
-  const arr = clientesActivos.value
-    .map(c => ({
+  return clientesActivos.value
+    .map((c) => ({
       id: c.id,
       cliente: c,
       label: clienteLabel(c),
-      blob: `${c.nombre} ${c.apellido} ${c.dni ?? ""}`.toLowerCase(),
+      blob: `${c.nombre} ${c.apellido} ${c.dni ?? ""} ${c.id}`.toLowerCase(),
     }))
-    .filter(x => x.blob.includes(t))
+    .filter((x) => x.blob.includes(t))
     .slice(0, 8)
-
-  return arr.map(x => ({ id: x.id, label: x.label, cliente: x.cliente }))
+    .map((x) => ({ id: x.id, label: x.label, cliente: x.cliente }))
 }
 
 function selectCliente(c) {
   if (!c?.id) return
-  clienteIdSel.value = String(c.id) // dispara watcher y carga cuenta
+  clienteIdSel.value = String(c.id)
   showSuggest.value = false
   suggestions.value = []
   searchError.value = ""
-  // opcional: limpiar el input después de seleccionar
-  // searchInput.value = ""
 }
 
 async function searchByDni(dni) {
   const clean = String(dni || "").replace(/\D/g, "").trim()
   if (!clean) return
 
+  // 1) intentamos local primero (evita 404 spam)
+  const local = buildSuggestions(clean)
+  if (local.length === 1) return selectCliente(local[0].cliente)
+  if (local.length > 1) {
+    suggestions.value = local
+    showSuggest.value = true
+    return
+  }
+
+  // 2) intentamos endpoint si existe
   searching.value = true
   searchError.value = ""
-
   try {
     const { data } = await clientesApi.getByDni(clean)
     const c = mapCliente(data)
@@ -122,9 +133,7 @@ async function searchByDni(dni) {
     okMsg.value = `Cliente encontrado: ${c.nombre} ${c.apellido || ""}`.trim()
     setTimeout(() => (okMsg.value = ""), 1800)
   } catch (e) {
-    searchError.value =
-      e?.response?.data?.error ||
-      "No se encontró cliente con ese DNI."
+    searchError.value = e?.response?.data?.error || "No se encontró cliente con ese DNI (o el endpoint no existe)."
   } finally {
     searching.value = false
   }
@@ -142,27 +151,23 @@ function onSearchInput() {
 
   clearTimeout(debounceTimer)
   debounceTimer = setTimeout(async () => {
-    // Modo nombre/apellido: sugerencias 100% local
+    // modo nombre: local
     if (searchMode.value === "NOMBRE") {
-      suggestions.value = buildSuggestionsByName(v)
+      suggestions.value = buildSuggestions(v)
       showSuggest.value = suggestions.value.length > 0
       return
     }
 
-    // Modo DNI: sugerencias local si matchea, y si no, intentamos endpoint SOLO si tiene muchos dígitos
+    // modo DNI: sugerencias local, y si no hay, endpoint sólo con 7+ dígitos
     const clean = String(v).replace(/\D/g, "")
-
-    // Tip: para no spamear 404, probamos recién con 7+ dígitos
     if (clean.length >= 7) {
-      // primero tratamos local (por si ya cargaste clientes con dni)
-      const local = buildSuggestionsByName(clean)
+      const local = buildSuggestions(clean)
       if (local.length) {
         suggestions.value = local
         showSuggest.value = true
         return
       }
-
-      // si no hay local, intentamos endpoint silencioso (sin mostrar error si falla)
+      // intento silencioso
       try {
         searching.value = true
         const { data } = await clientesApi.getByDni(clean)
@@ -174,7 +179,7 @@ function onSearchInput() {
           suggestions.value = []
           showSuggest.value = false
         }
-      } catch (_) {
+      } catch {
         suggestions.value = []
         showSuggest.value = false
       } finally {
@@ -192,10 +197,9 @@ async function doSearch() {
   if (!v) return
 
   if (searchMode.value === "NOMBRE") {
-    const list = buildSuggestionsByName(v)
-    if (list.length === 1) {
-      selectCliente(list[0].cliente)
-    } else {
+    const list = buildSuggestions(v)
+    if (list.length === 1) selectCliente(list[0].cliente)
+    else {
       suggestions.value = list
       showSuggest.value = list.length > 0
       if (!list.length) searchError.value = "No hay coincidencias."
@@ -208,17 +212,15 @@ async function doSearch() {
 
 function onGlobalClick(e) {
   const el = e.target
-  if (!el?.closest?.(".cc-search")) {
-    showSuggest.value = false
-  }
+  if (!el?.closest?.(".cc-search")) showSuggest.value = false
 }
 
 // =========================
 // Loaders
 // =========================
 async function fetchClientes() {
-  const { data } = await clientesApi.list()
-  const arr = Array.isArray(data) ? data : []
+  const { data } = await clientesApi.list({ page: 0, size: 500 })
+  const arr = unwrapPage(data)
   clientes.value = arr.map(mapCliente)
 }
 
@@ -230,7 +232,9 @@ function setClienteFromQuery() {
 
 function pushQueryCliente() {
   if (!clienteIdSel.value) {
-    router.replace({ query: { ...route.query, clienteId: undefined } })
+    const qq = { ...route.query }
+    delete qq.clienteId
+    router.replace({ query: qq })
     return
   }
   router.replace({ query: { ...route.query, clienteId: String(clienteIdSel.value) } })
@@ -246,9 +250,8 @@ async function fetchCuenta(clienteId) {
       cuentaCorrienteApi.estadoCuenta(clienteId),
     ])
 
-    deuda.value = rDeuda.data ?? null
-
-    const arr = Array.isArray(rEstado.data) ? rEstado.data : []
+    deuda.value = rDeuda?.data ?? null
+    const arr = Array.isArray(rEstado?.data) ? rEstado.data : []
     estado.value = arr
   } catch (e) {
     deuda.value = null
@@ -265,7 +268,7 @@ async function fetchCuenta(clienteId) {
 }
 
 // =========================
-// Normalización UI (por si cambian nombres)
+// Normalización UI
 // =========================
 function normalizeRow(x) {
   const fecha = x.fecha ?? x.createdAt ?? x.created_at ?? null
@@ -279,22 +282,14 @@ function normalizeRow(x) {
   if (debe > 0) tipo = "DEBE"
   else if (haber > 0) tipo = "HABER"
 
-  return {
-    fecha,
-    referencia: ref,
-    debe,
-    haber,
-    saldo,
-    tipo,
-    raw: x,
-  }
+  return { fecha, referencia: ref, debe, haber, saldo, tipo, raw: x }
 }
 
 const estadoUI = computed(() => (estado.value || []).map(normalizeRow))
 
 const estadoFiltrado = computed(() => {
   const txt = filtroTexto.value.trim().toLowerCase()
-  return estadoUI.value.filter(r => {
+  return estadoUI.value.filter((r) => {
     if (filtroTipo.value !== "TODOS" && r.tipo !== filtroTipo.value) return false
     if (txt) {
       const blob = String(r.referencia ?? "").toLowerCase()
@@ -313,7 +308,7 @@ const saldoFinal = computed(() => {
 })
 
 function exportCSV() {
-  const rows = estadoFiltrado.value.map(r => ({
+  const rows = estadoFiltrado.value.map((r) => ({
     fecha: r.fecha ?? "",
     referencia: r.referencia ?? "",
     debe: r.debe ?? 0,
@@ -322,10 +317,13 @@ function exportCSV() {
   }))
 
   const header = ["fecha", "referencia", "debe", "haber", "saldo"]
-  const csv = [
+  const csvLines = [
     header.join(";"),
-    ...rows.map(obj => header.map(k => `"${String(obj[k] ?? "").replaceAll('"', '""')}"`).join(";")).join(";")
-  ].join("\n")
+    ...rows.map((obj) =>
+      header.map((k) => `"${String(obj[k] ?? "").replaceAll('"', '""')}"`).join(";")
+    ),
+  ]
+  const csv = csvLines.join("\n")
 
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
   const url = URL.createObjectURL(blob)
@@ -343,7 +341,6 @@ onMounted(async () => {
   await fetchClientes()
   setClienteFromQuery()
   if (clienteIdSel.value) await fetchCuenta(Number(clienteIdSel.value))
-
   window.addEventListener("click", onGlobalClick)
 })
 
@@ -400,7 +397,6 @@ watch(clienteIdSel, async (v) => {
               :disabled="loading"
             />
 
-            <!-- Dropdown sugerencias -->
             <div
               v-if="showSuggest"
               class="border border-secondary bg-dark rounded mt-1"
@@ -437,13 +433,13 @@ watch(clienteIdSel, async (v) => {
           Totales: Debe <b>$ {{ formatMoney(totDebe) }}</b> · Haber <b>$ {{ formatMoney(totHaber) }}</b> ·
           Saldo <b>$ {{ formatMoney(saldoFinal) }}</b>
           <span v-if="deuda?.deudaTotal != null" class="ms-2">
-            · Deuda (endpoint /deuda): <b>$ {{ formatMoney(deuda.deudaTotal) }}</b>
+            · Deuda (endpoint): <b>$ {{ formatMoney(deuda.deudaTotal) }}</b>
           </span>
         </div>
       </div>
     </div>
 
-    <!-- Selector (lo dejé porque es útil siempre) -->
+    <!-- Selector -->
     <div class="card bg-panel border-0 shadow-sm mb-4">
       <div class="card-body">
         <div class="row g-3 align-items-end">
@@ -478,7 +474,11 @@ watch(clienteIdSel, async (v) => {
             </select>
           </div>
           <div class="col-12 col-md-9">
-            <input v-model="filtroTexto" class="form-control bg-dark text-white border-secondary" placeholder="Buscar por referencia / detalle..." />
+            <input
+              v-model="filtroTexto"
+              class="form-control bg-dark text-white border-secondary"
+              placeholder="Buscar por referencia / detalle..."
+            />
           </div>
         </div>
       </div>
@@ -487,7 +487,9 @@ watch(clienteIdSel, async (v) => {
     <!-- Tabla -->
     <div class="card bg-panel border-0 shadow-sm" v-if="clienteIdSel">
       <div class="card-body">
-        <div v-if="!estadoFiltrado.length" class="text-secondary">
+        <div v-if="loading" class="text-secondary">Cargando...</div>
+
+        <div v-else-if="!estadoFiltrado.length" class="text-secondary">
           No hay movimientos para este cliente (o no matchean los filtros).
         </div>
 
@@ -508,10 +510,10 @@ watch(clienteIdSel, async (v) => {
                 <td class="text-secondary">{{ formatDateTime(r.fecha) }}</td>
                 <td class="text-secondary">{{ r.referencia || "-" }}</td>
                 <td class="text-end" :class="r.debe > 0 ? 'text-danger fw-bold' : 'text-secondary'">
-                  {{ r.debe > 0 ? ("$ " + formatMoney(r.debe)) : "-" }}
+                  {{ r.debe > 0 ? "$ " + formatMoney(r.debe) : "-" }}
                 </td>
                 <td class="text-end" :class="r.haber > 0 ? 'text-success fw-bold' : 'text-secondary'">
-                  {{ r.haber > 0 ? ("$ " + formatMoney(r.haber)) : "-" }}
+                  {{ r.haber > 0 ? "$ " + formatMoney(r.haber) : "-" }}
                 </td>
                 <td class="text-end fw-bold">$ {{ formatMoney(r.saldo ?? 0) }}</td>
               </tr>
@@ -532,5 +534,5 @@ watch(clienteIdSel, async (v) => {
 </template>
 
 <style scoped>
-.bg-panel{ background: rgba(18, 22, 32, .92); }
+.bg-panel { background: rgba(18, 22, 32, .92); }
 </style>

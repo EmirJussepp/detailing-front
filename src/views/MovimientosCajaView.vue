@@ -1,9 +1,9 @@
 <script setup>
-import { computed, ref, watch, onMounted, onBeforeUnmount } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { getSession, isAdmin, getShift } from "../auth/session"
+
 import { clientesApi } from "../services/clientesService"
 import { ventasApi } from "../services/ventasApi"
-
 import { cajaApi } from "../services/cajaApi"
 import { movimientosCajaApi } from "../services/movimientosCajaApi"
 import { metodosPagoApi } from "../services/metodopagoService"
@@ -34,7 +34,7 @@ function resolveUserId(sess) {
   return 1
 }
 function toMoneyNumber(v) {
-  const x = Number(String(v ?? "").replace(",", "."))
+  const x = Number(String(v ?? "").replace(",", ".").replace(/[^\d.]/g, ""))
   return Number.isFinite(x) ? x : NaN
 }
 function formatDateTime(v) {
@@ -42,6 +42,15 @@ function formatDateTime(v) {
   const d = new Date(v)
   if (Number.isNaN(d.getTime())) return String(v)
   return d.toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+}
+function unwrapPage(data) {
+  if (Array.isArray(data)) return data
+  const content = data?.content ?? data?.items ?? data?.data ?? []
+  return Array.isArray(content) ? content : []
+}
+function safeId(x) {
+  const n = Number(x ?? 0)
+  return Number.isFinite(n) && n > 0 ? n : 0
 }
 
 // =========================
@@ -78,18 +87,16 @@ const cajaAbierta = ref(null)
 const movimientos = ref([])
 const resumen = ref({ ingresos: 0, egresos: 0, saldo: 0 })
 
-
-
 // =========================
-// Métodos de pago (cache)
+// Métodos de pago
 // =========================
 const metodosPago = ref([])
 const metodosLoaded = ref(false)
 
 function normalizeMetodoPago(x) {
   return {
-    id: Number(x?.metodoPagoId ?? x?.id ?? 0),
-    nombre: String(x?.nombre ?? x?.name ?? "SIN NOMBRE"),
+    id: safeId(x?.metodoPagoId ?? x?.id),
+    nombre: String(x?.nombre ?? x?.name ?? x?.descripcion ?? "SIN NOMBRE"),
   }
 }
 
@@ -107,31 +114,42 @@ async function fetchMetodosPagoOnce() {
 }
 
 function metodoNombreById(id) {
-  const m = metodosPago.value.find((x) => Number(x.id) === Number(id))
-  return m?.nombre ?? String(id ?? "-")
+  const mid = safeId(id)
+  const m = metodosPago.value.find((x) => Number(x.id) === mid)
+  return m?.nombre ?? (mid ? `#${mid}` : "-")
 }
 
-// ---- cache pro ----
+// =========================
+// Cache clientes (para mostrar nombre)
+// =========================
 const clientes = ref([])
 const clientesLoaded = ref(false)
+
+function mapCliente(c) {
+  return {
+    id: safeId(c?.clienteId ?? c?.id),
+    nombre: c?.nombre ?? "",
+    apellido: c?.apellido ?? "",
+    dni: c?.dni ?? null,
+    activo: c?.activo ?? true,
+  }
+}
 
 const clienteById = computed(() => {
   const m = new Map()
   for (const c of clientes.value) {
-    const id = Number(c.id ?? c.clienteId)
+    const id = safeId(c.id)
     if (id) m.set(id, c)
   }
   return m
 })
 
-const ventaClienteCache = ref(new Map())
-// ventaId -> { clienteId, clienteTxt }
-
 async function fetchClientesOnce() {
   if (clientesLoaded.value) return
   try {
-    const { data } = await clientesApi.list()
-    clientes.value = Array.isArray(data) ? data : []
+    const { data } = await clientesApi.list({ page: 0, size: 500 })
+    const arr = unwrapPage(data).map(mapCliente)
+    clientes.value = arr
   } catch {
     clientes.value = []
   } finally {
@@ -140,32 +158,43 @@ async function fetchClientesOnce() {
 }
 
 function clienteTxtById(clienteId) {
-  if (!clienteId) return "Mostrador"
-  const c = clienteById.value.get(Number(clienteId))
-  if (!c) return `Cliente #${clienteId}`
+  const cid = safeId(clienteId)
+  if (!cid) return "Mostrador"
+  const c = clienteById.value.get(cid)
+  if (!c) return `Cliente #${cid}`
   const nombre = `${c.nombre ?? ""} ${c.apellido ?? ""}`.trim()
   const dni = c.dni ? `DNI ${c.dni}` : null
-  return [nombre || `Cliente #${clienteId}`, dni].filter(Boolean).join(" · ")
+  return [nombre || `Cliente #${cid}`, dni].filter(Boolean).join(" · ")
 }
 
+// =========================
+// Cache ventas → clienteTxt
+// ⚠️ NO Map: usamos objeto para re-render seguro
+// =========================
+const ventaClienteCache = ref({}) // { [ventaId]: { clienteId, clienteTxt } }
+
 async function hydrateClienteFromVentaId(ventaId) {
-  const vid = Number(ventaId)
-  if (!Number.isFinite(vid) || vid <= 0) return
-  if (ventaClienteCache.value.has(vid)) return
+  const vid = safeId(ventaId)
+  if (!vid) return
+  if (ventaClienteCache.value[vid]) return
 
   try {
     const { data } = await ventasApi.porId(vid)
     const venta = data ?? null
-    const clienteId = venta?.clienteId ?? null
+    const clienteId = venta?.clienteId ?? venta?.cliente_id ?? null
     const clienteTxt = clienteTxtById(clienteId)
 
-    ventaClienteCache.value.set(vid, { clienteId, clienteTxt })
+    ventaClienteCache.value = {
+      ...ventaClienteCache.value,
+      [vid]: { clienteId, clienteTxt },
+    }
   } catch {
-    // fallback
-    ventaClienteCache.value.set(vid, { clienteId: null, clienteTxt: `Venta #${vid}` })
+    ventaClienteCache.value = {
+      ...ventaClienteCache.value,
+      [vid]: { clienteId: null, clienteTxt: `Venta #${vid}` },
+    }
   }
 }
-
 
 // =========================
 // Fetch caja + movimientos
@@ -184,7 +213,7 @@ async function refreshCaja() {
     const msg = e?.response?.data?.message || e?.response?.data?.error || ""
     cajaAbierta.value = null
 
-    if (status === 404 && String(msg).toLowerCase().includes("no hay caja abierta")) {
+    if (status === 404) {
       cajaCheck.value = { ok: false, error: "No hay caja ABIERTA para esa fecha/turno." }
     } else {
       cajaCheck.value = { ok: false, error: msg || "Error consultando caja (backend)." }
@@ -198,40 +227,39 @@ async function refreshMovimientos() {
 
   if (!cajaAbierta.value?.cajaId) return
 
-  await fetchClientesOnce() // ✅ importante
+  await fetchClientesOnce()
 
   try {
     const { data } = await movimientosCajaApi.porCajaId(cajaAbierta.value.cajaId)
     const arrRaw = Array.isArray(data) ? data : []
 
-    // normalizo + ordeno
     const arr = arrRaw
       .map((m) => ({
         ...m,
         tipo: String(m.tipo ?? "").toUpperCase(),
         concepto: String(m.concepto ?? "").toUpperCase(),
         monto: Number(m.monto ?? 0) || 0,
-        ventaId: m.ventaId ?? null,
+        ventaId: m.ventaId ?? m.venta_id ?? null,
+        metodoPagoId: m.metodoPagoId ?? m.metodo_pago_id ?? null,
       }))
       .sort((a, b) => new Date(b.fecha ?? 0) - new Date(a.fecha ?? 0))
 
     movimientos.value = arr
 
-    // ✅ hidratar cliente por ventaId (solo las ventas)
-    const ventaIds = [...new Set(arr.map(x => Number(x.ventaId)).filter(v => v > 0))]
+    // hidratar ventas (solo las que tengan ventaId)
+    const ventaIds = [...new Set(arr.map((x) => safeId(x.ventaId)).filter((v) => v > 0))]
     for (const vid of ventaIds) {
       await hydrateClienteFromVentaId(vid)
     }
 
-    const ingresos = arr.filter(m => m.tipo === "INGRESO").reduce((a, m) => a + m.monto, 0)
-    const egresos = arr.filter(m => m.tipo === "EGRESO").reduce((a, m) => a + m.monto, 0)
-    const montoInicial = Number(cajaAbierta.value?.montoInicial ?? 0) || 0
+    const ingresos = arr.filter((m) => m.tipo === "INGRESO").reduce((a, m) => a + m.monto, 0)
+    const egresos = arr.filter((m) => m.tipo === "EGRESO").reduce((a, m) => a + m.monto, 0)
+    const montoInicial = Number(cajaAbierta.value?.montoInicial ?? cajaAbierta.value?.monto_inicial ?? 0) || 0
     resumen.value = { ingresos, egresos, saldo: montoInicial + ingresos - egresos }
   } catch (e) {
     console.log("refreshMovimientos error:", e?.response?.status, e?.response?.data || e?.message)
   }
 }
-
 
 async function refreshAll() {
   errorMsg.value = ""
@@ -250,7 +278,7 @@ const canUse = computed(() => cajaCheck.value?.ok === true && Boolean(cajaAbiert
 
 watch([fecha, turnoSel, admin], refreshAll, { immediate: true })
 
-// ✅ escuchar cambios globales de caja
+// escuchar cambios globales de caja
 function onCajaChanged() {
   refreshAll()
 }
@@ -281,18 +309,18 @@ async function crearMovimiento() {
     if (!Number.isFinite(monto) || monto <= 0) throw new Error("Monto inválido.")
 
     const payload = {
-      cajaId: Number(cajaAbierta.value.cajaId),
-      userId: Number(userIdInt.value),
+      cajaId: safeId(cajaAbierta.value.cajaId),
+      userId: safeId(userIdInt.value),
       tipo: String(formTipo.value).toUpperCase(),
       concepto: String(formConcepto.value).toUpperCase(),
       descripcion: formDescripcion.value?.trim() || null,
-      metodoPagoId: formMetodoPagoId.value ? Number(formMetodoPagoId.value) : null,
+      metodoPagoId: formMetodoPagoId.value ? safeId(formMetodoPagoId.value) : null,
       monto,
     }
 
     await movimientosCajaApi.crear(payload)
 
-    okMsg.value = `Movimiento creado ✅ (${payload.tipo} / ${payload.concepto}) $ ${formatMoney(payload.monto)}`
+    okMsg.value = `Movimiento creado ✅ (${payload.tipo}/${payload.concepto}) $ ${formatMoney(payload.monto)}`
     formDescripcion.value = ""
     formMonto.value = ""
     formMetodoPagoId.value = ""
@@ -331,7 +359,6 @@ const movimientosFiltrados = computed(() => {
   })
 })
 
-// Totales por concepto
 const totalesPorConcepto = computed(() => {
   const map = new Map()
   for (const m of movimientosFiltrados.value) {
@@ -344,25 +371,29 @@ const totalesPorConcepto = computed(() => {
     .sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
 })
 
-// KPIs
 const kpiMovimientos = computed(() => movimientosFiltrados.value.length)
-const kpiIngresosFiltrados = computed(() => movimientosFiltrados.value.filter((m) => m.tipo === "INGRESO").reduce((a, m) => a + m.monto, 0))
-const kpiEgresosFiltrados = computed(() => movimientosFiltrados.value.filter((m) => m.tipo === "EGRESO").reduce((a, m) => a + m.monto, 0))
+const kpiIngresosFiltrados = computed(() =>
+  movimientosFiltrados.value.filter((m) => m.tipo === "INGRESO").reduce((a, m) => a + m.monto, 0)
+)
+const kpiEgresosFiltrados = computed(() =>
+  movimientosFiltrados.value.filter((m) => m.tipo === "EGRESO").reduce((a, m) => a + m.monto, 0)
+)
 const kpiNetoFiltrado = computed(() => kpiIngresosFiltrados.value - kpiEgresosFiltrados.value)
 
-// Export CSV
 function exportCSV() {
   const rows = movimientosFiltrados.value.map((m) => ({
-    id: m.movimientoId ?? m.id ?? "",
+    id: m.movimientoCajaId ?? m.movimientoId ?? m.id ?? "",
     fecha: m.fecha ?? "",
     tipo: m.tipo ?? "",
     concepto: m.concepto ?? "",
+    ventaId: m.ventaId ?? "",
+    cliente: m.ventaId ? (ventaClienteCache.value[safeId(m.ventaId)]?.clienteTxt ?? "") : "",
     descripcion: m.descripcion ?? "",
-    metodoPagoId: m.metodoPagoId ?? "",
+    metodo: m.metodoPagoId ? metodoNombreById(m.metodoPagoId) : "",
     monto: m.monto ?? 0,
   }))
 
-  const header = Object.keys(rows[0] || { id: "", fecha: "", tipo: "", concepto: "", descripcion: "", metodoPagoId: "", monto: 0 })
+  const header = Object.keys(rows[0] || { id: "", fecha: "", tipo: "", concepto: "", ventaId: "", cliente: "", descripcion: "", metodo: "", monto: 0 })
   const csv = [
     header.join(";"),
     ...rows.map((r) => header.map((k) => `"${String(r[k] ?? "").replaceAll('"', '""')}"`).join(";")),
@@ -377,7 +408,6 @@ function exportCSV() {
   URL.revokeObjectURL(url)
 }
 
-// UI tabla
 function rowClass(m) {
   if (m.tipo === "INGRESO") return "row-ingreso"
   if (m.tipo === "EGRESO") return "row-egreso"
@@ -413,8 +443,7 @@ function signedMoney(m) {
         <div class="row g-3 align-items-end">
           <div class="col-12 col-md-3">
             <label class="form-label text-secondary">Fecha</label>
-            <input v-model="fecha" type="date" class="form-control bg-dark text-white border-secondary"
-              :disabled="!admin" />
+            <input v-model="fecha" type="date" class="form-control bg-dark text-white border-secondary" :disabled="!admin" />
           </div>
 
           <div class="col-12 col-md-3" v-if="admin">
@@ -521,14 +550,12 @@ function signedMoney(m) {
 
           <div class="col-12 col-md-3">
             <label class="form-label text-secondary">Monto</label>
-            <input v-model="formMonto" class="form-control bg-dark text-white border-secondary"
-              placeholder="Ej: 1500" />
+            <input v-model="formMonto" class="form-control bg-dark text-white border-secondary" placeholder="Ej: 1500" />
           </div>
 
           <div class="col-12">
             <label class="form-label text-secondary">Descripción (opcional)</label>
-            <input v-model="formDescripcion" class="form-control bg-dark text-white border-secondary"
-              placeholder="Ej: compra insumos / retiro caja / aporte inicial" />
+            <input v-model="formDescripcion" class="form-control bg-dark text-white border-secondary" placeholder="Ej: compra insumos / retiro caja / aporte inicial" />
           </div>
         </div>
 
@@ -570,16 +597,14 @@ function signedMoney(m) {
           </div>
 
           <div class="col-md-6">
-            <input v-model="filtroTexto" class="form-control bg-dark text-white border-secondary"
-              placeholder="Buscar en descripción..." />
+            <input v-model="filtroTexto" class="form-control bg-dark text-white border-secondary" placeholder="Buscar en descripción..." />
           </div>
         </div>
 
         <div v-if="totalesPorConcepto.length" class="mb-3">
           <div class="text-secondary small mb-2">Totales por concepto (filtrados)</div>
           <div class="d-flex flex-wrap gap-2">
-            <span v-for="t in totalesPorConcepto" :key="t.concepto" class="badge bg-dark border border-secondary"
-              style="padding: 8px 10px;">
+            <span v-for="t in totalesPorConcepto" :key="t.concepto" class="badge bg-dark border border-secondary" style="padding: 8px 10px;">
               <span class="text-secondary">{{ t.concepto }}</span>
               <span class="ms-2 fw-bold">$ {{ formatMoney(t.total) }}</span>
             </span>
@@ -593,62 +618,52 @@ function signedMoney(m) {
         <div v-else class="table-responsive">
           <table class="table table-dark table-hover align-middle mb-0">
             <thead>
-  <tr>
-    <th style="width: 90px">ID</th>
-    <th style="width: 170px">Fecha</th>
-    <th style="width: 90px">Venta</th>
-    <th style="width: 260px">Cliente</th>
-    <th style="width: 110px">Tipo</th>
-    <th style="width: 160px">Concepto</th>
-    <th>Descripción</th>
-    <th style="width: 160px">Método</th>
-    <th style="width: 170px" class="text-end">Monto</th>
-  </tr>
-</thead>
-<tbody>
-  <tr v-for="m in movimientosFiltrados" :key="m.movimientoCajaId ?? m.movimientoId ?? m.id" :class="rowClass(m)">
-    <!-- ID movimiento -->
-    <td class="text-secondary">{{ m.movimientoCajaId ?? m.movimientoId ?? m.id ?? "-" }}</td>
+              <tr>
+                <th style="width: 90px">ID</th>
+                <th style="width: 170px">Fecha</th>
+                <th style="width: 90px">Venta</th>
+                <th style="width: 260px">Cliente</th>
+                <th style="width: 110px">Tipo</th>
+                <th style="width: 160px">Concepto</th>
+                <th>Descripción</th>
+                <th style="width: 160px">Método</th>
+                <th style="width: 170px" class="text-end">Monto</th>
+              </tr>
+            </thead>
 
-    <!-- Fecha -->
-    <td class="text-secondary">{{ formatDateTime(m.fecha) }}</td>
+            <tbody>
+              <tr v-for="m in movimientosFiltrados" :key="m.movimientoCajaId ?? m.movimientoId ?? m.id" :class="rowClass(m)">
+                <td class="text-secondary">{{ m.movimientoCajaId ?? m.movimientoId ?? m.id ?? "-" }}</td>
+                <td class="text-secondary">{{ formatDateTime(m.fecha) }}</td>
 
-    <!-- Venta -->
-    <td class="text-secondary">
-      <span v-if="m.ventaId">#{{ m.ventaId }}</span>
-      <span v-else>-</span>
-    </td>
+                <td class="text-secondary">
+                  <span v-if="m.ventaId">#{{ m.ventaId }}</span>
+                  <span v-else>-</span>
+                </td>
 
-    <!-- Cliente -->
-    <td class="text-secondary">
-      <span v-if="m.ventaId">
-        {{ ventaClienteCache.get(Number(m.ventaId))?.clienteTxt || "Cargando…" }}
-      </span>
-      <span v-else>-</span>
-    </td>
+                <td class="text-secondary">
+                  <span v-if="m.ventaId">
+                    {{ ventaClienteCache[safeId(m.ventaId)]?.clienteTxt || "Cargando…" }}
+                  </span>
+                  <span v-else>-</span>
+                </td>
 
-    <!-- Tipo -->
-    <td>
-      <span class="badge" :class="m.tipo === 'INGRESO' ? 'bg-success' : 'bg-danger'">
-        {{ m.tipo }}
-      </span>
-    </td>
+                <td>
+                  <span class="badge" :class="m.tipo === 'INGRESO' ? 'bg-success' : 'bg-danger'">
+                    {{ m.tipo }}
+                  </span>
+                </td>
 
-    <!-- Concepto -->
-    <td class="text-secondary">{{ m.concepto || "-" }}</td>
+                <td class="text-secondary">{{ m.concepto || "-" }}</td>
+                <td class="text-secondary">{{ m.descripcion ?? "-" }}</td>
 
-    <!-- Descripción -->
-    <td class="text-secondary">{{ m.descripcion ?? "-" }}</td>
+                <td class="text-secondary">
+                  {{ m.metodoPagoId ? metodoNombreById(m.metodoPagoId) : "-" }}
+                </td>
 
-    <!-- Método -->
-    <td class="text-secondary">
-      {{ m.metodoPagoId ? metodoNombreById(m.metodoPagoId) : "-" }}
-    </td>
-
-    <!-- Monto -->
-    <td class="text-end fw-bold">{{ signedMoney(m) }}</td>
-  </tr>
-</tbody>
+                <td class="text-end fw-bold">{{ signedMoney(m) }}</td>
+              </tr>
+            </tbody>
           </table>
         </div>
 
@@ -667,19 +682,10 @@ function signedMoney(m) {
 </template>
 
 <style scoped>
-.bg-panel {
-  background: rgba(18, 22, 32, .92);
-}
+.bg-panel { background: rgba(18, 22, 32, .92); }
 
-.row-ingreso td {
-  background: rgba(25, 135, 84, 0.08) !important;
-}
+.row-ingreso td { background: rgba(25, 135, 84, 0.08) !important; }
+.row-egreso td { background: rgba(220, 53, 69, 0.08) !important; }
 
-.row-egreso td {
-  background: rgba(220, 53, 69, 0.08) !important;
-}
-
-.table-dark.table-hover tbody tr:hover td {
-  filter: brightness(1.05);
-}
+.table-dark.table-hover tbody tr:hover td { filter: brightness(1.05); }
 </style>

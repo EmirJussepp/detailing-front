@@ -10,7 +10,7 @@ export const cajaApi = {
   },
 
   abrir(payload) {
-    return http.post("/cajas", payload)
+    return http.post("/cajas/abrir", payload)
   },
 
   cerrar(cajaId, payload) {
