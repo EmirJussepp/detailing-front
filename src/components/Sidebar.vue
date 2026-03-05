@@ -35,16 +35,17 @@
 <script setup>
 import { computed } from "vue"
 import { useRoute } from "vue-router"
-import { buildMenu, getRole } from "../ui/menu"
+import { buildMenuFromPermissions, isAdminFromPermissions } from "../ui/menu"
 import { getSession } from "../auth/session"
 
 const route = useRoute()
 
 const session = computed(() => getSession())
-const role = computed(() => getRole())
-const shift = computed(() => session.value?.shift || null)
+const permissions = computed(() => session.value?.permissions || [])
+const role = computed(() => (isAdminFromPermissions(permissions.value) ? "ADMIN" : "EMPLEADO"))
 
-const menu = computed(() => buildMenu(role.value))
+const shift = computed(() => session.value?.shift || null)
+const menu = computed(() => buildMenuFromPermissions(permissions.value))
 
 function isActive(item) {
   const name = route.name ? String(route.name) : ""

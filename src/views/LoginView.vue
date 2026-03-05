@@ -105,7 +105,7 @@ async function onSubmit() {
     else localStorage.removeItem("remember_email")
 
     // =========================
-    // ✅ INTENTO 1: LOGIN REAL (token)
+    // ✅ LOGIN REAL (JWT)
     // =========================
     try {
       const { data: loginResp } = await usuariosApi.login({
@@ -117,24 +117,22 @@ async function onSubmit() {
       if (!token) throw new Error("Token no recibido")
 
       const payload = decodeJwt(token) || {}
-      const userIdFromJwt = Number(payload?.userId ?? payload?.id ?? 0) || null
+      const userId = Number(payload?.userId ?? payload?.id ?? 0) || null
       const permissions = Array.isArray(payload?.permissions) ? payload.permissions : []
 
-      // para obtener roles/nombre, buscamos en /usuarios
-      const { data: all } = await usuariosApi.list()
-      const arr = Array.isArray(all) ? all : []
-      const meRaw = arr.find(u => normalizeEmail(u?.email) === email)
-      const me = meRaw ? normalizeUser(meRaw) : null
+      // Rol virtual (solo para UI). La verdad está en permissions.
+      const isAdmin =
+        permissions.includes("admin:all") ||
+        permissions.includes("usuarios:gestionar") // buen proxy de admin
 
-      const roles = resolveRoles(me || { email })
-      const roleName = roles.includes("ADMIN") ? "ADMIN" : "CASHIER"
-      const roleId = roleName === "ADMIN" ? 1 : 2
+      const roleName = isAdmin ? "ADMIN" : "EMPLEADO"
+      const roleId = isAdmin ? 1 : 2
+      const roles = [roleName]
 
       setSession({
         token,
-        userId: Number(me?.userId ?? userIdFromJwt ?? 0),
+        userId,
         email,
-        name: me?.name ?? null,
 
         roles,
         roleName,
@@ -149,12 +147,11 @@ async function onSubmit() {
       router.replace(redirect || { name: "dashboard" })
       return
     } catch (eLoginReal) {
-      // si no existe endpoint login / falla token, caemos al fallback
       console.warn("Login real falló, fallback a list():", eLoginReal?.message || eLoginReal)
     }
 
     // =========================
-    // ✅ INTENTO 2: FALLBACK (sin back login)
+    // ✅ FALLBACK (solo si todavía no tenés login real estable)
     // =========================
     const { data } = await usuariosApi.list()
     const arr = Array.isArray(data) ? data : []
@@ -167,7 +164,7 @@ async function onSubmit() {
     }
 
     const roles = resolveRoles(user)
-    const roleName = roles.includes("ADMIN") ? "ADMIN" : "CASHIER"
+    const roleName = roles.includes("ADMIN") ? "ADMIN" : "EMPLEADO"
     const roleId = roleName === "ADMIN" ? 1 : 2
 
     setSession({
@@ -180,6 +177,7 @@ async function onSubmit() {
       roleName,
       role: roleName,
 
+      permissions: [], // sin JWT no hay permisos reales
       shift: normalizeShift(form.shift),
     })
 

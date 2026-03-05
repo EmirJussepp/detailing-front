@@ -1,197 +1,233 @@
 <script setup>
-import { computed, ref, onMounted } from "vue"
-import { getSession, isAdmin } from "../auth/session"
+import { computed, onMounted, reactive, ref } from "vue"
+import { getSession } from "../auth/session"
 import { usuariosApi } from "../services/usuariosService"
 
 const session = getSession() ?? null
-const admin = computed(() => Boolean(session && isAdmin()))
+
+const perms = computed(() => session?.permissions || [])
+const canView = computed(() => perms.value.includes("admin:all") || perms.value.includes("usuarios:ver"))
+const canManage = computed(() => perms.value.includes("admin:all") || perms.value.includes("usuarios:gestionar"))
 
 const loading = ref(false)
-const errorMsg = ref("")
-const okMsg = ref("")
+const error = ref("")
+const success = ref("")
+const usuarios = ref([])
 
-const items = ref([])
+const modalOpen = ref(false)
 
-async function load() {
+const form = reactive({
+  name: "",
+  email: "",
+  password: "",
+  role: "EMPLEADO", // ADMIN | EMPLEADO
+  shift: "MANIANA", // opcional (si todavía no lo guardás, lo ignoramos)
+})
+
+function normalizeEmail(v) {
+  return String(v || "").trim().toLowerCase()
+}
+
+function resetAlerts() {
+  error.value = ""
+  success.value = ""
+}
+
+function resetForm() {
+  form.name = ""
+  form.email = ""
+  form.password = ""
+  form.role = "EMPLEADO"
+  form.shift = "MANIANA"
+}
+
+async function fetchUsuarios() {
+  if (!canView.value) return
   loading.value = true
-  errorMsg.value = ""
+  resetAlerts()
   try {
     const { data } = await usuariosApi.list()
-    items.value = Array.isArray(data) ? data : []
+    usuarios.value = Array.isArray(data) ? data : (Array.isArray(data?.content) ? data.content : [])
   } catch (e) {
-    errorMsg.value = e?.response?.data?.error || e?.response?.data?.message || e?.message || "Error cargando usuarios"
-    items.value = []
+    error.value =
+      e?.response?.data?.error ||
+      e?.response?.data?.message ||
+      e?.message ||
+      "No se pudieron cargar los usuarios"
   } finally {
     loading.value = false
   }
 }
 
-onMounted(load)
+function openCreate() {
+  resetAlerts()
+  resetForm()
+  modalOpen.value = true
+}
 
-// Form create
-const fName = ref("")
-const fEmail = ref("")
-const fPassword = ref("")
-const fRoleId = ref("1") // por defecto ADMIN (en tu dump: roles tiene id 1)
+function closeModal() {
+  modalOpen.value = false
+}
 
-async function createUser() {
-  if (loading.value) return
-  errorMsg.value = ""
-  okMsg.value = ""
+function validateForm() {
+  resetAlerts()
+  if (!String(form.name || "").trim()) return (error.value = "Ingresá nombre"), false
+  const email = normalizeEmail(form.email)
+  if (!email) return (error.value = "Ingresá email"), false
+  if (!email.includes("@")) return (error.value = "Email inválido"), false
+  if (!String(form.password || "").trim()) return (error.value = "Ingresá contraseña"), false
+  if (!["ADMIN", "EMPLEADO"].includes(String(form.role))) return (error.value = "Rol inválido"), false
+  return true
+}
+
+async function createUsuario() {
+  if (!canManage.value) {
+    error.value = "Sin permiso para gestionar usuarios"
+    return
+  }
+  if (!validateForm()) return
+
+  loading.value = true
+  resetAlerts()
 
   try {
-    if (!admin.value) throw new Error("Solo ADMIN puede crear usuarios.")
-    if (!fName.value.trim()) throw new Error("Nombre requerido.")
-    if (!fEmail.value.trim()) throw new Error("Email requerido.")
-    if (!fPassword.value.trim()) throw new Error("Password requerido.")
+    const payload = {
+      name: String(form.name).trim(),
+      email: normalizeEmail(form.email),
+      password: String(form.password),
+      roles: [String(form.role)], // ✅ back: roles: ["ADMIN"] o ["EMPLEADO"]
+      // shift: form.shift, // solo si tu back lo soporta
+    }
 
-    const roleId = Number(fRoleId.value)
-    if (!Number.isFinite(roleId) || roleId <= 0) throw new Error("roleId inválido.")
+    await usuariosApi.create(payload)
 
-    await usuariosApi.create({
-      name: fName.value.trim(),
-      email: fEmail.value.trim(),
-      password: fPassword.value.trim(),
-      roleId,
-    })
-
-    okMsg.value = "Usuario creado ✅"
-    fName.value = ""
-    fEmail.value = ""
-    fPassword.value = ""
-    fRoleId.value = "1"
-    await load()
+    success.value = "Usuario creado correctamente"
+    closeModal()
+    await fetchUsuarios()
   } catch (e) {
-    errorMsg.value = e?.response?.data?.error || e?.response?.data?.message || e?.message || "Error creando usuario"
+    error.value =
+      e?.response?.data?.error ||
+      e?.response?.data?.message ||
+      e?.message ||
+      "No se pudo crear el usuario"
+  } finally {
+    loading.value = false
   }
 }
 
-async function removeUser(u) {
-  if (loading.value) return
-  errorMsg.value = ""
-  okMsg.value = ""
-
-  try {
-    if (!admin.value) throw new Error("Solo ADMIN puede eliminar usuarios.")
-    const id = Number(u?.userId ?? u?.id)
-    if (!Number.isFinite(id) || id <= 0) throw new Error("ID inválido.")
-    const ok = confirm(`¿Eliminar usuario #${id}?`)
-    if (!ok) return
-
-    await usuariosApi.delete(id)
-    okMsg.value = "Usuario eliminado ✅"
-    await load()
-  } catch (e) {
-    errorMsg.value = e?.response?.data?.error || e?.response?.data?.message || e?.message || "Error eliminando usuario"
-  }
-}
-
-function roleName(roleId) {
-  const id = Number(roleId)
-  if (id === 1) return "ADMIN"
-  if (id === 2) return "CASHIER"
-  return `ROLE #${id}`
-}
+onMounted(fetchUsuarios)
 </script>
 
 <template>
   <div class="container py-4">
-    <div class="mb-3">
-      <h1 class="h4 mb-1">Usuarios</h1>
-      <div class="text-secondary">Alta / listado / baja (usa el back real).</div>
+    <div class="d-flex flex-wrap gap-2 align-items-end justify-content-between mb-3">
+      <div>
+        <h1 class="h4 mb-1">Usuarios</h1>
+        <div class="text-secondary">Crear y administrar usuarios del sistema.</div>
+      </div>
+
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-light" @click="fetchUsuarios" :disabled="loading || !canView">
+          {{ loading ? "Actualizando..." : "Refresh" }}
+        </button>
+        <button class="btn btn-accent" @click="openCreate" :disabled="loading || !canManage">
+          + Nuevo usuario
+        </button>
+      </div>
     </div>
 
-    <div v-if="errorMsg" class="alert alert-danger py-2">{{ errorMsg }}</div>
-    <div v-if="okMsg" class="alert alert-success py-2">{{ okMsg }}</div>
-
-    <div v-if="!admin" class="alert alert-warning py-2">
-      Solo ADMIN puede administrar usuarios.
+    <div v-if="!canView" class="alert alert-warning py-2">
+      No tenés permisos para ver usuarios.
     </div>
 
-    <div v-else class="card bg-panel border-0 shadow-sm mb-4">
-      <div class="card-body">
-        <h2 class="h6 mb-3">Crear usuario</h2>
+    <div v-else>
+      <div v-if="error" class="alert alert-danger py-2">{{ error }}</div>
+      <div v-if="success" class="alert alert-success py-2">{{ success }}</div>
 
-        <div class="row g-3">
-          <div class="col-12 col-md-4">
-            <label class="form-label text-secondary">Nombre</label>
-            <input v-model="fName" class="form-control bg-dark text-white border-secondary" placeholder="Ej: Juan Pérez" />
+      <div class="card bg-panel border-0 shadow-sm">
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-dark table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th style="width: 80px">ID</th>
+                  <th>Nombre</th>
+                  <th>Email</th>
+                  <th style="width: 160px">Roles</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="u in usuarios" :key="u.userId ?? u.id">
+                  <td class="text-secondary">{{ u.userId ?? u.id }}</td>
+                  <td>{{ u.name ?? u.nombre ?? "-" }}</td>
+                  <td class="text-secondary">{{ u.email }}</td>
+                  <td>
+                    <span
+                      v-for="r in (u.roles || [])"
+                      :key="r"
+                      class="badge rounded-pill bg-secondary me-1"
+                    >
+                      {{ r }}
+                    </span>
+                    <span v-if="!u.roles || !u.roles.length" class="text-secondary">-</span>
+                  </td>
+                </tr>
+
+                <tr v-if="usuarios.length === 0">
+                  <td colspan="4" class="text-secondary">No hay usuarios para mostrar.</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
-          <div class="col-12 col-md-4">
-            <label class="form-label text-secondary">Email</label>
-            <input v-model="fEmail" class="form-control bg-dark text-white border-secondary" placeholder="ej@mail.com" />
+          <div class="text-secondary small mt-2">
+            Para crear/editar usuarios necesitás <b>usuarios:gestionar</b>.
           </div>
-
-          <div class="col-12 col-md-4">
-            <label class="form-label text-secondary">Password</label>
-            <input v-model="fPassword" type="password" class="form-control bg-dark text-white border-secondary" placeholder="••••••" />
-          </div>
-
-          <div class="col-12 col-md-3">
-            <label class="form-label text-secondary">Role ID</label>
-            <select v-model="fRoleId" class="form-select bg-dark text-white border-secondary">
-              <option value="1">1 - ADMIN</option>
-              <option value="2">2 - CASHIER</option>
-            </select>
-            <div class="text-secondary small mt-1">
-              (Roles CRUD todavía no existe en tu back, esto es por ID.)
-            </div>
-          </div>
-        </div>
-
-        <div class="d-flex justify-content-end mt-3">
-          <button class="btn btn-primary btn-accent" @click="createUser" :disabled="loading">
-            {{ loading ? "Guardando..." : "Crear usuario" }}
-          </button>
         </div>
       </div>
     </div>
 
-    <div class="card bg-panel border-0 shadow-sm">
-      <div class="card-body">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-          <h2 class="h6 mb-0">Listado</h2>
-          <button class="btn btn-sm btn-outline-light" @click="load" :disabled="loading">
-            {{ loading ? "Cargando..." : "Refrescar" }}
+    <!-- Modal simple (sin Bootstrap JS) -->
+    <div v-if="modalOpen" class="modal-backdrop">
+      <div class="modal-card">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <div class="fw-bold">Nuevo usuario</div>
+          <button class="btn btn-sm btn-outline-light" @click="closeModal" :disabled="loading">X</button>
+        </div>
+
+        <div v-if="error" class="alert alert-danger py-2">{{ error }}</div>
+
+        <div class="mb-2">
+          <label class="form-label text-secondary small">Nombre</label>
+          <input class="form-control bg-dark text-white border-0" v-model="form.name" :disabled="loading" />
+        </div>
+
+        <div class="mb-2">
+          <label class="form-label text-secondary small">Email</label>
+          <input class="form-control bg-dark text-white border-0" v-model="form.email" :disabled="loading" />
+        </div>
+
+        <div class="mb-2">
+          <label class="form-label text-secondary small">Contraseña</label>
+          <input class="form-control bg-dark text-white border-0" type="password" v-model="form.password" :disabled="loading" />
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label text-secondary small">Rol</label>
+          <select class="form-select bg-dark text-white border-0" v-model="form.role" :disabled="loading">
+            <option value="EMPLEADO">EMPLEADO</option>
+            <option value="ADMIN">ADMIN</option>
+          </select>
+          <div class="text-secondary small mt-1">
+            EMPLEADO: sin compras/proveedores · ADMIN: todo
+          </div>
+        </div>
+
+        <div class="d-flex gap-2 justify-content-end">
+          <button class="btn btn-outline-light" @click="closeModal" :disabled="loading">Cancelar</button>
+          <button class="btn btn-accent" @click="createUsuario" :disabled="loading || !canManage">
+            {{ loading ? "Guardando..." : "Crear" }}
           </button>
-        </div>
-
-        <div v-if="loading" class="text-secondary small">Cargando…</div>
-
-        <div v-else-if="!items.length" class="text-secondary small">
-          No hay usuarios.
-        </div>
-
-        <div v-else class="table-responsive">
-          <table class="table table-dark table-hover align-middle mb-0">
-            <thead>
-              <tr>
-                <th style="width: 90px">ID</th>
-                <th>Nombre</th>
-                <th>Email</th>
-                <th style="width: 140px">Role</th>
-                <th style="width: 130px" class="text-end">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="u in items" :key="u.userId ?? u.id">
-                <td class="text-secondary">{{ u.userId ?? u.id }}</td>
-                <td class="fw-semibold">{{ u.name ?? u.nombre }}</td>
-                <td class="text-secondary">{{ u.email }}</td>
-                <td class="text-secondary">{{ roleName(u.roleId) }}</td>
-                <td class="text-end">
-                  <button class="btn btn-sm btn-outline-danger" @click="removeUser(u)">
-                    Eliminar
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="text-secondary small mt-2">
-          ✅ Esto usa tus endpoints reales: <b>GET /users</b> · <b>POST /users</b> · <b>DELETE /users/:id</b>
         </div>
       </div>
     </div>
@@ -200,4 +236,29 @@ function roleName(roleId) {
 
 <style scoped>
 .bg-panel { background: rgba(18, 22, 32, .92); }
+.btn-accent {
+  border: 1px solid rgba(170, 150, 255, 0.35);
+  background: rgba(170, 150, 255, 0.14);
+  color: rgba(255, 255, 255, 0.92);
+  font-weight: 800;
+}
+.btn-accent:hover { background: rgba(170, 150, 255, 0.20); }
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.55);
+  display: grid;
+  place-items: center;
+  z-index: 2000;
+  padding: 16px;
+}
+.modal-card{
+  width: 100%;
+  max-width: 520px;
+  border-radius: 16px;
+  background: rgba(18, 22, 32, .98);
+  border: 1px solid rgba(255,255,255,.08);
+  box-shadow: 0 18px 55px rgba(0,0,0,.45);
+  padding: 16px;
+}
 </style>

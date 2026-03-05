@@ -2,7 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { getSession, isAdmin, getShift } from "../auth/session"
 
-import { clientesApi } from "../services/clientesService"
+import { clientesApi } from "../services/clientesApi"
+import { productosApi } from "../services/productosApi"
 import { ventasApi } from "../services/ventasApi"
 import { cajaApi } from "../services/cajaApi"
 import { movimientosCajaApi } from "../services/movimientosCajaApi"
@@ -120,6 +121,36 @@ function metodoNombreById(id) {
 }
 
 // =========================
+// Productos cache (para nombres en detalle venta)
+// =========================
+const productosById = ref(new Map())
+const productosLoaded = ref(false)
+
+function unwrapPageAny(data) {
+  if (Array.isArray(data)) return data
+  const content = data?.content ?? data?.items ?? data?.data ?? []
+  return Array.isArray(content) ? content : []
+}
+
+async function fetchProductosOnce() {
+  if (productosLoaded.value) return
+  try {
+    const { data } = await productosApi.list({ page: 0, size: 1000, search: "" })
+    const arr = unwrapPageAny(data)
+    const m = new Map()
+    for (const p of arr) {
+      const id = safeId(p?.productoId ?? p?.id)
+      if (id) m.set(id, String(p?.nombre ?? `Prod #${id}`))
+    }
+    productosById.value = m
+  } catch {
+    productosById.value = new Map()
+  } finally {
+    productosLoaded.value = true
+  }
+}
+
+// =========================
 // Cache clientes (para mostrar nombre)
 // =========================
 const clientes = ref([])
@@ -156,43 +187,91 @@ async function fetchClientesOnce() {
     clientesLoaded.value = true
   }
 }
-
 function clienteTxtById(clienteId) {
   const cid = safeId(clienteId)
   if (!cid) return "Mostrador"
+
   const c = clienteById.value.get(cid)
   if (!c) return `Cliente #${cid}`
+
   const nombre = `${c.nombre ?? ""} ${c.apellido ?? ""}`.trim()
   const dni = c.dni ? `DNI ${c.dni}` : null
   return [nombre || `Cliente #${cid}`, dni].filter(Boolean).join(" · ")
 }
 
-// =========================
-// Cache ventas → clienteTxt
-// ⚠️ NO Map: usamos objeto para re-render seguro
-// =========================
-const ventaClienteCache = ref({}) // { [ventaId]: { clienteId, clienteTxt } }
+function pickClienteIdFromVenta(venta) {
+  const v = venta ?? {}
 
-async function hydrateClienteFromVentaId(ventaId) {
+  const raw =
+    v.clienteId ??
+    v.cliente_id ??
+    v.clienteID ??
+    v.cliente?.clienteId ??
+    v.cliente?.id ??
+    v.cliente?.cliente_id ??
+    v.clienteIdStr ?? // por si viene raro
+    null
+
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+// =========================
+// Cache ventas → info (cliente + items + total)
+// =========================
+const ventaInfoCache = ref({})
+// { [ventaId]: { clienteId, clienteTxt, total, itemsTxt } }
+
+async function hydrateVentaInfoFromVentaId(ventaId) {
   const vid = safeId(ventaId)
   if (!vid) return
-  if (ventaClienteCache.value[vid]) return
+  if (ventaInfoCache.value[vid]) return
 
   try {
     const { data } = await ventasApi.porId(vid)
-    const venta = data ?? null
-    const clienteId = venta?.clienteId ?? venta?.cliente_id ?? null
-    const clienteTxt = clienteTxtById(clienteId)
 
-    ventaClienteCache.value = {
-      ...ventaClienteCache.value,
-      [vid]: { clienteId, clienteTxt },
-    }
+    // ✅ a veces el back devuelve { venta: {...} } o { ventaActualizada: {...} }
+    const venta = data?.venta ?? data?.ventaActualizada ?? data ?? null
+
+    const clienteId = pickClienteIdFromVenta(venta)
+
+    const detalles =
+      venta?.detallesVenta ??
+      venta?.detalles ??
+      venta?.items ??
+      venta?.detalleVenta ??
+      []
+
+    const itemsTxt = Array.isArray(detalles)
+      ? detalles
+          .map((d) => {
+            const cant = Number(d.cantidad ?? d.qty ?? 0) || 0
+            const pid = safeId(d.productoId ?? d.producto_id)
+            const nombre =
+              d.productoNombre ??
+              d.producto?.nombre ??
+              d.nombreProducto ??
+              productosById.value.get(pid) ??
+              (pid ? `Prod #${pid}` : "Producto")
+
+            return cant > 0 ? `${cant}× ${nombre}` : nombre
+          })
+          .filter(Boolean)
+          .slice(0, 4)
+          .join(" · ")
+      : ""
+
+    const total = Number(venta?.total ?? 0) || 0
+
+    ventaInfoCache.value = {
+  ...ventaInfoCache.value,
+  [vid]: { clienteId, total, itemsTxt },
+}
   } catch {
-    ventaClienteCache.value = {
-      ...ventaClienteCache.value,
-      [vid]: { clienteId: null, clienteTxt: `Venta #${vid}` },
-    }
+    ventaInfoCache.value = {
+  ...ventaInfoCache.value,
+  [vid]: { clienteId: null, total: 0, itemsTxt: "" },
+}
   }
 }
 
@@ -221,36 +300,115 @@ async function refreshCaja() {
   }
 }
 
+function pickFecha(m) {
+  if (!m) return null
+
+  // 1) keys típicas (agregué muchas)
+  const candidates = [
+    m.fecha,
+    m.fechaHora,
+    m.fecha_hora,
+    m.fechaMovimiento,
+    m.fecha_movimiento,
+    m.fechaCreacion,
+    m.fecha_creacion,
+    m.creadoEn,
+    m.creado_en,
+    m.createdAt,
+    m.created_at,
+    m.updatedAt,
+    m.updated_at,
+    m.timestamp,
+  ].filter(Boolean)
+
+  for (const c of candidates) {
+    const iso = normalizeFecha(c)
+    if (iso) return iso
+  }
+
+  // 2) fallback: buscar cualquier key que incluya "fecha" o "date" o "time"
+  for (const [k, v] of Object.entries(m)) {
+    const kk = k.toLowerCase()
+    if (kk.includes("fecha") || kk.includes("date") || kk.includes("time")) {
+      const iso = normalizeFecha(v)
+      if (iso) return iso
+    }
+  }
+
+  return null
+}
+
+function normalizeFecha(v) {
+  if (!v) return null
+
+  // string ISO o similar
+  if (typeof v === "string") {
+    const d = new Date(v)
+    return Number.isNaN(d.getTime()) ? null : d.toISOString()
+  }
+
+  // number timestamp
+  if (typeof v === "number") {
+    const d = new Date(v)
+    return Number.isNaN(d.getTime()) ? null : d.toISOString()
+  }
+
+  // objetos raros tipo { value: "..."} o { iso: "..."} o Kotlin serializado
+  if (typeof v === "object") {
+    const maybe =
+      v.iso ??
+      v.value ??
+      v.dateTime ??
+      v.datetime ??
+      v.fecha ??
+      v.timestamp ??
+      null
+
+    if (typeof maybe === "string" || typeof maybe === "number") {
+      const d = new Date(maybe)
+      return Number.isNaN(d.getTime()) ? null : d.toISOString()
+    }
+
+    // último fallback
+    const s = String(v)
+    const d = new Date(s)
+    return Number.isNaN(d.getTime()) ? null : d.toISOString()
+  }
+
+  return null
+}
+
 async function refreshMovimientos() {
   movimientos.value = []
   resumen.value = { ingresos: 0, egresos: 0, saldo: 0 }
 
   if (!cajaAbierta.value?.cajaId) return
 
-  await fetchClientesOnce()
+  await Promise.all([fetchClientesOnce(), fetchProductosOnce()])
 
   try {
     const { data } = await movimientosCajaApi.porCajaId(cajaAbierta.value.cajaId)
     const arrRaw = Array.isArray(data) ? data : []
 
+    // ✅ ACÁ adentro, porque arrRaw existe acá
+    console.log("mov ejemplo:", arrRaw?.[0])
+
     const arr = arrRaw
       .map((m) => ({
         ...m,
+        fecha: pickFecha(m),
         tipo: String(m.tipo ?? "").toUpperCase(),
         concepto: String(m.concepto ?? "").toUpperCase(),
-        monto: Number(m.monto ?? 0) || 0,
-        ventaId: m.ventaId ?? m.venta_id ?? null,
-        metodoPagoId: m.metodoPagoId ?? m.metodo_pago_id ?? null,
+        monto: Number(m.monto ?? m.importe ?? 0) || 0,
+        ventaId: m.ventaId ?? m.venta_id ?? m.venta ?? null,
+        metodoPagoId: m.metodoPagoId ?? m.metodo_pago_id ?? m.metodoId ?? null,
       }))
       .sort((a, b) => new Date(b.fecha ?? 0) - new Date(a.fecha ?? 0))
 
     movimientos.value = arr
 
-    // hidratar ventas (solo las que tengan ventaId)
     const ventaIds = [...new Set(arr.map((x) => safeId(x.ventaId)).filter((v) => v > 0))]
-    for (const vid of ventaIds) {
-      await hydrateClienteFromVentaId(vid)
-    }
+    for (const vid of ventaIds) await hydrateVentaInfoFromVentaId(vid)
 
     const ingresos = arr.filter((m) => m.tipo === "INGRESO").reduce((a, m) => a + m.monto, 0)
     const egresos = arr.filter((m) => m.tipo === "EGRESO").reduce((a, m) => a + m.monto, 0)
@@ -381,19 +539,41 @@ const kpiEgresosFiltrados = computed(() =>
 const kpiNetoFiltrado = computed(() => kpiIngresosFiltrados.value - kpiEgresosFiltrados.value)
 
 function exportCSV() {
-  const rows = movimientosFiltrados.value.map((m) => ({
-    id: m.movimientoCajaId ?? m.movimientoId ?? m.id ?? "",
-    fecha: m.fecha ?? "",
-    tipo: m.tipo ?? "",
-    concepto: m.concepto ?? "",
-    ventaId: m.ventaId ?? "",
-    cliente: m.ventaId ? (ventaClienteCache.value[safeId(m.ventaId)]?.clienteTxt ?? "") : "",
-    descripcion: m.descripcion ?? "",
-    metodo: m.metodoPagoId ? metodoNombreById(m.metodoPagoId) : "",
-    monto: m.monto ?? 0,
-  }))
+  const rows = movimientosFiltrados.value.map((m) => {
+    const vid = safeId(m.ventaId)
+    const info = vid ? ventaInfoCache.value[vid] : null
 
-  const header = Object.keys(rows[0] || { id: "", fecha: "", tipo: "", concepto: "", ventaId: "", cliente: "", descripcion: "", metodo: "", monto: 0 })
+    return {
+      id: m.movimientoCajaId ?? m.movimientoId ?? m.id ?? "",
+      fecha: m.fecha ?? "",
+      tipo: m.tipo ?? "",
+      concepto: m.concepto ?? "",
+      ventaId: vid ? String(vid) : "",
+      cliente: info?.clienteId ? clienteTxtById(info.clienteId) : "Mostrador",
+      items: info?.itemsTxt ?? "",
+      totalVenta: info?.total ?? 0,
+      descripcion: m.descripcion ?? "",
+      metodo: m.metodoPagoId ? metodoNombreById(m.metodoPagoId) : "",
+      monto: m.monto ?? 0,
+    }
+  })
+
+  const header = Object.keys(
+    rows[0] || {
+      id: "",
+      fecha: "",
+      tipo: "",
+      concepto: "",
+      ventaId: "",
+      cliente: "",
+      items: "",
+      totalVenta: 0,
+      descripcion: "",
+      metodo: "",
+      monto: 0,
+    }
+  )
+
   const csv = [
     header.join(";"),
     ...rows.map((r) => header.map((k) => `"${String(r[k] ?? "").replaceAll('"', '""')}"`).join(";")),
@@ -416,6 +596,13 @@ function rowClass(m) {
 function signedMoney(m) {
   const sign = m.tipo === "EGRESO" ? "-" : "+"
   return `${sign}$ ${formatMoney(m.monto)}`
+}
+function clienteTxtTemplate(ventaId) {
+  const vid = safeId(ventaId)
+  if (!vid) return "-"
+  const info = ventaInfoCache.value[vid]
+  if (!info) return "Cargando…"
+  return clienteTxtById(info.clienteId)
 }
 </script>
 
@@ -642,11 +829,14 @@ function signedMoney(m) {
                 </td>
 
                 <td class="text-secondary">
-                  <span v-if="m.ventaId">
-                    {{ ventaClienteCache[safeId(m.ventaId)]?.clienteTxt || "Cargando…" }}
-                  </span>
-                  <span v-else>-</span>
-                </td>
+  <span v-if="m.ventaId">
+   {{ clienteTxtTemplate(m.ventaId) }}
+    <div class="text-secondary small">
+      {{ ventaInfoCache[safeId(m.ventaId)]?.itemsTxt || "" }}
+    </div>
+  </span>
+  <span v-else>-</span>
+</td>
 
                 <td>
                   <span class="badge" :class="m.tipo === 'INGRESO' ? 'bg-success' : 'bg-danger'">

@@ -1,26 +1,29 @@
-// src/services/clientesService.js
 import { http } from "./http"
 
 export const clientesApi = {
-  // ✅ lista (puede ser paginada o array)
   list(params = {}) {
-    const { page = 0, size = 50, search = "" } = params
-    return http.get("/clientes", { params: { page, size, search } })
+    const page = Number(params.page ?? 0)
+    const size = Number(params.size ?? 50)
+
+    const termRaw = params.search ?? params.q ?? ""
+    const term = String(termRaw ?? "").trim()
+
+    const qp = { page, size }
+    if (term) {
+      qp.search = term
+      qp.q = term
+    }
+
+    return http.get("/clientes", { params: qp })
   },
 
   create(payload) {
     return http.post("/clientes", payload)
   },
 
-  // ✅ si tu back lo tiene así:
   getByDni(dni) {
     return http.get(`/clientes/dni/${encodeURIComponent(dni)}`)
   },
-
-  // ✅ alternativo (si tu back lo tiene con query):
-  // getByDni(dni) {
-  //   return http.get("/clientes/buscar", { params: { dni } })
-  // },
 
   deuda(clienteId) {
     return http.get(`/clientes/${clienteId}/deuda`)
