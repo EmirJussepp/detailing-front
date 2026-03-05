@@ -1,5 +1,5 @@
 import axios from "axios"
-import { getSession } from "../auth/session"
+import { getSession, clearSession } from "../auth/session"
 
 export const http = axios.create({
   baseURL: import.meta.env.VITE_API_URL || "http://127.0.0.1:8082",
@@ -26,7 +26,18 @@ http.interceptors.response.use(
     return res
   },
   (err) => {
-    console.error("❌", err.config?.url, err.response?.status, err.response?.data || err.message)
+    const status = err?.response?.status
+    console.error("❌", err.config?.url, status, err.response?.data || err.message)
+
+    if (status === 401) {
+      try { clearSession() } catch {}
+
+      if (!String(window.location.pathname || "").startsWith("/login")) {
+        const redirect = encodeURIComponent(window.location.pathname + window.location.search)
+        window.location.href = `/login?redirect=${redirect}`
+      }
+    }
+
     return Promise.reject(err)
   }
 )
