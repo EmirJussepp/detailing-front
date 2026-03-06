@@ -108,17 +108,16 @@ async function onSubmit() {
     // ✅ LOGIN REAL (JWT)
     // =========================
     try {
-      const { data: loginResp } = await usuariosApi.login({
-        email,
-        password: form.password,
-      })
-
-      const token = loginResp?.token
-      if (!token) throw new Error("Token no recibido")
+  const { data: loginResp } = await usuariosApi.login({ email, password: form.password })
+  const token = loginResp?.token
+  if (!token) throw new Error("Token no recibido")
 
       const payload = decodeJwt(token) || {}
+const permissions = Array.isArray(payload?.permissions) ? payload.permissions : []
+console.log("JWT payload:", payload)
+console.log("JWT permissions:", permissions)
       const userId = Number(payload?.userId ?? payload?.id ?? 0) || null
-      const permissions = Array.isArray(payload?.permissions) ? payload.permissions : []
+      
 
       // Rol virtual (solo para UI). La verdad está en permissions.
       const isAdmin =
@@ -147,42 +146,13 @@ async function onSubmit() {
       router.replace(redirect || { name: "dashboard" })
       return
     } catch (eLoginReal) {
-      console.warn("Login real falló, fallback a list():", eLoginReal?.message || eLoginReal)
-    }
-
-    // =========================
-    // ✅ FALLBACK (solo si todavía no tenés login real estable)
-    // =========================
-    const { data } = await usuariosApi.list()
-    const arr = Array.isArray(data) ? data : []
-    const users = arr.map(normalizeUser).filter(u => u.userId > 0 && u.email)
-
-    const user = users.find(u => u.email === email)
-    if (!user) {
-      errorMsg.value = "Usuario no encontrado en el sistema"
-      return
-    }
-
-    const roles = resolveRoles(user)
-    const roleName = roles.includes("ADMIN") ? "ADMIN" : "EMPLEADO"
-    const roleId = roleName === "ADMIN" ? 1 : 2
-
-    setSession({
-      userId: user.userId,
-      email: user.email,
-      name: user.name,
-
-      roles,
-      roleId,
-      roleName,
-      role: roleName,
-
-      permissions: [], // sin JWT no hay permisos reales
-      shift: normalizeShift(form.shift),
-    })
-
-    const redirect = typeof route.query.redirect === "string" ? route.query.redirect : null
-    router.replace(redirect || { name: "dashboard" })
+  errorMsg.value =
+    eLoginReal?.response?.data?.error ||
+    eLoginReal?.response?.data?.message ||
+    eLoginReal?.message ||
+    "Error en login"
+  return
+}
   } catch (e) {
     errorMsg.value =
       e?.response?.data?.error ||
@@ -232,21 +202,6 @@ async function onSubmit() {
   <label>Contraseña</label>
   <input v-model="form.password" type="password" placeholder="••••••••" :disabled="loading" />
 </div>
-
-          <!-- Turno (si lo querés activar, descomentá) -->
-          <!--
-          <div class="field">
-            <label>Turno</label>
-            <select
-              v-model="form.shift"
-              :disabled="loading"
-              style="width:100%; height:44px; border-radius:12px; border:1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.92); padding: 0 12px;"
-            >
-              <option value="MAÑANA">MAÑANA</option>
-              <option value="TARDE">TARDE</option>
-            </select>
-          </div>
-          -->
 
           <div class="row-options">
             <label class="remember">
