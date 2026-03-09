@@ -31,7 +31,7 @@ export function isAdmin() {
   return roleName === "ADMIN" || roles.includes("ADMIN")
 }
 
-export function getShift() {
+export function getShift() {  
   const s = getSession()
   const t = String(s?.shift ?? "").toUpperCase()
   if (t === "MANIANA" || t === "MAÑANA") return "MANIANA"

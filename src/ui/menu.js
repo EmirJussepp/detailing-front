@@ -54,6 +54,12 @@ export function buildMenuFromPermissions(perms = getPermissions()) {
     { section: "Compras", permAny: ["compras:ver", "proveedores:ver"] },
     { label: "Compras", to: { name: "compras" }, icon: "🧾", perm: "compras:ver" },
     { label: "Proveedores", to: { name: "compras.proveedores" }, icon: "🏭", perm: "proveedores:ver" },
+    {
+  label: "Reportes",
+  icon: "📊",
+  to: { name: "reportes" },
+  permission: "usuarios:ver",
+},
 
     // Config (si puede ver/gestionar usuarios)
     { section: "Configuración", permAny: ["usuarios:ver", "usuarios:gestionar"] },

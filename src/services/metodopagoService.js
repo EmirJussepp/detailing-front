@@ -1,9 +1,10 @@
 import { http } from "./http"
 
 export const metodosPagoApi = {
-  list() {
-    return http.get("/metodos-pago")
+  list(params = {}) {
+    return http.get("/metodos-pago", { params })
   },
+
   create(payload) {
     return http.post("/metodos-pago", payload)
   },

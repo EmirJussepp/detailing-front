@@ -8,6 +8,7 @@ import { ventasApi } from "../services/ventasApi"
 import { cajaApi } from "../services/cajaApi"
 import { movimientosCajaApi } from "../services/movimientosCajaApi"
 import { metodosPagoApi } from "../services/metodopagoService"
+import Pager from "../components/Pager.vue"
 
 // =========================
 // Helpers
@@ -44,11 +45,7 @@ function formatDateTime(v) {
   if (Number.isNaN(d.getTime())) return String(v)
   return d.toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
 }
-function unwrapPage(data) {
-  if (Array.isArray(data)) return data
-  const content = data?.content ?? data?.items ?? data?.data ?? []
-  return Array.isArray(content) ? content : []
-}
+
 function safeId(x) {
   const n = Number(x ?? 0)
   return Number.isFinite(n) && n > 0 ? n : 0
@@ -88,6 +85,11 @@ const cajaAbierta = ref(null)
 const movimientos = ref([])
 const resumen = ref({ ingresos: 0, egresos: 0, saldo: 0 })
 
+const page = ref(0)
+const size = ref(10)
+const totalElements = ref(0)
+const totalPages = ref(1)
+
 // =========================
 // Métodos de pago
 // =========================
@@ -126,10 +128,24 @@ function metodoNombreById(id) {
 const productosById = ref(new Map())
 const productosLoaded = ref(false)
 
-function unwrapPageAny(data) {
-  if (Array.isArray(data)) return data
-  const content = data?.content ?? data?.items ?? data?.data ?? []
-  return Array.isArray(content) ? content : []
+function unwrapPage(data) {
+  if (Array.isArray(data)) {
+    return {
+      content: data,
+      page: 0,
+      size: data.length || 10,
+      totalElements: data.length,
+      totalPages: 1,
+    }
+  }
+
+  return {
+    content: Array.isArray(data?.content) ? data.content : [],
+    page: Number(data?.page ?? data?.number ?? 0),
+    size: Number(data?.size ?? 10),
+    totalElements: Number(data?.totalElements ?? data?.total ?? 0),
+    totalPages: Number(data?.totalPages ?? 1),
+  }
 }
 
 async function fetchProductosOnce() {
@@ -299,6 +315,16 @@ async function refreshCaja() {
     }
   }
 }
+function onPageChange(newPage) {
+  page.value = Number(newPage)
+  refreshMovimientos()
+}
+
+function onSizeChange(newSize) {
+  size.value = Number(newSize)
+  page.value = 0
+  refreshMovimientos()
+}
 
 function pickFecha(m) {
   if (!m) return null
@@ -381,17 +407,30 @@ function normalizeFecha(v) {
 async function refreshMovimientos() {
   movimientos.value = []
   resumen.value = { ingresos: 0, egresos: 0, saldo: 0 }
+  totalElements.value = 0
+  totalPages.value = 1
 
   if (!cajaAbierta.value?.cajaId) return
 
   await Promise.all([fetchClientesOnce(), fetchProductosOnce()])
 
   try {
-    const { data } = await movimientosCajaApi.porCajaId(cajaAbierta.value.cajaId)
-    const arrRaw = Array.isArray(data) ? data : []
+    const { data } = await movimientosCajaApi.list({
+      page: page.value,
+      size: size.value,
+      cajaId: cajaAbierta.value.cajaId,
+      fecha: fecha.value,
+      turno: turnoBE(turnoSel.value),
+      userId: userIdInt.value,
+    })
 
-    // ✅ ACÁ adentro, porque arrRaw existe acá
-    console.log("mov ejemplo:", arrRaw?.[0])
+    const paged = unwrapPage(data)
+    const arrRaw = paged.content
+
+    page.value = paged.page
+    size.value = paged.size
+    totalElements.value = paged.totalElements
+    totalPages.value = paged.totalPages
 
     const arr = arrRaw
       .map((m) => ({
@@ -410,10 +449,23 @@ async function refreshMovimientos() {
     const ventaIds = [...new Set(arr.map((x) => safeId(x.ventaId)).filter((v) => v > 0))]
     for (const vid of ventaIds) await hydrateVentaInfoFromVentaId(vid)
 
-    const ingresos = arr.filter((m) => m.tipo === "INGRESO").reduce((a, m) => a + m.monto, 0)
-    const egresos = arr.filter((m) => m.tipo === "EGRESO").reduce((a, m) => a + m.monto, 0)
-    const montoInicial = Number(cajaAbierta.value?.montoInicial ?? cajaAbierta.value?.monto_inicial ?? 0) || 0
-    resumen.value = { ingresos, egresos, saldo: montoInicial + ingresos - egresos }
+    const ingresos = arr
+      .filter((m) => m.tipo === "INGRESO")
+      .reduce((a, m) => a + m.monto, 0)
+
+    const egresos = arr
+      .filter((m) => m.tipo === "EGRESO")
+      .reduce((a, m) => a + m.monto, 0)
+
+    const montoInicial = Number(
+      cajaAbierta.value?.montoInicial ?? cajaAbierta.value?.monto_inicial ?? 0
+    ) || 0
+
+    resumen.value = {
+      ingresos,
+      egresos,
+      saldo: montoInicial + ingresos - egresos,
+    }
   } catch (e) {
     console.log("refreshMovimientos error:", e?.response?.status, e?.response?.data || e?.message)
   }
@@ -433,8 +485,10 @@ async function refreshAll() {
 }
 
 const canUse = computed(() => cajaCheck.value?.ok === true && Boolean(cajaAbierta.value?.cajaId))
-
-watch([fecha, turnoSel, admin], refreshAll, { immediate: true })
+watch([fecha, turnoSel, admin], () => {
+  page.value = 0
+  refreshAll()
+}, { immediate: true })
 
 // escuchar cambios globales de caja
 function onCajaChanged() {
@@ -756,118 +810,148 @@ function clienteTxtTemplate(ventaId) {
 
     <!-- Listado + filtros -->
     <div class="card bg-panel border-0 shadow-sm" v-if="canUse">
-      <div class="card-body">
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-          <h2 class="h6 mb-0">Movimientos del turno</h2>
+  <div class="card-body">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+      <h2 class="h6 mb-0">Movimientos del turno</h2>
 
-          <div class="d-flex gap-2">
-            <button class="btn btn-outline-light btn-sm" @click="exportCSV" :disabled="!movimientosFiltrados.length">
-              Exportar CSV
-            </button>
-          </div>
-        </div>
-
-        <div class="row g-2 mb-3">
-          <div class="col-md-3">
-            <select v-model="filtroTipo" class="form-select bg-dark text-white border-secondary">
-              <option value="TODOS">Todos</option>
-              <option value="INGRESO">Solo ingresos</option>
-              <option value="EGRESO">Solo egresos</option>
-            </select>
-          </div>
-
-          <div class="col-md-3">
-            <select v-model="filtroConcepto" class="form-select bg-dark text-white border-secondary">
-              <option value="TODOS">Todos los conceptos</option>
-              <option v-for="c in conceptos" :key="c" :value="c">{{ c }}</option>
-            </select>
-          </div>
-
-          <div class="col-md-6">
-            <input v-model="filtroTexto" class="form-control bg-dark text-white border-secondary" placeholder="Buscar en descripción..." />
-          </div>
-        </div>
-
-        <div v-if="totalesPorConcepto.length" class="mb-3">
-          <div class="text-secondary small mb-2">Totales por concepto (filtrados)</div>
-          <div class="d-flex flex-wrap gap-2">
-            <span v-for="t in totalesPorConcepto" :key="t.concepto" class="badge bg-dark border border-secondary" style="padding: 8px 10px;">
-              <span class="text-secondary">{{ t.concepto }}</span>
-              <span class="ms-2 fw-bold">$ {{ formatMoney(t.total) }}</span>
-            </span>
-          </div>
-        </div>
-
-        <div v-if="!movimientosFiltrados.length" class="text-secondary small">
-          No hay movimientos con esos filtros.
-        </div>
-
-        <div v-else class="table-responsive">
-          <table class="table table-dark table-hover align-middle mb-0">
-            <thead>
-              <tr>
-                <th style="width: 90px">ID</th>
-                <th style="width: 170px">Fecha</th>
-                <th style="width: 90px">Venta</th>
-                <th style="width: 260px">Cliente</th>
-                <th style="width: 110px">Tipo</th>
-                <th style="width: 160px">Concepto</th>
-                <th>Descripción</th>
-                <th style="width: 160px">Método</th>
-                <th style="width: 170px" class="text-end">Monto</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              <tr v-for="m in movimientosFiltrados" :key="m.movimientoCajaId ?? m.movimientoId ?? m.id" :class="rowClass(m)">
-                <td class="text-secondary">{{ m.movimientoCajaId ?? m.movimientoId ?? m.id ?? "-" }}</td>
-                <td class="text-secondary">{{ formatDateTime(m.fecha) }}</td>
-
-                <td class="text-secondary">
-                  <span v-if="m.ventaId">#{{ m.ventaId }}</span>
-                  <span v-else>-</span>
-                </td>
-
-                <td class="text-secondary">
-  <span v-if="m.ventaId">
-   {{ clienteTxtTemplate(m.ventaId) }}
-    <div class="text-secondary small">
-      {{ ventaInfoCache[safeId(m.ventaId)]?.itemsTxt || "" }}
-    </div>
-  </span>
-  <span v-else>-</span>
-</td>
-
-                <td>
-                  <span class="badge" :class="m.tipo === 'INGRESO' ? 'bg-success' : 'bg-danger'">
-                    {{ m.tipo }}
-                  </span>
-                </td>
-
-                <td class="text-secondary">{{ m.concepto || "-" }}</td>
-                <td class="text-secondary">{{ m.descripcion ?? "-" }}</td>
-
-                <td class="text-secondary">
-                  {{ m.metodoPagoId ? metodoNombreById(m.metodoPagoId) : "-" }}
-                </td>
-
-                <td class="text-end fw-bold">{{ signedMoney(m) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="text-secondary small mt-2">
-          Ingresos: <b>$ {{ formatMoney(resumen.ingresos) }}</b> ·
-          Egresos: <b>$ {{ formatMoney(resumen.egresos) }}</b> ·
-          Saldo: <b>$ {{ formatMoney(resumen.saldo) }}</b>
-        </div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-light btn-sm" @click="exportCSV" :disabled="!movimientosFiltrados.length">
+          Exportar CSV
+        </button>
       </div>
     </div>
 
-    <div v-else class="text-secondary">
-      Abrí una caja (o elegí un turno con caja ABIERTA) para ver movimientos.
+    <div class="row g-2 mb-3">
+      <div class="col-md-3">
+        <select v-model="filtroTipo" class="form-select bg-dark text-white border-secondary">
+          <option value="TODOS">Todos</option>
+          <option value="INGRESO">Solo ingresos</option>
+          <option value="EGRESO">Solo egresos</option>
+        </select>
+      </div>
+
+      <div class="col-md-3">
+        <select v-model="filtroConcepto" class="form-select bg-dark text-white border-secondary">
+          <option value="TODOS">Todos los conceptos</option>
+          <option v-for="c in conceptos" :key="c" :value="c">{{ c }}</option>
+        </select>
+      </div>
+
+      <div class="col-md-6">
+        <input
+          v-model="filtroTexto"
+          class="form-control bg-dark text-white border-secondary"
+          placeholder="Buscar en descripción..."
+        />
+      </div>
     </div>
+
+    <div v-if="totalesPorConcepto.length" class="mb-3">
+      <div class="text-secondary small mb-2">Totales por concepto (filtrados de esta página)</div>
+      <div class="d-flex flex-wrap gap-2">
+        <span
+          v-for="t in totalesPorConcepto"
+          :key="t.concepto"
+          class="badge bg-dark border border-secondary"
+          style="padding: 8px 10px;"
+        >
+          <span class="text-secondary">{{ t.concepto }}</span>
+          <span class="ms-2 fw-bold">$ {{ formatMoney(t.total) }}</span>
+        </span>
+      </div>
+    </div>
+
+    <div v-if="!movimientosFiltrados.length" class="text-secondary small">
+      No hay movimientos con esos filtros.
+    </div>
+
+    <div v-else class="table-responsive">
+      <table class="table table-dark table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th style="width: 90px">ID</th>
+            <th style="width: 170px">Fecha</th>
+            <th style="width: 90px">Venta</th>
+            <th style="width: 260px">Cliente</th>
+            <th style="width: 110px">Tipo</th>
+            <th style="width: 160px">Concepto</th>
+            <th>Descripción</th>
+            <th style="width: 160px">Método</th>
+            <th style="width: 170px" class="text-end">Monto</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          <tr
+            v-for="m in movimientosFiltrados"
+            :key="m.movimientoCajaId ?? m.movimientoId ?? m.id"
+            :class="rowClass(m)"
+          >
+            <td class="text-secondary">{{ m.movimientoCajaId ?? m.movimientoId ?? m.id ?? "-" }}</td>
+            <td class="text-secondary">{{ formatDateTime(m.fecha) }}</td>
+
+            <td class="text-secondary">
+              <span v-if="m.ventaId">#{{ m.ventaId }}</span>
+              <span v-else>-</span>
+            </td>
+
+            <td class="text-secondary">
+              <span v-if="m.ventaId">
+                {{ clienteTxtTemplate(m.ventaId) }}
+                <div class="text-secondary small">
+                  {{ ventaInfoCache[safeId(m.ventaId)]?.itemsTxt || "" }}
+                </div>
+              </span>
+              <span v-else>-</span>
+            </td>
+
+            <td>
+              <span class="badge" :class="m.tipo === 'INGRESO' ? 'bg-success' : 'bg-danger'">
+                {{ m.tipo }}
+              </span>
+            </td>
+
+            <td class="text-secondary">{{ m.concepto || "-" }}</td>
+            <td class="text-secondary">{{ m.descripcion ?? "-" }}</td>
+
+            <td class="text-secondary">
+              {{ m.metodoPagoId ? metodoNombreById(m.metodoPagoId) : "-" }}
+            </td>
+
+            <td class="text-end fw-bold">{{ signedMoney(m) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
+      <div class="text-secondary small">
+        Ingresos: <b>$ {{ formatMoney(resumen.ingresos) }}</b> ·
+        Egresos: <b>$ {{ formatMoney(resumen.egresos) }}</b> ·
+        Saldo: <b>$ {{ formatMoney(resumen.saldo) }}</b>
+      </div>
+
+      <div class="text-secondary small">
+        Total registros: <b>{{ totalElements }}</b>
+      </div>
+    </div>
+
+    <div class="mt-3">
+      <Pager
+        :page="page"
+        :size="size"
+        :total-elements="totalElements"
+        :total-pages="totalPages"
+        @update:page="onPageChange"
+        @update:size="onSizeChange"
+      />
+    </div>
+  </div>
+</div>
+
+<div v-else class="text-secondary">
+  Abrí una caja (o elegí un turno con caja ABIERTA) para ver movimientos.
+</div>
   </div>
 </template>
 

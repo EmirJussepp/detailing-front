@@ -76,6 +76,19 @@ function debounce(fn, wait = 250) {
   }
 }
 
+function round2(n) {
+  const x = Number(n ?? 0)
+  return Math.round(x * 100) / 100
+}
+
+function normalizePct(v) {
+  const n = Number(String(v ?? "0").replace(",", "."))
+  if (!Number.isFinite(n)) return 0
+  if (n < 0) return 0
+  if (n > 100) return 100
+  return round2(n)
+}
+
 // =========================
 // Router / Session
 // =========================
@@ -207,10 +220,15 @@ async function fetchMetodosOnce() {
   if (loadedMetodos.value) return
   try {
     const { data } = await metodosPagoApi.list()
+    console.log("METODOS PAGO RAW:", data)
+
     const arr = Array.isArray(data) ? data : unwrapPageArray(data)
     metodosPago.value = arr.map(normalizeMetodoPago).filter((m) => m.id > 0)
-  } catch {
+
+    console.log("METODOS PAGO NORMALIZADOS:", metodosPago.value)
+  } catch (e) {
     metodosPago.value = []
+    console.error("ERROR /metodos-pago:", e?.response?.status, e?.response?.data || e?.message)
   } finally {
     loadedMetodos.value = true
   }
@@ -225,7 +243,6 @@ const showAdvancedId = ref(false)
 
 function goCuentaCorriente() {
   if (!cobrarClienteId.value) return setErr("Seleccioná un cliente para ir a Cuenta Corriente.")
-  // ⬇️ Cambiá el name si tu router usa otro
   router.push({ name: "cuentaCorriente", query: { clienteId: String(cobrarClienteId.value) } })
 }
 
@@ -248,20 +265,37 @@ function getPrecioSugerido(p) {
 const items = ref([])
 
 function recalcItem(it) {
-  const price = Number(it.price ?? 0)
+  const basePrice = Number(it.basePrice ?? it.price ?? 0)
+  const porcentajeAjuste = normalizePct(it.porcentajeAjuste ?? 0)
   const cost = Number(it.cost ?? 0)
   const qty = Number.isFinite(Number(it.qty)) ? Number(it.qty) : 0
-  const subtotal = price * qty
+
+  const price = round2(basePrice * (1 - porcentajeAjuste / 100))
+  const subtotal = round2(price * qty)
 
   let invalidReason = ""
-  if (qty <= 0) invalidReason = "Cantidad inválida"
-  else if (price < cost) invalidReason = "Vende a pérdida"
+
+  if (qty <= 0) {
+    invalidReason = "Cantidad inválida"
+  } else if (price < 0) {
+    invalidReason = "Precio final inválido"
+  } else if (price < cost) {
+    invalidReason = "Vende a pérdida"
+  }
 
   if (it.stock != null && Number.isFinite(Number(it.stock)) && qty > Number(it.stock)) {
     invalidReason = `Stock insuficiente (disp: ${it.stock})`
   }
 
-  return { ...it, qty, subtotal, invalidReason }
+  return {
+    ...it,
+    basePrice: round2(basePrice),
+    porcentajeAjuste,
+    price,
+    qty,
+    subtotal,
+    invalidReason,
+  }
 }
 
 function addItem(qtyOverride = null) {
@@ -282,19 +316,28 @@ function addItem(qtyOverride = null) {
   }
 
   const existing = items.value.find((x) => Number(x.productId) === Number(p.id))
+
   if (existing) {
-    const updated = recalcItem({ ...existing, qty: Number(existing.qty) + qty })
+    const updated = recalcItem({
+      ...existing,
+      qty: Number(existing.qty) + qty,
+    })
     items.value = items.value.map((x) => (x.id === existing.id ? updated : x))
   } else {
+    const basePrice = Number(getPrecioSugerido(p) ?? 0)
+
     const it = {
       id: `${Date.now()}_${Math.floor(Math.random() * 1e9)}`,
       productId: Number(p.id),
       name: p.nombre,
-      price: getPrecioSugerido(p),
+      basePrice,
+      porcentajeAjuste: 0,
+      price: basePrice,
       cost: Number(p.precioCosto ?? 0),
       qty,
       stock: p.stockActual == null ? null : Number(p.stockActual),
     }
+
     items.value = [...items.value, recalcItem(it)]
   }
 
@@ -310,6 +353,13 @@ function removeItem(itemId) {
 function updateItemQty(itemId, v) {
   const q = toIntSafe(v, 1)
   items.value = items.value.map((it) => (it.id === itemId ? recalcItem({ ...it, qty: q <= 0 ? 1 : q }) : it))
+}
+
+function updateItemPct(itemId, v) {
+  const pct = normalizePct(v)
+  items.value = items.value.map((it) =>
+    it.id === itemId ? recalcItem({ ...it, porcentajeAjuste: pct }) : it
+  )
 }
 
 function clearForm() {
@@ -360,10 +410,10 @@ function normalizeVentaFromApi(payload) {
   const estado = String(v.estado ?? payload?.estado ?? "PENDIENTE").toUpperCase()
 
   const clienteId =
-    v.clienteId != null ? Number(v.clienteId) :
-    v.cliente?.id != null ? Number(v.cliente.id) :
-    v.cliente?.clienteId != null ? Number(v.cliente.clienteId) :
-    null
+    v.clienteId != null ? Number(v.clienteId)
+      : v.cliente?.id != null ? Number(v.cliente.id)
+        : v.cliente?.clienteId != null ? Number(v.cliente.clienteId)
+          : null
 
   return { ventaId, total, estado, clienteId, raw: v }
 }
@@ -383,6 +433,7 @@ async function registrarVenta() {
     const detallesVenta = items.value.map((i) => ({
       productoId: Number(i.productId),
       cantidad: Number(i.qty),
+      porcentajeAjuste: Number(i.porcentajeAjuste ?? 0),
     }))
 
     const command = {
@@ -404,7 +455,9 @@ async function registrarVenta() {
       ventaId: ventaN.ventaId,
       total: ventaN.total,
       estado: ventaN.estado,
-      clienteTxt: c ? `${c.nombre} ${c.apellido || ""}`.trim() : (clienteSel.value ? `${clienteSel.value.nombre} ${clienteSel.value.apellido || ""}`.trim() : "Sin cliente"),
+      clienteTxt: c
+        ? `${c.nombre} ${c.apellido || ""}`.trim()
+        : (clienteSel.value ? `${clienteSel.value.nombre} ${clienteSel.value.apellido || ""}`.trim() : "Sin cliente"),
     }
 
     setOk(
@@ -436,6 +489,8 @@ async function registrarVenta() {
 // =========================
 const buscarVentaId = ref("")
 const buscarLoading = ref(false)
+const devolviendoVenta = ref(false)
+
 
 async function buscarVenta() {
   errorMsg.value = ""
@@ -470,6 +525,43 @@ async function buscarVenta() {
     setErr(pickErr(e, "Error buscando venta."))
   } finally {
     buscarLoading.value = false
+  }
+}
+async function devolverVenta(ventaId) {
+  if (!ventaId) return setErr("Venta inválida.")
+
+  if (!cajaAbierta.value?.cajaId) {
+    return setErr("Necesitás una caja ABIERTA para registrar la devolución.")
+  }
+
+  const confirmado = window.confirm(`¿Seguro que querés devolver la venta #${ventaId}? Esto generará un egreso en caja y devolverá stock.`)
+  if (!confirmado) return
+
+  devolviendoVenta.value = true
+  errorMsg.value = ""
+  okMsg.value = ""
+
+  try {
+    await ventasApi.devolver(ventaId, {
+      userId: Number(userIdInt.value),
+      cajaId: Number(cajaAbierta.value.cajaId),
+      motivo: "Devolución registrada desde ventas",
+    })
+
+    setOk(`Venta #${ventaId} devuelta correctamente ✅`)
+
+    await refreshProductos(productSearch.value?.trim() || null)
+    await refreshCaja()
+
+    if (String(buscarVentaId.value || "").trim()) {
+      await buscarVenta()
+    }
+
+    window.dispatchEvent(new Event("cuentaCorriente:changed"))
+  } catch (e) {
+    setErr(pickErr(e, "Error devolviendo venta."))
+  } finally {
+    devolviendoVenta.value = false
   }
 }
 
@@ -674,7 +766,6 @@ onBeforeUnmount(() => {
     <div v-if="errorMsg" class="alert alert-danger py-2">{{ errorMsg }}</div>
     <div v-if="okMsg" class="alert alert-success py-2">{{ okMsg }}</div>
 
-    <!-- CONTROLES CAJA -->
     <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
         <div class="row g-3 align-items-end">
@@ -710,14 +801,92 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-   
+   <div class="card bg-panel border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <h2 class="h6 mb-3">Gestionar / devolver venta</h2>
 
-    <!-- NUEVA VENTA -->
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-md-4">
+        <label class="form-label text-secondary">N° de venta</label>
+        <input
+          v-model="buscarVentaId"
+          class="form-control bg-dark text-white border-secondary"
+          placeholder="Ej: 125"
+        />
+      </div>
+
+      <div class="col-12 col-md-3">
+        <button class="btn btn-outline-light w-100" @click="buscarVenta" :disabled="buscarLoading">
+          {{ buscarLoading ? "Buscando..." : "Buscar venta" }}
+        </button>
+      </div>
+    </div>
+
+    <div v-if="lastVenta" class="mt-3 p-3 rounded border border-secondary-subtle">
+      <div class="row g-2">
+        <div class="col-12 col-md-3">
+          <div class="text-secondary small">Venta</div>
+          <div class="fw-semibold">#{{ lastVenta.ventaId }}</div>
+        </div>
+
+        <div class="col-12 col-md-3">
+          <div class="text-secondary small">Estado</div>
+          <div
+            class="fw-semibold"
+            :class="
+              lastVenta.estado === 'ANULADA'
+                ? 'text-danger'
+                : lastVenta.estado === 'PAGADA'
+                ? 'text-success'
+                : lastVenta.estado === 'PARCIAL'
+                ? 'text-warning'
+                : 'text-secondary'
+            "
+          >
+            {{ lastVenta.estado }}
+          </div>
+        </div>
+
+        <div class="col-12 col-md-3">
+          <div class="text-secondary small">Cliente</div>
+          <div class="fw-semibold">{{ lastVenta.clienteTxt }}</div>
+        </div>
+
+        <div class="col-12 col-md-3">
+          <div class="text-secondary small">Total</div>
+          <div class="fw-semibold">$ {{ formatMoney(lastVenta.total) }}</div>
+        </div>
+      </div>
+
+      <div class="d-flex flex-wrap gap-2 mt-3">
+        <button
+          class="btn btn-outline-light"
+          @click="openPagoModal(lastVenta.ventaId, lastVenta.total)"
+          :disabled="lastVenta.estado === 'ANULADA' || lastVenta.estado === 'PAGADA'"
+        >
+          Cobrar venta
+        </button>
+
+        <button
+  class="btn btn-outline-danger"
+  @click="devolverVenta(lastVenta.ventaId)"
+  :disabled="devolviendoVenta || lastVenta.estado === 'ANULADA'"
+>
+  {{ devolviendoVenta ? "Devolviendo..." : "Devolver venta" }}
+</button>
+      </div>
+
+      <div class="text-secondary small mt-2">
+  ⚠️ La devolución depende de las validaciones del backend: caja abierta, venta existente y pagos registrados.
+</div>
+    </div>
+  </div>
+</div>
+
     <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
         <h2 class="h6 mb-3">Nueva venta</h2>
 
-        <!-- Cliente -->
         <div class="row g-2 mb-2">
           <div class="col-12 col-md-4">
             <label class="form-label text-secondary">Buscar cliente</label>
@@ -742,7 +911,6 @@ onBeforeUnmount(() => {
 
         <div class="text-secondary small mb-3">Registrá la venta y cobrá ahora o después (fiado).</div>
 
-        <!-- Buscar producto -->
         <div class="row g-2 mb-2">
           <div class="col-12">
             <label class="form-label text-secondary">Buscar producto (nombre o código)</label>
@@ -760,7 +928,6 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- Agregar producto -->
         <div class="row g-3 align-items-end">
           <div class="col-12 col-md-7">
             <label class="form-label text-secondary">Producto</label>
@@ -791,14 +958,15 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- Items -->
         <div class="table-responsive mt-3" v-if="items.length">
           <table class="table table-dark table-hover align-middle mb-0">
             <thead>
               <tr>
                 <th>Producto</th>
-                <th style="width: 140px">Precio</th>
-                <th style="width: 140px">Cant.</th>
+                <th style="width: 130px">Base</th>
+                <th style="width: 140px">Desc. %</th>
+                <th style="width: 140px">Final</th>
+                <th style="width: 120px">Cant.</th>
                 <th style="width: 160px">Subtotal</th>
                 <th style="width: 120px" class="text-end">Acción</th>
               </tr>
@@ -809,7 +977,26 @@ onBeforeUnmount(() => {
                   {{ it.name }}
                   <div class="text-secondary small" v-if="it.invalidReason">{{ it.invalidReason }}</div>
                 </td>
-                <td class="text-secondary">$ {{ formatMoney(it.price) }}</td>
+
+                <td class="text-secondary">
+                  $ {{ formatMoney(it.basePrice) }}
+                </td>
+
+                <td>
+                  <input
+                    class="form-control form-control-sm bg-dark text-white border-secondary"
+                    :value="it.porcentajeAjuste"
+                    inputmode="decimal"
+                    @input="updateItemPct(it.id, $event.target.value)"
+                    :disabled="!canSell"
+                    placeholder="0"
+                  />
+                </td>
+
+                <td class="text-secondary fw-semibold">
+                  $ {{ formatMoney(it.price) }}
+                </td>
+
                 <td>
                   <input
                     class="form-control form-control-sm bg-dark text-white border-secondary"
@@ -819,7 +1006,11 @@ onBeforeUnmount(() => {
                     :disabled="!canSell"
                   />
                 </td>
-                <td class="fw-bold">$ {{ formatMoney(it.subtotal) }}</td>
+
+                <td class="fw-bold">
+                  $ {{ formatMoney(it.subtotal) }}
+                </td>
+
                 <td class="text-end">
                   <button class="btn btn-sm btn-outline-light" @click="removeItem(it.id)" :disabled="!canSell">
                     Quitar
@@ -849,11 +1040,12 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="text-secondary small mt-2">✅ Caja debe estar ABIERTA · ✅ Venta descuenta stock · ✅ Cobro parcial/total desde el modal</div>
+        <div class="text-secondary small mt-2">
+          ✅ Caja debe estar ABIERTA · ✅ Venta descuenta stock · ✅ Cada ítem admite descuento % · ✅ Cobro parcial/total desde el modal
+        </div>
       </div>
     </div>
 
-    <!-- MODAL PAGO -->
     <div v-if="showPagoModal" class="modal-backdrop-custom" @click.self="closePagoModal">
       <div class="modal-card">
         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -866,8 +1058,8 @@ onBeforeUnmount(() => {
                   estadoPagoVenta === 'PAGADA'
                     ? 'text-success'
                     : estadoPagoVenta === 'PARCIAL'
-                    ? 'text-warning'
-                    : 'text-secondary'
+                      ? 'text-warning'
+                      : 'text-secondary'
                 "
               >
                 {{ estadoPagoVenta }}
@@ -905,7 +1097,12 @@ onBeforeUnmount(() => {
 
           <div class="col-12">
             <label class="form-label text-secondary">Referencia (opcional)</label>
-            <input v-model="pagoReferencia" class="form-control bg-dark text-white border-secondary" placeholder="Ej: comprobante / alias" :disabled="estadoPagoVenta === 'PAGADA'" />
+            <input
+              v-model="pagoReferencia"
+              class="form-control bg-dark text-white border-secondary"
+              placeholder="Ej: comprobante / alias"
+              :disabled="estadoPagoVenta === 'PAGADA'"
+            />
           </div>
         </div>
 

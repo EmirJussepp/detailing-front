@@ -18,6 +18,10 @@ const userId = Number(session?.userId ?? 1)
 function todayISO() {
   return new Date().toISOString().slice(0, 10)
 }
+function turnoBE(t) {
+  const s = String(t ?? "").toUpperCase()
+  return s === "MAÑANA" ? "MANIANA" : "TARDE"
+}
 
 function formatMoney(n) {
   const num = Number(n ?? 0)
@@ -148,34 +152,33 @@ async function loadMovimientos() {
 async function refresh() {
   loading.value = true
   errorMsg.value = ""
-  okMsg.value = ""
   infoMsg.value = ""
 
   try {
-    // /cajas/abierta?userId&turno
-    const { data } = await cajaApi.abierta({ userId }) // ✅ trae la abierta del usuario
+    const { data } = await cajaApi.abierta({
+      userId,
+      turno: turnoBE(selectedTurno.value),
+      fecha: todayISO(),
+    })
+
     caja.value = data ?? null
 
     if (!caja.value?.cajaId) {
-      // Si el back devuelve 200 con null, dejamos info.
       saldoActual.value = 0
       movimientos.value = []
       infoMsg.value = "No hay caja abierta para este turno. Podés abrirla abajo."
       return
     }
 
-    // saldo actual (server)
     const { data: saldoDto } = await cajaApi.saldo(caja.value.cajaId)
     saldoActual.value = Number(saldoDto?.saldoActual ?? 0)
 
-    // movimientos (para KPIs/tabla)
     try {
       await loadMovimientos()
     } catch {
       movimientos.value = []
     }
   } catch (e) {
-    // 404 acá NO es “error”: significa “no hay caja”
     const status = e?.response?.status
     if (status === 404) {
       caja.value = null
@@ -197,6 +200,7 @@ async function refresh() {
   }
 }
 
+watch(selectedTurno, (v) => localStorage.setItem(turnoKey, v))
 // =========================
 // Actions
 // =========================
