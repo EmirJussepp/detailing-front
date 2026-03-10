@@ -10,17 +10,13 @@ import { movimientosCajaApi } from "../services/movimientosCajaApi"
 // Session
 // =========================
 const session = getSession() ?? null
-const userId = Number(session?.userId ?? 1)
+const userId = Number(session?.userId ?? 0)
 
 // =========================
 // Helpers
 // =========================
 function todayISO() {
   return new Date().toISOString().slice(0, 10)
-}
-function turnoBE(t) {
-  const s = String(t ?? "").toUpperCase()
-  return s === "MAÑANA" ? "MANIANA" : "TARDE"
 }
 
 function formatMoney(n) {
@@ -155,9 +151,30 @@ async function refresh() {
   infoMsg.value = ""
 
   try {
-   const { data } = await cajaApi.abierta({
-  turno: turnoBE(selectedTurno.value),
-})
+    const turnoActual = selectedTurno.value
+    const turnoAlternativo = turnoActual === "MANIANA" ? "TARDE" : "MANIANA"
+
+    let data = null
+
+    try {
+      const res = await cajaApi.abierta({ turno: turnoActual })
+      data = res.data
+    } catch (e) {
+      if (e?.response?.status !== 404) throw e
+    }
+
+    if (!data) {
+      try {
+        const resAlt = await cajaApi.abierta({ turno: turnoAlternativo })
+        data = resAlt.data
+
+        if (data?.turno) {
+          selectedTurno.value = data.turno
+        }
+      } catch (e) {
+        if (e?.response?.status !== 404) throw e
+      }
+    }
 
     caja.value = data ?? null
 
@@ -166,6 +183,10 @@ async function refresh() {
       movimientos.value = []
       infoMsg.value = "No hay caja abierta para este turno. Podés abrirla abajo."
       return
+    }
+
+    if (caja.value?.turno && caja.value.turno !== selectedTurno.value) {
+      selectedTurno.value = caja.value.turno
     }
 
     const { data: saldoDto } = await cajaApi.saldo(caja.value.cajaId)
@@ -177,27 +198,18 @@ async function refresh() {
       movimientos.value = []
     }
   } catch (e) {
-    const status = e?.response?.status
-    if (status === 404) {
-      caja.value = null
-      saldoActual.value = 0
-      movimientos.value = []
-      infoMsg.value = "No hay caja abierta para este turno. Podés abrirla abajo."
-    } else {
-      caja.value = null
-      saldoActual.value = 0
-      movimientos.value = []
-      errorMsg.value =
-        e?.response?.data?.error ||
-        e?.response?.data?.message ||
-        e?.message ||
-        "Error consultando la caja."
-    }
+    caja.value = null
+    saldoActual.value = 0
+    movimientos.value = []
+    errorMsg.value =
+      e?.response?.data?.error ||
+      e?.response?.data?.message ||
+      e?.message ||
+      "Error consultando la caja."
   } finally {
     loading.value = false
   }
 }
-
 watch(selectedTurno, (v) => localStorage.setItem(turnoKey, v))
 // =========================
 // Actions
@@ -344,7 +356,6 @@ onMounted(() => {
   refresh()
 })
 
-watch(selectedTurno, (v) => localStorage.setItem(turnoKey, v))
 </script>
 
 <template>

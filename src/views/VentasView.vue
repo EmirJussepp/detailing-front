@@ -15,21 +15,56 @@ import { mapCliente } from "../mappers/clientes"
 // Helpers
 // =========================
 function todayISO() {
-  return new Date().toISOString().slice(0, 10)
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${y}-${m}-${day}`
+}
+function formatMoney2(n) {
+  const num = Number(n ?? 0)
+  return Number.isFinite(num)
+    ? num.toLocaleString("es-AR", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
+    : "0,00"
 }
 
 function formatMoney(n) {
   const num = Number(n ?? 0)
-  return Number.isFinite(num) ? num.toLocaleString("es-AR", { maximumFractionDigits: 0 }) : "0"
+  return Number.isFinite(num)
+    ? num.toLocaleString("es-AR", { maximumFractionDigits: 0 })
+    : "0"
 }
 
 function parseArNumber(v) {
-  const s = String(v ?? "")
-    .trim()
-    .replace(/\$/g, "")
-    .replace(/\s/g, "")
-    .replace(/\./g, "")
-    .replace(",", ".")
+  let s = String(v ?? "").trim()
+
+  if (!s) return NaN
+
+  s = s.replace(/\$/g, "").replace(/\s/g, "")
+
+  const hasComma = s.includes(",")
+  const hasDot = s.includes(".")
+
+  if (hasComma && hasDot) {
+    s = s.replace(/\./g, "").replace(",", ".")
+    const x = Number(s)
+    return Number.isFinite(x) ? x : NaN
+  }
+
+  if (hasComma) {
+    s = s.replace(",", ".")
+    const x = Number(s)
+    return Number.isFinite(x) ? x : NaN
+  }
+
+  if (hasDot) {
+    const x = Number(s)
+    return Number.isFinite(x) ? x : NaN
+  }
+
   const x = Number(s)
   return Number.isFinite(x) ? x : NaN
 }
@@ -53,11 +88,21 @@ function turnoBE(t) {
 
 function resolveUserId(sess) {
   const n = Number(sess?.userId)
-  return Number.isFinite(n) && n > 0 ? n : 1
+  return Number.isFinite(n) && n > 0 ? n : 0
 }
 
 function pickErr(e, fallback = "Error") {
-  return e?.response?.data?.error || e?.response?.data?.message || e?.response?.data || e?.message || fallback
+  return e?.response?.data?.error ||
+    e?.response?.data?.message ||
+    e?.response?.data ||
+    e?.message ||
+    fallback
+}
+
+function getCajaErrorMessage(e) {
+  const status = e?.response?.status
+  if (status === 404) return "No hay caja ABIERTA."
+  return pickErr(e, "No se pudo validar la caja.")
 }
 
 function unwrapPageArray(data) {
@@ -98,9 +143,10 @@ const router = useRouter()
 const session = getSession() ?? null
 const admin = computed(() => Boolean(session && isAdmin()))
 const userIdInt = computed(() => resolveUserId(session))
+const hasValidUser = computed(() => Number(userIdInt.value) > 0)
 
 // =========================
-// Filtros (fecha/turno)
+// Filtros visuales
 // =========================
 const fecha = ref(todayISO())
 const turnoSel = ref("MAÑANA")
@@ -108,7 +154,7 @@ const turnoSel = ref("MAÑANA")
 watch(
   admin,
   (isAdm) => {
-    turnoSel.value = turnoUI(isAdm ? "MAÑANA" : getShift())
+    turnoSel.value = isAdm ? "MAÑANA" : turnoUI(getShift())
   },
   { immediate: true }
 )
@@ -125,40 +171,74 @@ function setOk(msg) {
   okMsg.value = msg
   errorMsg.value = ""
 }
+
 function setErr(msg) {
   errorMsg.value = msg
   okMsg.value = ""
 }
 
 // =========================
-// Caja (bloqueo real)
+// Caja
 // =========================
 const cajaCheck = ref({ ok: false, error: "" })
 const cajaAbierta = ref(null)
 
+async function buscarCajaAbiertaConFallback() {
+  const turnoPreferido = turnoBE(turnoSel.value)
+  const turnoAlternativo = turnoPreferido === "MANIANA" ? "TARDE" : "MANIANA"
+
+  let data = null
+
+  try {
+    const res = await cajaApi.abierta({ turno: turnoPreferido })
+    data = res?.data ?? null
+  } catch (e) {
+    if (e?.response?.status !== 404) throw e
+  }
+
+  if (!data) {
+    try {
+      const resAlt = await cajaApi.abierta({ turno: turnoAlternativo })
+      data = resAlt?.data ?? null
+    } catch (e) {
+      if (e?.response?.status !== 404) throw e
+    }
+  }
+
+  return data
+}
+
 async function refreshCaja() {
   try {
-    const { data } = await cajaApi.abierta({
-      fecha: fecha.value,
-      turno: turnoBE(turnoSel.value),
-      userId: userIdInt.value,
-    })
+    const data = await buscarCajaAbiertaConFallback()
+
     cajaAbierta.value = data ?? null
-    cajaCheck.value = { ok: true, error: "" }
+
+    if (cajaAbierta.value?.turno) {
+      turnoSel.value = turnoUI(cajaAbierta.value.turno)
+    }
+
+    if (cajaAbierta.value?.cajaId) {
+      cajaCheck.value = { ok: true, error: "" }
+    } else {
+      cajaCheck.value = { ok: false, error: "No hay caja ABIERTA." }
+    }
   } catch (e) {
     cajaAbierta.value = null
-    cajaCheck.value = { ok: false, error: pickErr(e, "No hay caja ABIERTA para esta fecha/turno.") }
+    cajaCheck.value = { ok: false, error: getCajaErrorMessage(e) }
   }
 }
 
-const canSell = computed(() => cajaCheck.value?.ok === true && Boolean(cajaAbierta.value?.cajaId))
+const canSell = computed(() => {
+  return hasValidUser.value && cajaCheck.value?.ok === true && Boolean(cajaAbierta.value?.cajaId)
+})
 
 function goCaja() {
   router.push({ name: "caja.dashboard" })
 }
 
 // =========================
-// Datos maestros (server-side search)
+// Datos maestros
 // =========================
 const productos = ref([])
 const clientes = ref([])
@@ -218,14 +298,11 @@ async function refreshClientes(searchTerm = null) {
 
 async function fetchMetodosOnce() {
   if (loadedMetodos.value) return
+
   try {
     const { data } = await metodosPagoApi.list()
-    console.log("METODOS PAGO RAW:", data)
-
     const arr = Array.isArray(data) ? data : unwrapPageArray(data)
     metodosPago.value = arr.map(normalizeMetodoPago).filter((m) => m.id > 0)
-
-    console.log("METODOS PAGO NORMALIZADOS:", metodosPago.value)
   } catch (e) {
     metodosPago.value = []
     console.error("ERROR /metodos-pago:", e?.response?.status, e?.response?.data || e?.message)
@@ -235,10 +312,12 @@ async function fetchMetodosOnce() {
 }
 
 // =========================
-// Cobros PRO (por cliente)
+// Cobros PRO
 // =========================
 const cobrarClienteId = ref("")
-const cobrarCliente = computed(() => clientes.value.find((c) => String(c.id) === String(cobrarClienteId.value)) ?? null)
+const cobrarCliente = computed(() =>
+  clientes.value.find((c) => String(c.id) === String(cobrarClienteId.value)) ?? null
+)
 const showAdvancedId = ref(false)
 
 function goCuentaCorriente() {
@@ -247,16 +326,20 @@ function goCuentaCorriente() {
 }
 
 // =========================
-// Carrito (venta nueva)
+// Carrito
 // =========================
 const clienteSelId = ref("")
-const clienteSel = computed(() => clientes.value.find((c) => String(c.id) === String(clienteSelId.value)) ?? null)
+const clienteSel = computed(() =>
+  clientes.value.find((c) => String(c.id) === String(clienteSelId.value)) ?? null
+)
 
 const selProductoId = ref("")
 const itemQty = ref("1")
 const codeInputRef = ref(null)
 
-const selectedProducto = computed(() => productos.value.find((p) => String(p.id) === String(selProductoId.value)) ?? null)
+const selectedProducto = computed(() =>
+  productos.value.find((p) => String(p.id) === String(selProductoId.value)) ?? null
+)
 
 function getPrecioSugerido(p) {
   return Number(p.precioVenta ?? 0)
@@ -302,6 +385,7 @@ function addItem(qtyOverride = null) {
   okMsg.value = ""
   errorMsg.value = ""
 
+  if (!hasValidUser.value) return setErr("Sesión inválida. Volvé a iniciar sesión.")
   if (!canSell.value) return setErr(cajaCheck.value?.error || "Caja no disponible.")
 
   const p = selectedProducto.value
@@ -312,7 +396,9 @@ function addItem(qtyOverride = null) {
 
   if (p.stockActual != null && Number.isFinite(Number(p.stockActual))) {
     const existingQty = items.value.find((x) => Number(x.productId) === Number(p.id))?.qty ?? 0
-    if (existingQty + qty > Number(p.stockActual)) return setErr(`Stock insuficiente: disp ${p.stockActual}.`)
+    if (existingQty + qty > Number(p.stockActual)) {
+      return setErr(`Stock insuficiente: disp ${p.stockActual}.`)
+    }
   }
 
   const existing = items.value.find((x) => Number(x.productId) === Number(p.id))
@@ -352,7 +438,9 @@ function removeItem(itemId) {
 
 function updateItemQty(itemId, v) {
   const q = toIntSafe(v, 1)
-  items.value = items.value.map((it) => (it.id === itemId ? recalcItem({ ...it, qty: q <= 0 ? 1 : q }) : it))
+  items.value = items.value.map((it) =>
+    it.id === itemId ? recalcItem({ ...it, qty: q <= 0 ? 1 : q }) : it
+  )
 }
 
 function updateItemPct(itemId, v) {
@@ -371,18 +459,31 @@ function clearForm() {
   nextTick(() => codeInputRef.value?.focus?.())
 }
 
-const totalCalc = computed(() => items.value.reduce((acc, it) => acc + Number(it.subtotal ?? 0), 0))
-const hasInvalidItems = computed(() => items.value.some((it) => it.invalidReason))
-const canRegister = computed(() => canSell.value && items.value.length > 0 && !hasInvalidItems.value)
+const totalCalc = computed(() =>
+  items.value.reduce((acc, it) => acc + Number(it.subtotal ?? 0), 0)
+)
+
+const hasInvalidItems = computed(() =>
+  items.value.some((it) => it.invalidReason)
+)
+
+const canRegister = computed(() =>
+  canSell.value && items.value.length > 0 && !hasInvalidItems.value
+)
 
 function trySelectByExactCode(termRaw) {
   const term = String(termRaw ?? "").trim().toLowerCase()
   if (!term) return false
-  const match = productos.value.find((p) => String(p.codigoProducto ?? "").trim().toLowerCase() === term)
+
+  const match = productos.value.find(
+    (p) => String(p.codigoProducto ?? "").trim().toLowerCase() === term
+  )
+
   if (match) {
     selProductoId.value = String(match.id)
     return true
   }
+
   return false
 }
 
@@ -397,7 +498,7 @@ function onQtyKeydown(e) {
 }
 
 // =========================
-// Venta: normalizador y registro
+// Venta
 // =========================
 const lastVenta = ref(null)
 
@@ -412,20 +513,22 @@ function normalizeVentaFromApi(payload) {
   const clienteId =
     v.clienteId != null ? Number(v.clienteId)
       : v.cliente?.id != null ? Number(v.cliente.id)
-        : v.cliente?.clienteId != null ? Number(v.cliente.clienteId)
-          : null
+      : v.cliente?.clienteId != null ? Number(v.cliente.clienteId)
+      : null
 
   return { ventaId, total, estado, clienteId, raw: v }
 }
 
 async function registrarVenta() {
   if (saving.value) return
+
   saving.value = true
   errorMsg.value = ""
   okMsg.value = ""
 
   try {
-    if (!canSell.value) throw new Error(cajaCheck.value?.error || "No hay caja ABIERTA.")
+    if (!hasValidUser.value) throw new Error("Sesión inválida. Volvé a iniciar sesión.")
+    if (!canSell.value) throw new Error(cajaCheck.value?.error || "No hay caja ABIERTA disponible.")
 
     const uid = Number(userIdInt.value)
     if (!Number.isFinite(uid) || uid <= 0) throw new Error("userId inválido.")
@@ -444,7 +547,14 @@ async function registrarVenta() {
     }
 
     const { data } = await ventasApi.create(command)
-    const ventaN = normalizeVentaFromApi(data) ?? { ventaId: null, total: totalCalc.value, estado: "PENDIENTE", clienteId: null }
+
+    const ventaN =
+      normalizeVentaFromApi(data) ?? {
+        ventaId: null,
+        total: totalCalc.value,
+        estado: "PENDIENTE",
+        clienteId: null,
+      }
 
     const c =
       ventaN.clienteId != null
@@ -457,7 +567,9 @@ async function registrarVenta() {
       estado: ventaN.estado,
       clienteTxt: c
         ? `${c.nombre} ${c.apellido || ""}`.trim()
-        : (clienteSel.value ? `${clienteSel.value.nombre} ${clienteSel.value.apellido || ""}`.trim() : "Sin cliente"),
+        : clienteSel.value
+          ? `${clienteSel.value.nombre} ${clienteSel.value.apellido || ""}`.trim()
+          : "Sin cliente",
     }
 
     setOk(
@@ -474,7 +586,9 @@ async function registrarVenta() {
     await refreshCaja()
     await refreshProductos(productSearch.value?.trim() || null)
 
-    if (ventaN.ventaId) await openPagoModal(ventaN.ventaId, ventaN.total)
+    if (ventaN.ventaId) {
+      await openPagoModal(ventaN.ventaId, ventaN.total)
+    }
 
     nextTick(() => codeInputRef.value?.focus?.())
   } catch (e) {
@@ -485,12 +599,11 @@ async function registrarVenta() {
 }
 
 // =========================
-// Buscar venta por ID (ADVANCED)
+// Buscar / devolver venta
 // =========================
 const buscarVentaId = ref("")
 const buscarLoading = ref(false)
 const devolviendoVenta = ref(false)
-
 
 async function buscarVenta() {
   errorMsg.value = ""
@@ -500,8 +613,11 @@ async function buscarVenta() {
   if (!id || id <= 0) return setErr("Ingresá un N° de venta válido.")
 
   buscarLoading.value = true
+
   try {
-    if (!clientes.value.length) await refreshClientes(clientesSearch.value?.trim() || null)
+    if (!clientes.value.length) {
+      await refreshClientes(clientesSearch.value?.trim() || null)
+    }
 
     const { data } = await ventasApi.porId(id)
     const ventaN = normalizeVentaFromApi(data) ?? null
@@ -527,14 +643,14 @@ async function buscarVenta() {
     buscarLoading.value = false
   }
 }
+
 async function devolverVenta(ventaId) {
   if (!ventaId) return setErr("Venta inválida.")
+  if (!cajaAbierta.value?.cajaId) return setErr("Necesitás una caja ABIERTA para registrar la devolución.")
 
-  if (!cajaAbierta.value?.cajaId) {
-    return setErr("Necesitás una caja ABIERTA para registrar la devolución.")
-  }
-
-  const confirmado = window.confirm(`¿Seguro que querés devolver la venta #${ventaId}? Esto generará un egreso en caja y devolverá stock.`)
+  const confirmado = window.confirm(
+    `¿Seguro que querés devolver la venta #${ventaId}? Esto generará un egreso en caja y devolverá stock.`
+  )
   if (!confirmado) return
 
   devolviendoVenta.value = true
@@ -566,7 +682,7 @@ async function devolverVenta(ventaId) {
 }
 
 // =========================
-// Pagos (modal)
+// Pagos
 // =========================
 function normalizePago(p) {
   const id = Number(p?.pagoId ?? p?.id ?? 0)
@@ -594,8 +710,13 @@ async function loadPagosVenta(ventaId) {
   }
 }
 
-const totalPagadoVenta = computed(() => pagosDeVenta.value.reduce((a, p) => a + Number(p.monto ?? 0), 0))
-const restanteVenta = computed(() => Math.max(0, Number(pagoTotalVenta.value ?? 0) - Number(totalPagadoVenta.value ?? 0)))
+const totalPagadoVenta = computed(() =>
+  pagosDeVenta.value.reduce((a, p) => a + Number(p.monto ?? 0), 0)
+)
+
+const restanteVenta = computed(() =>
+  Math.max(0, Number(pagoTotalVenta.value ?? 0) - Number(totalPagadoVenta.value ?? 0))
+)
 
 const estadoPagoVenta = computed(() => {
   const total = Number(pagoTotalVenta.value ?? 0)
@@ -616,7 +737,9 @@ async function openPagoModal(ventaId, total = 0) {
 
   await loadPagosVenta(ventaId)
 
-  if (estadoPagoVenta.value === "PAGADA") setOk("Esta venta ya está PAGADA ✅")
+  if (estadoPagoVenta.value === "PAGADA") {
+    setOk("Esta venta ya está PAGADA ✅")
+  }
 }
 
 function closePagoModal() {
@@ -625,16 +748,25 @@ function closePagoModal() {
 }
 
 function setPagarRestante() {
-  pagoMonto.value = String(restanteVenta.value || pagoTotalVenta.value || "")
+  const restante = round2(restanteVenta.value || pagoTotalVenta.value || 0)
+  pagoMonto.value =
+    restante > 0
+      ? restante.toLocaleString("es-AR", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })
+      : ""
 }
 
 async function registrarPago() {
   if (pagoLoading.value) return
+
   pagoLoading.value = true
   errorMsg.value = ""
   okMsg.value = ""
 
   try {
+    if (!hasValidUser.value) throw new Error("Sesión inválida. Volvé a iniciar sesión.")
     if (!canSell.value) throw new Error(cajaCheck.value?.error || "No hay caja ABIERTA para registrar pagos.")
     if (!pagoVentaId.value) throw new Error("Venta inválida.")
     if (estadoPagoVenta.value === "PAGADA") throw new Error("Esta venta ya está PAGADA.")
@@ -642,9 +774,16 @@ async function registrarPago() {
     const mp = Number(pagoMetodoPagoId.value)
     if (!Number.isFinite(mp) || mp <= 0) throw new Error("Seleccioná un método de pago.")
 
-    const monto = parseArNumber(pagoMonto.value)
-    if (!Number.isFinite(monto) || monto <= 0) throw new Error("Monto inválido.")
-    if (monto > restanteVenta.value) throw new Error(`El monto supera el restante ($ ${formatMoney(restanteVenta.value)}).`)
+    const monto = round2(parseArNumber(pagoMonto.value))
+    const restante = round2(restanteVenta.value)
+
+    if (!Number.isFinite(monto) || monto <= 0) {
+      throw new Error("Monto inválido.")
+    }
+
+    if (monto > restante) {
+      throw new Error(`El monto supera el restante ($ ${formatMoney2(restante)}).`)
+    }
 
     const payload = {
       ventaId: Number(pagoVentaId.value),
@@ -661,12 +800,11 @@ async function registrarPago() {
 
     window.dispatchEvent(new Event("cuentaCorriente:changed"))
 
-    let msg = `Pago registrado ✅ $ ${formatMoney(monto)} (${metodoNombreById(mp)})`
+    let msg = `Pago registrado ✅ $ ${formatMoney2(monto)} (${metodoNombreById(mp)})`
     if (estadoPagoVenta.value === "PAGADA") msg += " · Venta PAGADA ✅"
     setOk(msg)
 
-    if (restanteVenta.value > 0) pagoMonto.value = String(restanteVenta.value)
-    else pagoMonto.value = ""
+    pagoMonto.value = restanteVenta.value > 0 ? round2(restanteVenta.value).toFixed(2) : ""
   } catch (e) {
     setErr(pickErr(e, "Error registrando pago."))
   } finally {
@@ -674,19 +812,19 @@ async function registrarPago() {
   }
 }
 
-// modal ESC
+// =========================
+// Eventos
+// =========================
 function onKeydown(e) {
   if (e?.key === "Escape" && showPagoModal.value) closePagoModal()
 }
 
-// =========================
-// Refresh + watchers
-// =========================
 let refreshSeq = 0
 
 async function refreshAll() {
   const seq = ++refreshSeq
   loading.value = true
+
   try {
     await fetchMetodosOnce()
     if (seq !== refreshSeq) return
@@ -707,8 +845,13 @@ function onCajaChanged() {
   refreshCaja()
 }
 
-const refreshProductosDebounced = debounce(() => refreshProductos(productSearch.value?.trim() || null), 250)
-const refreshClientesDebounced = debounce(() => refreshClientes(clientesSearch.value?.trim() || null), 250)
+const refreshProductosDebounced = debounce(() => {
+  refreshProductos(productSearch.value?.trim() || null)
+}, 250)
+
+const refreshClientesDebounced = debounce(() => {
+  refreshClientes(clientesSearch.value?.trim() || null)
+}, 250)
 
 watch(productSearch, () => {
   trySelectByExactCode(productSearch.value)
@@ -719,7 +862,16 @@ watch(clientesSearch, () => {
   refreshClientesDebounced()
 })
 
-watch([fecha, turnoSel], () => refreshAll(), { flush: "post" })
+// Para admin puede seguir siendo visualmente editable.
+// Para cajero, aunque cambie visualmente, refreshCaja encuentra la caja real.
+watch(turnoSel, () => {
+  refreshCaja()
+})
+
+// fecha queda solo visual por ahora
+watch(fecha, () => {
+  // reservado por si más adelante usás fecha para filtros históricos
+})
 
 // =========================
 // Lifecycle
@@ -753,8 +905,8 @@ onBeforeUnmount(() => {
       <div>
         <h1 class="h4 mb-1">Ventas</h1>
         <div class="text-secondary">
-          <span v-if="admin">Vista ADMIN: elegís fecha y turno.</span>
-          <span v-else>Vista CAJERO: turno fijo ({{ turnoSel }}).</span>
+          <span v-if="admin">Vista ADMIN: fecha/turno visual.</span>
+          <span v-else>Vista CAJERO: turno informativo ({{ turnoSel }}).</span>
         </div>
       </div>
 
@@ -771,7 +923,12 @@ onBeforeUnmount(() => {
         <div class="row g-3 align-items-end">
           <div class="col-12 col-md-3">
             <label class="form-label text-secondary">Fecha</label>
-            <input v-model="fecha" type="date" class="form-control bg-dark text-white border-secondary" :disabled="!admin" />
+            <input
+              v-model="fecha"
+              type="date"
+              class="form-control bg-dark text-white border-secondary"
+              :disabled="!admin"
+            />
           </div>
 
           <div class="col-12 col-md-3" v-if="admin">
@@ -794,94 +951,94 @@ onBeforeUnmount(() => {
             </div>
 
             <div v-else class="small text-secondary">
-              Caja ABIERTA ✅ · Caja #{{ cajaAbierta?.cajaId }}
+              Caja ABIERTA ✅ · Caja #{{ cajaAbierta?.cajaId }} · Turno real: {{ turnoUI(cajaAbierta?.turno) }}
             </div>
           </div>
         </div>
       </div>
     </div>
 
-   <div class="card bg-panel border-0 shadow-sm mb-3">
-  <div class="card-body">
-    <h2 class="h6 mb-3">Gestionar / devolver venta</h2>
+    <div class="card bg-panel border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <h2 class="h6 mb-3">Gestionar / devolver venta</h2>
 
-    <div class="row g-2 align-items-end">
-      <div class="col-12 col-md-4">
-        <label class="form-label text-secondary">N° de venta</label>
-        <input
-          v-model="buscarVentaId"
-          class="form-control bg-dark text-white border-secondary"
-          placeholder="Ej: 125"
-        />
-      </div>
+        <div class="row g-2 align-items-end">
+          <div class="col-12 col-md-4">
+            <label class="form-label text-secondary">N° de venta</label>
+            <input
+              v-model="buscarVentaId"
+              class="form-control bg-dark text-white border-secondary"
+              placeholder="Ej: 125"
+            />
+          </div>
 
-      <div class="col-12 col-md-3">
-        <button class="btn btn-outline-light w-100" @click="buscarVenta" :disabled="buscarLoading">
-          {{ buscarLoading ? "Buscando..." : "Buscar venta" }}
-        </button>
-      </div>
-    </div>
-
-    <div v-if="lastVenta" class="mt-3 p-3 rounded border border-secondary-subtle">
-      <div class="row g-2">
-        <div class="col-12 col-md-3">
-          <div class="text-secondary small">Venta</div>
-          <div class="fw-semibold">#{{ lastVenta.ventaId }}</div>
-        </div>
-
-        <div class="col-12 col-md-3">
-          <div class="text-secondary small">Estado</div>
-          <div
-            class="fw-semibold"
-            :class="
-              lastVenta.estado === 'ANULADA'
-                ? 'text-danger'
-                : lastVenta.estado === 'PAGADA'
-                ? 'text-success'
-                : lastVenta.estado === 'PARCIAL'
-                ? 'text-warning'
-                : 'text-secondary'
-            "
-          >
-            {{ lastVenta.estado }}
+          <div class="col-12 col-md-3">
+            <button class="btn btn-outline-light w-100" @click="buscarVenta" :disabled="buscarLoading">
+              {{ buscarLoading ? "Buscando..." : "Buscar venta" }}
+            </button>
           </div>
         </div>
 
-        <div class="col-12 col-md-3">
-          <div class="text-secondary small">Cliente</div>
-          <div class="fw-semibold">{{ lastVenta.clienteTxt }}</div>
-        </div>
+        <div v-if="lastVenta" class="mt-3 p-3 rounded border border-secondary-subtle">
+          <div class="row g-2">
+            <div class="col-12 col-md-3">
+              <div class="text-secondary small">Venta</div>
+              <div class="fw-semibold">#{{ lastVenta.ventaId }}</div>
+            </div>
 
-        <div class="col-12 col-md-3">
-          <div class="text-secondary small">Total</div>
-          <div class="fw-semibold">$ {{ formatMoney(lastVenta.total) }}</div>
+            <div class="col-12 col-md-3">
+              <div class="text-secondary small">Estado</div>
+              <div
+                class="fw-semibold"
+                :class="
+                  lastVenta.estado === 'ANULADA'
+                    ? 'text-danger'
+                    : lastVenta.estado === 'PAGADA'
+                    ? 'text-success'
+                    : lastVenta.estado === 'PARCIAL'
+                    ? 'text-warning'
+                    : 'text-secondary'
+                "
+              >
+                {{ lastVenta.estado }}
+              </div>
+            </div>
+
+            <div class="col-12 col-md-3">
+              <div class="text-secondary small">Cliente</div>
+              <div class="fw-semibold">{{ lastVenta.clienteTxt }}</div>
+            </div>
+
+            <div class="col-12 col-md-3">
+              <div class="text-secondary small">Total</div>
+              <div class="fw-semibold">$ {{ formatMoney(lastVenta.total) }}</div>
+            </div>
+          </div>
+
+          <div class="d-flex flex-wrap gap-2 mt-3">
+            <button
+              class="btn btn-outline-light"
+              @click="openPagoModal(lastVenta.ventaId, lastVenta.total)"
+              :disabled="lastVenta.estado === 'ANULADA' || lastVenta.estado === 'PAGADA'"
+            >
+              Cobrar venta
+            </button>
+
+            <button
+              class="btn btn-outline-danger"
+              @click="devolverVenta(lastVenta.ventaId)"
+              :disabled="devolviendoVenta || lastVenta.estado === 'ANULADA'"
+            >
+              {{ devolviendoVenta ? "Devolviendo..." : "Devolver venta" }}
+            </button>
+          </div>
+
+          <div class="text-secondary small mt-2">
+            ⚠️ La devolución depende de las validaciones del backend: caja abierta, venta existente y pagos registrados.
+          </div>
         </div>
       </div>
-
-      <div class="d-flex flex-wrap gap-2 mt-3">
-        <button
-          class="btn btn-outline-light"
-          @click="openPagoModal(lastVenta.ventaId, lastVenta.total)"
-          :disabled="lastVenta.estado === 'ANULADA' || lastVenta.estado === 'PAGADA'"
-        >
-          Cobrar venta
-        </button>
-
-        <button
-  class="btn btn-outline-danger"
-  @click="devolverVenta(lastVenta.ventaId)"
-  :disabled="devolviendoVenta || lastVenta.estado === 'ANULADA'"
->
-  {{ devolviendoVenta ? "Devolviendo..." : "Devolver venta" }}
-</button>
-      </div>
-
-      <div class="text-secondary small mt-2">
-  ⚠️ La devolución depende de las validaciones del backend: caja abierta, venta existente y pagos registrados.
-</div>
     </div>
-  </div>
-</div>
 
     <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
@@ -1067,9 +1224,9 @@ onBeforeUnmount(() => {
             </div>
             <div class="text-secondary small">
               Venta #{{ pagoVentaId }} — Caja #{{ cajaAbierta?.cajaId }}
-              · Total: <b>$ {{ formatMoney(pagoTotalVenta) }}</b>
-              · Pagado: <b>$ {{ formatMoney(totalPagadoVenta) }}</b>
-              · Restante: <b>$ {{ formatMoney(restanteVenta) }}</b>
+              · Total: <b>$ {{ formatMoney2(pagoTotalVenta) }}</b>
+· Pagado: <b>$ {{ formatMoney2(totalPagadoVenta) }}</b>
+· Restante: <b>$ {{ formatMoney2(restanteVenta) }}</b>
             </div>
           </div>
           <button class="btn btn-sm btn-outline-light" @click="closePagoModal">X</button>
@@ -1138,7 +1295,7 @@ onBeforeUnmount(() => {
                 <tr v-for="p in pagosDeVenta" :key="p.id">
                   <td class="text-secondary">{{ p.id }}</td>
                   <td class="text-secondary">{{ metodoNombreById(p.metodoPagoId) }}</td>
-                  <td class="text-end fw-bold">$ {{ formatMoney(p.monto) }}</td>
+                  <td class="text-end fw-bold">$ {{ formatMoney2(p.monto) }}</td>
                 </tr>
               </tbody>
             </table>
