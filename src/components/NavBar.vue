@@ -1,7 +1,9 @@
 <script setup>
 import { computed, ref, onMounted, watch, onBeforeUnmount } from "vue"
+import { getTurnoOperativo } from "../ui/turnoOperativo"
 import { useRouter } from "vue-router"
 import { clearSession, getSession } from "../auth/session"
+
 import { cajaApi } from "../services/cajaApi"
 
 const props = defineProps({
@@ -12,6 +14,7 @@ const emit = defineEmits(["toggle-sidebar"])
 
 const router = useRouter()
 const session = computed(() => getSession())
+const turno = getTurnoOperativo()
 
 const isAdmin = computed(() => session.value?.role === "ADMIN")
 
@@ -44,11 +47,11 @@ const cajaId = ref(null)
 
 async function fetchCajaStatus() {
   try {
-    const fecha = todayISO()
-    const turno = turnoBE(session.value?.shift || "MAÑANA")
-    const userId = Number(session.value?.userId ?? 0) || 1
+    const turno = getTurnoOperativo()
 
-    const { data } = await cajaApi.abierta({ fecha, turno, userId })
+    const { data } = await cajaApi.abierta({
+      turno,
+    })
 
     if (!data) {
       cajaStatus.value = "SIN_CAJA"
@@ -62,6 +65,7 @@ async function fetchCajaStatus() {
     if (estado === "ABIERTA") cajaStatus.value = "ABIERTA"
     else if (estado === "CERRADA") cajaStatus.value = "CERRADA"
     else cajaStatus.value = "SIN_CAJA"
+
   } catch {
     cajaStatus.value = "SIN_CAJA"
     cajaId.value = null

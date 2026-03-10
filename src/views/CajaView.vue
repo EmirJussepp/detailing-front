@@ -1,27 +1,44 @@
 <script setup>
 import { computed, ref, onMounted, watch } from "vue"
 import { RouterLink } from "vue-router"
-import { getSession, getShift } from "../auth/session"
+import { getSession } from "../auth/session"
 import { emitCajaChanged } from "../ui/cajaEvents"
 import { cajaApi } from "../services/cajaApi"
 import { movimientosCajaApi } from "../services/movimientosCajaApi"
+import { getTurnoOperativo, setTurnoOperativo } from "../ui/turnoOperativo"
 
 // =========================
 // Session
 // =========================
 const session = getSession() ?? null
 const userId = Number(session?.userId ?? 0)
+const permissions = Array.isArray(session?.permissions) ? session.permissions : []
+
+function hasPermission(permission) {
+  if (permissions.includes("admin:all")) return true
+  return permissions.includes(permission)
+}
+
+const canViewCaja = computed(() => hasPermission("caja:ver"))
+const canAbrirCajaPerm = computed(() => hasPermission("caja:abrir"))
+const canCerrarCajaPerm = computed(() => hasPermission("caja:cerrar"))
+const canCrearMovimientoPerm = computed(() => hasPermission("movimientos_caja:crear"))
+const isAdmin = computed(() => permissions.includes("admin:all"))
 
 // =========================
 // Helpers
 // =========================
 function todayISO() {
-  return new Date().toISOString().slice(0, 10)
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${y}-${m}-${day}`
 }
 
 function formatMoney(n) {
   const num = Number(n ?? 0)
-  return num.toLocaleString("es-AR", { minimumFractionDigits: 0 })
+  return num.toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 }
 
 function toMoneyNumber(v) {
@@ -32,24 +49,29 @@ function toMoneyNumber(v) {
 function safeDateLabel(v) {
   if (!v) return "—"
   try {
-    return new Date(v).toLocaleString("es-AR")
+    const text = String(v).includes("T") ? String(v) : `${v}T00:00:00`
+    return new Date(text).toLocaleString("es-AR")
   } catch {
     return String(v)
   }
 }
 
-// Concepto -> tipo esperado (para alta manual)
 function tipoPorConcepto(concepto) {
   if (concepto === "GASTO" || concepto === "RETIRO") return "EGRESO"
   if (concepto === "APORTE") return "INGRESO"
   return "EGRESO"
 }
 
+function badgeTipoClass(tipo) {
+  return String(tipo || "").toUpperCase() === "INGRESO"
+    ? "text-bg-success"
+    : "text-bg-danger"
+}
+
 // =========================
-// Turno (persistido)
+// Turno
 // =========================
-const turnoKey = `caja_turno_v1:${userId}`
-const selectedTurno = ref(getShift?.() || "MANIANA") // backend: MANIANA | TARDE
+const selectedTurno = ref(getTurnoOperativo())
 
 // =========================
 // UI State
@@ -59,21 +81,17 @@ const errorMsg = ref("")
 const okMsg = ref("")
 const infoMsg = ref("")
 
-const caja = ref(null) // caja abierta o null
+const caja = ref(null)
 const saldoActual = ref(0)
 const movimientos = ref([])
 
-// abrir caja
 const abrirMontoInicial = ref("")
-
-// arqueo/cierre
 const montoContado = ref("")
 
-// modal movimiento manual
 const showMovModal = ref(false)
 const movForm = ref({
   concepto: "GASTO",
-  tipoManual: "EGRESO", // solo si concepto=AJUSTE
+  tipoManual: "EGRESO",
   monto: "",
   descripcion: "",
 })
@@ -84,7 +102,7 @@ function tipoMovimientoParaForm() {
 }
 
 // =========================
-// Derived (KPIs)
+// Derived
 // =========================
 const movimientosOrdenados = computed(() => {
   const arr = Array.isArray(movimientos.value) ? [...movimientos.value] : []
@@ -130,19 +148,46 @@ const diferencia = computed(() => {
   return c - Number(saldoActual.value ?? 0)
 })
 
-const canCerrar = computed(() => Boolean(caja.value?.cajaId) && !loading.value)
-const canAbrir = computed(() => !caja.value?.cajaId && !loading.value)
+const canAbrir = computed(() => {
+  return canAbrirCajaPerm.value && !caja.value?.cajaId && !loading.value
+})
+
+const canCerrar = computed(() => {
+  return canCerrarCajaPerm.value && !!caja.value?.cajaId && !loading.value
+})
+
+const puedeRegistrarMovimiento = computed(() => {
+  return canCrearMovimientoPerm.value && !!caja.value?.cajaId && !loading.value
+})
+
+const esResponsableCaja = computed(() => {
+  return Number(caja.value?.userId ?? 0) === userId
+})
+
+const cierreHint = computed(() => {
+  if (!caja.value?.cajaId) return "No hay caja abierta."
+  if (isAdmin.value) return "Como ADMIN podés cerrar cualquier caja."
+  if (esResponsableCaja.value) return "Podés cerrar esta caja porque sos el responsable."
+  return "Solo el responsable o un ADMIN pueden cerrar esta caja."
+})
 
 // =========================
-// Data Fetch
+// Data
 // =========================
 async function loadMovimientos() {
   if (!caja.value?.cajaId) {
     movimientos.value = []
     return
   }
+
   const { data } = await movimientosCajaApi.porCajaId(caja.value.cajaId)
-  movimientos.value = Array.isArray(data) ? data : []
+  movimientos.value = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.content)
+      ? data.content
+      : Array.isArray(data?.items)
+        ? data.items
+        : []
 }
 
 async function refresh() {
@@ -151,42 +196,17 @@ async function refresh() {
   infoMsg.value = ""
 
   try {
-    const turnoActual = selectedTurno.value
-    const turnoAlternativo = turnoActual === "MANIANA" ? "TARDE" : "MANIANA"
-
-    let data = null
-
-    try {
-      const res = await cajaApi.abierta({ turno: turnoActual })
-      data = res.data
-    } catch (e) {
-      if (e?.response?.status !== 404) throw e
-    }
-
-    if (!data) {
-      try {
-        const resAlt = await cajaApi.abierta({ turno: turnoAlternativo })
-        data = resAlt.data
-
-        if (data?.turno) {
-          selectedTurno.value = data.turno
-        }
-      } catch (e) {
-        if (e?.response?.status !== 404) throw e
-      }
-    }
+    const { data } = await cajaApi.abierta({
+      turno: selectedTurno.value,
+    })
 
     caja.value = data ?? null
 
     if (!caja.value?.cajaId) {
       saldoActual.value = 0
       movimientos.value = []
-      infoMsg.value = "No hay caja abierta para este turno. Podés abrirla abajo."
+      infoMsg.value = "No hay caja abierta para este turno."
       return
-    }
-
-    if (caja.value?.turno && caja.value.turno !== selectedTurno.value) {
-      selectedTurno.value = caja.value.turno
     }
 
     const { data: saldoDto } = await cajaApi.saldo(caja.value.cajaId)
@@ -198,19 +218,31 @@ async function refresh() {
       movimientos.value = []
     }
   } catch (e) {
-    caja.value = null
-    saldoActual.value = 0
-    movimientos.value = []
-    errorMsg.value =
-      e?.response?.data?.error ||
-      e?.response?.data?.message ||
-      e?.message ||
-      "Error consultando la caja."
+    if (e?.response?.status === 404) {
+      caja.value = null
+      saldoActual.value = 0
+      movimientos.value = []
+      infoMsg.value = "No hay caja abierta para este turno."
+    } else if (e?.response?.status === 403) {
+      caja.value = null
+      saldoActual.value = 0
+      movimientos.value = []
+      errorMsg.value = "No tenés permisos para ver Caja."
+    } else {
+      caja.value = null
+      saldoActual.value = 0
+      movimientos.value = []
+      errorMsg.value =
+        e?.response?.data?.error ||
+        e?.response?.data?.message ||
+        e?.message ||
+        "Error consultando la caja."
+    }
   } finally {
     loading.value = false
   }
 }
-watch(selectedTurno, (v) => localStorage.setItem(turnoKey, v))
+
 // =========================
 // Actions
 // =========================
@@ -229,7 +261,6 @@ async function abrirCaja() {
     await cajaApi.abrir({
       turno: selectedTurno.value,
       montoInicial: monto,
-      userId,
     })
 
     okMsg.value = "Caja abierta ✅"
@@ -237,11 +268,6 @@ async function abrirCaja() {
     emitCajaChanged()
     await refresh()
   } catch (e) {
-    const status = e?.response?.status
-    if (status === 409) {
-      errorMsg.value = e?.response?.data?.error || "Ya existe una caja ABIERTA para este usuario."
-      return
-    }
     errorMsg.value =
       e?.response?.data?.error ||
       e?.response?.data?.message ||
@@ -264,34 +290,31 @@ async function cerrarCaja() {
   const hayContado = Number.isFinite(contado)
 
   try {
-    // 1) si hay contado y hay diferencia, registramos AJUSTE automático
     if (hayContado) {
       const esperado = Number(saldoActual.value ?? 0)
       const diff = contado - esperado
 
       if (Math.abs(diff) >= 0.01) {
         await movimientosCajaApi.crear({
-          cajaId: caja.value.cajaId,
-          userId,
-          concepto: "AJUSTE",
-          tipo: diff > 0 ? "INGRESO" : "EGRESO",
-          monto: Math.abs(diff),
-          descripcion: `Arqueo cierre (contado: ${contado} / esperado: ${esperado})`,
-        })
+  cajaId: caja.value.cajaId,
+  concepto: "AJUSTE",
+  tipo: diff > 0 ? "INGRESO" : "EGRESO",
+  monto: Math.abs(diff),
+  descripcion: `Arqueo cierre (contado: ${contado} / esperado: ${esperado})`,
+})
       }
     }
 
-    // 2) refresco para que el saldo muestre el ajuste antes de cerrar
     await refresh()
 
-    // 3) cierro caja
-    await cajaApi.cerrar(caja.value.cajaId, { userId })
+    await cajaApi.cerrar(caja.value.cajaId, {
+      montoContado: hayContado ? contado : null,
+      observacion: hayContado ? "Cierre con arqueo" : "Cierre sin arqueo informado",
+    })
 
     okMsg.value = hayContado
-      ? `Caja cerrada ✅ (contado: $ ${formatMoney(contado)} / esperado: $ ${formatMoney(
-          saldoActual.value
-        )})`
-      : `Caja cerrada ✅ (monto final auto: $ ${formatMoney(saldoActual.value)})`
+      ? `Caja cerrada ✅ (contado: $ ${formatMoney(contado)})`
+      : "Caja cerrada ✅"
 
     montoContado.value = ""
     emitCajaChanged()
@@ -322,20 +345,23 @@ async function crearMovimientoManual() {
   }
 
   try {
-    await movimientosCajaApi.crear({
-      cajaId: caja.value.cajaId,
-      userId,
-      tipo: tipoMovimientoParaForm(),
-      concepto: movForm.value.concepto,
-      descripcion: movForm.value.descripcion?.trim() || null,
-      monto,
-    })
+   await movimientosCajaApi.crear({
+  cajaId: caja.value.cajaId,
+  tipo: tipoMovimientoParaForm(),
+  concepto: movForm.value.concepto,
+  descripcion: movForm.value.descripcion?.trim() || null,
+  monto,
+})
 
     okMsg.value = "Movimiento registrado ✅"
-    movForm.value.monto = ""
-    movForm.value.descripcion = ""
-    showMovModal.value = false
+    movForm.value = {
+      concepto: "GASTO",
+      tipoManual: "EGRESO",
+      monto: "",
+      descripcion: "",
+    }
 
+    showMovModal.value = false
     emitCajaChanged()
     await refresh()
   } catch (e) {
@@ -350,44 +376,54 @@ async function crearMovimientoManual() {
 // =========================
 // Lifecycle
 // =========================
-onMounted(() => {
-  const saved = localStorage.getItem(turnoKey)
-  if (saved === "MANIANA" || saved === "TARDE") selectedTurno.value = saved
-  refresh()
+watch(selectedTurno, async (v) => {
+  setTurnoOperativo(v)
+  await refresh()
 })
 
+onMounted(async () => {
+  selectedTurno.value = getTurnoOperativo()
+
+  if (canViewCaja.value) {
+    await refresh()
+  } else {
+    errorMsg.value = "No tenés permisos para acceder a Caja."
+  }
+})
 </script>
 
 <template>
-  <div>
-    <!-- Header -->
+  <div class="caja-page">
     <div class="d-flex align-items-start justify-content-between gap-3 mb-3 flex-wrap">
       <div>
         <h1 class="h4 mb-1">Caja (POS)</h1>
+
         <div class="text-secondary small">
           Usuario: <b>{{ userId }}</b> · Hoy: <b>{{ todayISO() }}</b>
         </div>
 
-        <div class="d-flex gap-2 mt-2 flex-wrap align-items-end">
-          <div>
-            <label class="form-label text-secondary mb-1">Turno</label>
-            <select
-              v-model="selectedTurno"
-              class="form-control bg-dark text-white border-secondary"
-              :disabled="Boolean(caja?.cajaId) || loading"
-            >
-              <option value="MANIANA">MAÑANA</option>
-              <option value="TARDE">TARDE</option>
-            </select>
-            <div class="text-secondary small mt-1" v-if="caja?.cajaId">
-              Turno bloqueado mientras la caja está abierta.
-            </div>
-          </div>
-        </div>
+      <div class="d-flex gap-2 mt-2 flex-wrap align-items-end">
+  <div>
+    <label class="form-label text-secondary mb-1">Turno</label>
+
+    <select
+      v-model="selectedTurno"
+      class="form-control bg-dark text-white border-secondary"
+      :disabled="Boolean(caja?.cajaId) || loading"
+    >
+      <option value="MANIANA">MAÑANA</option>
+      <option value="TARDE">TARDE</option>
+    </select>
+
+    <div class="text-secondary small mt-1" v-if="caja?.cajaId">
+      Turno bloqueado mientras la caja está abierta.
+    </div>
+  </div>
+</div>
       </div>
 
       <div class="d-flex gap-2 flex-wrap align-items-center">
-        <button class="btn btn-sm btn-outline-light" @click="refresh" :disabled="loading">
+        <button class="btn btn-sm btn-outline-light" @click="refresh" :disabled="loading || !canViewCaja">
           {{ loading ? "Actualizando..." : "Actualizar" }}
         </button>
 
@@ -405,12 +441,10 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Alerts -->
     <div v-if="errorMsg" class="alert alert-danger py-2">{{ errorMsg }}</div>
     <div v-if="okMsg" class="alert alert-success py-2">{{ okMsg }}</div>
     <div v-if="infoMsg" class="alert alert-secondary py-2">{{ infoMsg }}</div>
 
-    <!-- Estado + KPIs -->
     <div class="row g-3 mb-3">
       <div class="col-12 col-lg-4">
         <div class="card bg-panel border-0 shadow-sm h-100">
@@ -418,29 +452,39 @@ onMounted(() => {
             <div class="text-secondary small">Estado</div>
 
             <div v-if="caja?.cajaId" class="mt-2">
-              <span class="badge text-bg-success">ABIERTA</span>
+              <div class="d-flex align-items-center gap-2 flex-wrap">
+                <span class="badge text-bg-success">ABIERTA</span>
+                <span class="badge text-bg-dark border">Turno {{ caja.turno }}</span>
+              </div>
+
               <div class="text-secondary small mt-2">Caja ID: <b>{{ caja.cajaId }}</b></div>
-              <div class="text-secondary small">Turno: <b>{{ caja.turno }}</b></div>
+              <div class="text-secondary small">Responsable: <b>{{ caja.userId }}</b></div>
               <div class="text-secondary small">
                 Apertura: <b>{{ safeDateLabel(caja.apertura || caja.fecha) }}</b>
+              </div>
+
+              <div class="text-secondary small mt-2">
+                {{ cierreHint }}
               </div>
 
               <hr class="border-secondary my-3" />
 
               <div class="d-flex justify-content-between">
-                <div class="text-secondary small">Inicial</div>
+                <div class="text-secondary small">Monto inicial</div>
                 <div class="fw-bold">$ {{ formatMoney(caja.montoInicial) }}</div>
               </div>
 
               <div class="d-flex justify-content-between mt-2">
-                <div class="text-secondary small">Saldo (auto)</div>
+                <div class="text-secondary small">Saldo actual</div>
                 <div class="fw-bold">$ {{ formatMoney(saldoActual) }}</div>
               </div>
             </div>
 
             <div v-else class="mt-2 text-secondary">
-              No hay caja abierta.
-              <div class="text-secondary small mt-1">Abrí caja para empezar a vender / pagar.</div>
+              No hay caja abierta para <b>{{ selectedTurno === "MANIANA" ? "MAÑANA" : "TARDE" }}</b>.
+              <div class="text-secondary small mt-1">
+                Abrí caja para comenzar a operar el turno.
+              </div>
             </div>
           </div>
         </div>
@@ -461,18 +505,21 @@ onMounted(() => {
                   <div class="kpi-value text-success">$ {{ formatMoney(kpiIngresos) }}</div>
                 </div>
               </div>
+
               <div class="col-6 col-md-3">
                 <div class="kpi">
                   <div class="kpi-label">Egresos</div>
                   <div class="kpi-value text-danger">$ {{ formatMoney(kpiEgresos) }}</div>
                 </div>
               </div>
+
               <div class="col-6 col-md-3">
                 <div class="kpi">
                   <div class="kpi-label">Ventas</div>
                   <div class="kpi-value">$ {{ formatMoney(kpiVentas) }}</div>
                 </div>
               </div>
+
               <div class="col-6 col-md-3">
                 <div class="kpi">
                   <div class="kpi-label">Pagos prov.</div>
@@ -483,46 +530,58 @@ onMounted(() => {
 
             <hr class="border-secondary my-3" />
 
-            <h2 class="h6 mb-3">Acciones rápidas</h2>
+            <h2 class="h6 mb-3">Operación del turno</h2>
 
             <div class="row g-3">
-              <!-- Abrir -->
               <div class="col-12 col-md-6">
-                <label class="form-label text-secondary">Monto inicial (abrir)</label>
-                <input
-                  v-model="abrirMontoInicial"
-                  class="form-control bg-dark text-white border-secondary"
-                  placeholder="Ej: 20000"
-                  inputmode="numeric"
-                  :disabled="loading || !!caja?.cajaId"
-                />
-                <button
-                  class="btn btn-primary btn-accent w-100 mt-2"
-                  @click="abrirCaja"
-                  :disabled="!canAbrir"
-                >
-                  Abrir caja
-                </button>
-                <div class="text-secondary small mt-2">
-                  Abrí caja antes de registrar ventas/pagos del turno.
-                </div>
-              </div>
+  <template v-if="!caja?.cajaId">
+    <label class="form-label text-secondary">Monto inicial</label>
+    <input
+      v-model="abrirMontoInicial"
+      class="form-control bg-dark text-white border-secondary"
+      placeholder="Ej: 20000"
+      inputmode="numeric"
+      :disabled="loading || !canAbrirCajaPerm"
+    />
 
-              <!-- Cerrar -->
+    <button
+      class="btn btn-primary btn-accent w-100 mt-2"
+      @click="abrirCaja"
+      :disabled="!canAbrir"
+    >
+      Abrir caja
+    </button>
+
+    <div class="text-secondary small mt-2">
+      Se abrirá una única caja para el turno seleccionado.
+    </div>
+  </template>
+
+  <template v-else>
+    <label class="form-label text-secondary">Caja operativa</label>
+    <div class="form-control bg-dark text-white border-secondary d-flex align-items-center">
+      Caja abierta en turno {{ caja.turno === "MANIANA" ? "MAÑANA" : "TARDE" }}
+    </div>
+
+    <div class="text-secondary small mt-2">
+      La apertura ya fue realizada. Podés seguir operando o cerrar la caja.
+    </div>
+  </template>
+</div>
               <div class="col-12 col-md-6">
                 <label class="form-label text-secondary">Cierre / Arqueo</label>
 
                 <div class="d-flex justify-content-between small text-secondary">
-                  <span>Esperado (auto)</span>
+                  <span>Esperado</span>
                   <b>$ {{ formatMoney(saldoActual) }}</b>
                 </div>
 
                 <input
                   v-model="montoContado"
                   class="form-control bg-dark text-white border-secondary mt-2"
-                  placeholder="Contado (opcional) ej: 148000"
+                  placeholder="Contado (opcional)"
                   inputmode="numeric"
-                  :disabled="loading || !caja?.cajaId"
+                  :disabled="loading || !caja?.cajaId || !canCerrarCajaPerm"
                 />
 
                 <div class="d-flex justify-content-between small mt-2">
@@ -538,22 +597,34 @@ onMounted(() => {
                   <span v-else class="text-secondary">—</span>
                 </div>
 
-                <button class="btn btn-outline-light w-100 mt-2" @click="cerrarCaja" :disabled="!canCerrar">
+                <button
+                  class="btn btn-outline-light w-100 mt-2"
+                  @click="cerrarCaja"
+                  :disabled="!canCerrar"
+                >
                   Cerrar caja
                 </button>
 
                 <div class="text-secondary small mt-2">
-                  Si cargás “Contado”, el sistema registra un <b>AJUSTE</b> automático si hay diferencia.
+                  Si cargás el contado y hay diferencia, se registra un <b>AJUSTE</b> automático antes del cierre.
                 </div>
               </div>
             </div>
 
             <div class="d-flex gap-2 mt-3 flex-wrap">
-              <button class="btn btn-sm btn-primary btn-accent" :disabled="!caja?.cajaId" @click="showMovModal = true">
+              <button
+                class="btn btn-sm btn-primary btn-accent"
+                :disabled="!puedeRegistrarMovimiento"
+                @click="showMovModal = true"
+              >
                 + Movimiento manual
               </button>
 
-              <RouterLink class="btn btn-sm btn-outline-light" :class="{ disabled: !caja?.cajaId }" to="/movimientos-caja">
+              <RouterLink
+                class="btn btn-sm btn-outline-light"
+                :class="{ disabled: !caja?.cajaId }"
+                to="/movimientos-caja"
+              >
                 Ver historial completo
               </RouterLink>
             </div>
@@ -562,12 +633,18 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Últimos movimientos -->
     <div class="card bg-panel border-0 shadow-sm" v-if="caja?.cajaId">
       <div class="card-body">
-        <h2 class="h6 mb-3">Últimos movimientos</h2>
+        <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-3">
+          <h2 class="h6 mb-0">Últimos movimientos</h2>
+          <div class="text-secondary small">
+            {{ ultimosMovs.length }} registro(s) recientes
+          </div>
+        </div>
 
-        <div v-if="ultimosMovs.length === 0" class="text-secondary">No hay movimientos todavía.</div>
+        <div v-if="ultimosMovs.length === 0" class="text-secondary">
+          No hay movimientos todavía.
+        </div>
 
         <div v-else class="table-responsive">
           <table class="table table-dark table-hover align-middle mb-0">
@@ -584,7 +661,7 @@ onMounted(() => {
               <tr v-for="m in ultimosMovs" :key="m.movimientoCajaId ?? m.id">
                 <td class="text-secondary">{{ safeDateLabel(m.fecha) }}</td>
                 <td>
-                  <span class="badge" :class="String(m.tipo).toUpperCase() === 'INGRESO' ? 'text-bg-success' : 'text-bg-danger'">
+                  <span class="badge" :class="badgeTipoClass(m.tipo)">
                     {{ m.tipo }}
                   </span>
                 </td>
@@ -597,12 +674,11 @@ onMounted(() => {
         </div>
 
         <div class="text-secondary small mt-2">
-          Tip: ventas/pagos proveedor deberían generar movimientos automáticos (no manuales).
+          Las ventas y pagos a proveedor deberían impactar caja automáticamente desde sus módulos.
         </div>
       </div>
     </div>
 
-    <!-- Modal movimiento -->
     <div v-if="showMovModal" class="modal-backdrop" @click.self="showMovModal = false">
       <div class="modal-card">
         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -620,7 +696,7 @@ onMounted(() => {
               <option value="AJUSTE">AJUSTE</option>
             </select>
             <div class="text-secondary small mt-1">
-              VENTA y PAGO_PROVEEDOR no se registran manualmente (los crea el sistema).
+              VENTA y PAGO_PROVEEDOR deben generarse automáticamente desde sus módulos.
             </div>
           </div>
 
@@ -634,17 +710,25 @@ onMounted(() => {
 
           <div class="col-12">
             <label class="form-label text-secondary">Monto</label>
-            <input v-model="movForm.monto" class="form-control bg-dark text-white border-secondary" inputmode="numeric" />
+            <input
+              v-model="movForm.monto"
+              class="form-control bg-dark text-white border-secondary"
+              inputmode="numeric"
+            />
           </div>
 
           <div class="col-12">
             <label class="form-label text-secondary">Descripción</label>
-            <input v-model="movForm.descripcion" class="form-control bg-dark text-white border-secondary" />
+            <input
+              v-model="movForm.descripcion"
+              class="form-control bg-dark text-white border-secondary"
+              placeholder="Opcional"
+            />
           </div>
         </div>
 
         <button class="btn btn-primary btn-accent w-100 mt-3" @click="crearMovimientoManual">
-          Guardar
+          Guardar movimiento
         </button>
       </div>
     </div>
@@ -652,30 +736,52 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.bg-panel { background: rgba(18, 22, 32, .92); }
-.btn-accent { background: #6f5cff; border: none; }
-.btn-accent:hover { background: #5f4de6; }
+.caja-page {
+  min-height: 100%;
+}
 
-.kpi{
+.bg-panel {
+  background: rgba(18, 22, 32, 0.92);
+}
+
+.btn-accent {
+  background: #6f5cff;
+  border: none;
+}
+
+.btn-accent:hover {
+  background: #5f4de6;
+}
+
+.kpi {
   border: 1px solid rgba(255,255,255,.10);
   border-radius: 12px;
   padding: 10px 12px;
   background: rgba(0,0,0,.15);
 }
-.kpi-label{ color: rgba(255,255,255,.65); font-size: 12px; }
-.kpi-value{ font-weight: 800; font-size: 16px; }
 
-.modal-backdrop{
+.kpi-label {
+  color: rgba(255,255,255,.65);
+  font-size: 12px;
+}
+
+.kpi-value {
+  font-weight: 800;
+  font-size: 16px;
+}
+
+.modal-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,.55);
-  display:flex;
-  align-items:center;
-  justify-content:center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 18px;
   z-index: 999;
 }
-.modal-card{
+
+.modal-card {
   width: 100%;
   max-width: 520px;
   background: rgba(18, 22, 32, .98);

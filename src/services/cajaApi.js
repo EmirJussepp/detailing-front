@@ -1,6 +1,7 @@
 import { http } from "./http"
 
 export const cajaApi = {
+
   abierta(params) {
     return http.get("/cajas/abierta", { params })
   },
@@ -9,11 +10,11 @@ export const cajaApi = {
     return http.post("/cajas/abrir", payload)
   },
 
-  cerrar(cajaId, payload) {
+  cerrar(cajaId, payload = {}) {
     return http.post(`/cajas/${cajaId}/cerrar`, payload)
   },
 
   saldo(cajaId) {
     return http.get(`/cajas/${cajaId}/saldo`)
-  },
+  }
 }

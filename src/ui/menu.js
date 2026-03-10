@@ -37,30 +37,36 @@ export function buildMenuFromPermissions(perms = getPermissions()) {
   { label: "Dashboard", to: { name: "dashboard" }, icon: "🏠" },
 
   { section: "Operación" },
-  { label: "Caja", to: { name: "caja.dashboard" }, icon: "💰", perm: "movimientos_caja:ver" },
-  { label: "Ventas", to: { name: "caja.ventas" }, icon: "🛒", perm: "ventas:ver" },
-  { label: "Movimientos", to: { name: "caja.movimientos" }, icon: "🔄", perm: "movimientos_caja:ver" },
-  { label: "Cuenta Corriente", to: { name: "caja.cuenta" }, icon: "📘", perm: "pagos:ver" },
+    { label: "Caja", to: { name: "caja.dashboard" }, icon: "💰", perm: "caja:ver" },
+    { label: "Ventas", to: { name: "caja.ventas" }, icon: "🛒", perm: "ventas:ver" },
+    { label: "Movimientos", to: { name: "caja.movimientos" }, icon: "🔄", perm: "movimientos_caja:ver" },
+    { label: "Cuenta Corriente", to: { name: "caja.cuenta" }, icon: "📘", perm: "pagos:ver" },
 
-  { section: "Clientes" },
-  { label: "Clientes", to: { name: "clientes" }, icon: "👥", perm: "clientes:ver" },
+    { section: "Clientes" },
+    { label: "Clientes", to: { name: "clientes" }, icon: "👥", perm: "clientes:ver" },
 
-  { section: "Inventario" },
-  { label: "Productos", to: { name: "productos" }, icon: "📦", perm: "productos:ver" },
+    { section: "Inventario" },
+    { label: "Productos", to: { name: "productos" }, icon: "📦", perm: "productos:ver" },
 
-  { section: "Compras" },
-  { label: "Compras", to: { name: "compras" }, icon: "🛍️", perm: "compras:ver" },
-  { label: "Proveedores", to: { name: "compras.proveedores" }, icon: "🚚", perm: "proveedores:ver" },
+    { section: "Compras" },
+    { label: "Compras", to: { name: "compras" }, icon: "🛍️", perm: "compras:ver" },
+    { label: "Proveedores", to: { name: "compras.proveedores" }, icon: "🚚", perm: "proveedores:ver" },
 
-  { section: "Reportes" },
-  { label: "Reportes", to: { name: "reportes" }, icon: "📈", perm: "usuarios:ver" },
+    { section: "Reportes" },
+    { label: "Reportes", to: { name: "reportes" }, icon: "📈", perm: "usuarios:ver" },
+    {
+      label: "Histórico Caja",
+      to: { name: "caja.movimientos-historico" },
+      icon: "🧾",
+      permAny: ["admin:all", "usuarios:gestionar"],
+    },
 
-  { section: "Configuración" },
-  { label: "Panel Config", to: { name: "configuracion" }, icon: "⚙️", permAny: ["usuarios:ver", "usuarios:gestionar"] },
-  { label: "Localidades", to: { name: "config-localidades" }, icon: "📍", perm: "usuarios:gestionar" },
-  { label: "Tipos de cliente", to: { name: "config-tipos-cliente" }, icon: "🏷️", perm: "usuarios:gestionar" },
-  { label: "Métodos de pago (Config)", to: { name: "config-metodos-pago" }, icon: "💳", perm: "usuarios:gestionar" },
-]
+    { section: "Configuración" },
+    { label: "Panel Config", to: { name: "configuracion" }, icon: "⚙️", permAny: ["usuarios:ver", "usuarios:gestionar"] },
+    { label: "Localidades", to: { name: "config-localidades" }, icon: "📍", perm: "usuarios:gestionar" },
+    { label: "Tipos de cliente", to: { name: "config-tipos-cliente" }, icon: "🏷️", perm: "usuarios:gestionar" },
+    { label: "Métodos de pago (Config)", to: { name: "config-metodos-pago" }, icon: "💳", perm: "usuarios:gestionar" },
+  ]
 
   const visible = items.filter((it) => canPerm(it, perms))
 
@@ -110,6 +116,9 @@ export function buildMenu(role = getRole()) {
     { section: "Compras", roles: ["ADMIN"] },
     { label: "Compras", to: { name: "compras" }, icon: "🧾", roles: ["ADMIN"] },
     { label: "Proveedores", to: { name: "compras.proveedores" }, icon: "🏭", roles: ["ADMIN"] },
+
+    { section: "Reportes", roles: ["ADMIN"] },
+    { label: "Histórico Caja", to: { name: "caja.movimientos-historico" }, icon: "🧾", roles: ["ADMIN"] },
 
     { section: "Configuración", roles: ["ADMIN"] },
     { label: "Panel Config", to: { name: "configuracion" }, icon: "⚙️", roles: ["ADMIN"] },

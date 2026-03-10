@@ -1,7 +1,8 @@
 <script setup>
 import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { getSession, isAdmin, getShift } from "../auth/session"
+import { getSession, isAdmin } from "../auth/session"
+import { getTurnoOperativo } from "../ui/turnoOperativo"
 
 import { cajaApi } from "../services/cajaApi"
 import { ventasApi } from "../services/ventasApi"
@@ -154,7 +155,7 @@ const turnoSel = ref("MAÑANA")
 watch(
   admin,
   (isAdm) => {
-    turnoSel.value = isAdm ? "MAÑANA" : turnoUI(getShift())
+    turnoSel.value = isAdm ? "MAÑANA" : turnoUI(getTurnoOperativo())
   },
   { immediate: true }
 )

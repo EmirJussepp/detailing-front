@@ -152,6 +152,12 @@ const routes = [
                 meta: { requiresAuth: true, perm: "usuarios:ver" },
             },
             {
+  path: "/movimientos-caja-historico",
+  name: "caja.movimientos-historico",
+  component: () => import("../views/MovimientosCajaHistoricoView.vue"),
+},
+            
+            {
                 path: "config/metodos-pago",
                 name: "config-metodos-pago",
                 component: () => import("../views/MetodoPagoView.vue"),
