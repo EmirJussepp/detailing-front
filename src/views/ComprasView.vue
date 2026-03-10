@@ -1,7 +1,7 @@
 <template>
   <div class="container py-4">
     <!-- Header -->
-    <div class="d-flex flex-wrap gap-2 align-items-end justify-content-between mb-3">
+    <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
       <div>
         <h2 class="mb-1">Compras</h2>
         <div class="text-secondary small">
@@ -9,13 +9,13 @@
         </div>
       </div>
 
-      <div class="d-flex gap-2">
+      <div class="d-flex gap-2 align-items-center">
         <button class="btn btn-outline-light" @click="refreshAll" :disabled="loading">
           {{ loading ? "Actualizando..." : "Refresh" }}
         </button>
 
         <button
-          class="btn btn-accent"
+          class="btn btn-primary btn-accent"
           data-bs-toggle="modal"
           data-bs-target="#compraModal"
           @click="prepareCreate"
@@ -25,52 +25,89 @@
       </div>
     </div>
 
-    <div v-if="error" class="alert alert-danger py-2">{{ error }}</div>
-    <div v-if="success" class="alert alert-success py-2">{{ success }}</div>
-
-    <!-- Listado -->
-    <div class="card bg-panel border-0 shadow-sm">
+    <!-- Filtros -->
+    <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
-        <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-2">
-          <div class="d-flex gap-2 align-items-center">
+        <div class="row g-2 align-items-center">
+          <div class="col-12 col-md-5">
             <input
               v-model="q"
-              class="form-control form-control-sm"
-              style="min-width: 260px"
-              placeholder="Buscar por proveedor / id"
+              class="form-control bg-dark text-white border-secondary"
+              placeholder="Buscar por proveedor o ID de compra…"
             />
           </div>
 
-          <div class="text-secondary small">
-       Total compras: <b>{{ totalElements }}</b> · Mostrando: <b>{{ comprasFiltradas.length }}</b>
+          <div class="col-12 col-md-3">
+            <select v-model="sortBy" class="form-select bg-dark text-white border-secondary">
+              <option value="fechaDesc">Orden: Más recientes</option>
+              <option value="fechaAsc">Orden: Más antiguas</option>
+              <option value="totalDesc">Orden: Total mayor</option>
+              <option value="totalAsc">Orden: Total menor</option>
+              <option value="proveedor">Orden: Proveedor</option>
+              <option value="estado">Orden: Estado</option>
+            </select>
+          </div>
+
+          <div class="col-12 col-md-4 d-flex justify-content-md-end">
+            <span class="text-secondary small">
+              Total compras: <b>{{ totalElements }}</b> · Mostrando: <b>{{ comprasFiltradas.length }}</b>
+            </span>
           </div>
         </div>
+      </div>
+    </div>
 
-        <div class="table-responsive">
-          <table class="table table-dark table-hover align-middle">
-            <thead>
-              <tr>
-                <th style="width: 90px">ID</th>
-                <th>Proveedor</th>
-                <th style="width: 140px">Fecha</th>
-                <th style="width: 140px" class="text-end">Total</th>
-                <th style="width: 120px">Estado</th>
-                <th style="width: 160px"></th>
-              </tr>
-            </thead>
+    <div v-if="error" class="alert alert-danger py-2">{{ error }}</div>
+    <div v-if="success" class="alert alert-success py-2">{{ success }}</div>
 
-            <tbody>
-              <tr v-for="c in comprasFiltradas" :key="c.compraId">
-                <td class="text-secondary">#{{ c.compraId }}</td>
-                <td>{{ proveedorName(c.proveedorId) }}</td>
-                <td class="text-secondary">{{ (c.fecha || "").slice(0, 10) }}</td>
-                <td class="text-end">{{ formatMoney(c.total) }}</td>
-                <td>
-                  <span class="badge text-bg-dark border border-secondary">{{ c.estado }}</span>
-                </td>
-                <td class="text-end">
+    <!-- Tabla -->
+    <div class="card bg-panel border-0 shadow-sm">
+      <div class="table-responsive">
+        <table class="table table-dark table-hover align-middle mb-0">
+          <thead>
+            <tr class="text-secondary">
+              <th style="width: 90px">ID</th>
+              <th>Proveedor</th>
+              <th style="width: 140px">Fecha</th>
+              <th style="width: 140px" class="text-end">Total</th>
+              <th style="width: 130px" class="text-center">Estado</th>
+              <th style="width: 180px" class="text-end">Acciones</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr v-if="!comprasFiltradas.length">
+              <td colspan="6" class="text-center text-secondary py-4">
+                No hay compras para mostrar.
+              </td>
+            </tr>
+
+            <tr v-for="c in comprasFiltradas" :key="c.compraId">
+              <td class="text-secondary">#{{ c.compraId }}</td>
+
+              <td>
+                <div class="fw-semibold">{{ proveedorName(c.proveedorId) }}</div>
+                <div class="text-secondary small">Compra registrada</div>
+              </td>
+
+              <td class="text-secondary">
+                {{ (c.fecha || "").slice(0, 10) }}
+              </td>
+
+              <td class="text-end fw-bold">
+                {{ formatMoney(c.total) }}
+              </td>
+
+              <td class="text-center">
+                <span class="badge" :class="estadoBadgeClass(c.estado)">
+                  {{ c.estado }}
+                </span>
+              </td>
+
+              <td class="text-end">
+                <div class="btn-group">
                   <button
-                    class="btn btn-sm btn-outline-light me-2"
+                    class="btn btn-outline-light btn-sm"
                     data-bs-toggle="modal"
                     data-bs-target="#detalleModal"
                     @click="openDetalle(c.compraId)"
@@ -79,21 +116,39 @@
                   </button>
 
                   <button
-                    class="btn btn-sm btn-accent"
+                    class="btn btn-outline-success btn-sm"
                     data-bs-toggle="modal"
                     data-bs-target="#pagoModal"
                     @click="preparePago(c.compraId)"
                   >
                     Pagar
                   </button>
-                </td>
-              </tr>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-              <tr v-if="!comprasFiltradas.length">
-                <td colspan="6" class="text-secondary">Sin compras.</td>
-              </tr>
-            </tbody>
-          </table>
+      <div class="card-footer border-secondary d-flex flex-wrap justify-content-between align-items-center gap-2 text-secondary small">
+        <div>
+          Tip: desde acá podés <b>crear compras</b>, consultar el <b>detalle</b> y registrar <b>pagos</b>.
+        </div>
+
+        <div class="d-flex align-items-center gap-2">
+          <button class="btn btn-sm btn-outline-light" @click="prevPage" :disabled="loading || !canPrev">◀</button>
+          <span>Página <b>{{ page + 1 }}</b> / <b>{{ totalPages }}</b></span>
+          <button class="btn btn-sm btn-outline-light" @click="nextPage" :disabled="loading || !canNext">▶</button>
+
+          <select
+            v-model.number="size"
+            class="form-select form-select-sm bg-dark text-white border-secondary"
+            style="width: 90px"
+          >
+            <option :value="10">10</option>
+            <option :value="20">20</option>
+            <option :value="50">50</option>
+          </select>
         </div>
       </div>
     </div>
@@ -108,9 +163,9 @@
           </div>
 
           <div class="modal-body">
-            <div class="row g-2">
+            <div class="row g-3">
               <div class="col-md-8">
-                <label class="form-label small text-secondary">Proveedor</label>
+                <label class="form-label text-secondary">Proveedor</label>
                 <select v-model.number="form.proveedorId" class="form-select">
                   <option :value="null">Seleccionar...</option>
                   <option v-for="p in proveedores" :key="p.proveedorId" :value="p.proveedorId">
@@ -120,23 +175,23 @@
               </div>
 
               <div class="col-md-4">
-                <label class="form-label small text-secondary">Fecha</label>
+                <label class="form-label text-secondary">Fecha</label>
                 <input v-model="form.fecha" type="date" class="form-control" />
               </div>
             </div>
 
             <hr class="border-secondary my-3" />
 
-            <div class="d-flex align-items-center justify-content-between">
-              <h6 class="mb-2">Ítems</h6>
-              <span class="text-secondary small"
-                >Total: <b>{{ formatMoney(totalDraft) }}</b></span
-              >
+            <div class="d-flex align-items-center justify-content-between mb-2">
+              <h6 class="mb-0">Ítems</h6>
+              <span class="text-secondary small">
+                Total: <b>{{ formatMoney(totalDraft) }}</b>
+              </span>
             </div>
 
             <div class="row g-2 align-items-end">
               <div class="col-md-6">
-                <label class="form-label small text-secondary">Producto</label>
+                <label class="form-label text-secondary">Producto</label>
                 <select v-model.number="itemDraft.productoId" class="form-select">
                   <option :value="null">Seleccionar...</option>
                   <option v-for="p in productos" :key="p.productoId" :value="p.productoId">
@@ -146,12 +201,12 @@
               </div>
 
               <div class="col-md-2">
-                <label class="form-label small text-secondary">Cant.</label>
+                <label class="form-label text-secondary">Cant.</label>
                 <input v-model.number="itemDraft.cantidad" type="number" min="1" class="form-control" />
               </div>
 
               <div class="col-md-2">
-                <label class="form-label small text-secondary">PU</label>
+                <label class="form-label text-secondary">PU</label>
                 <input
                   v-model.number="itemDraft.precioUnitario"
                   type="number"
@@ -167,9 +222,9 @@
             </div>
 
             <div class="table-responsive mt-3" v-if="form.detalles.length">
-              <table class="table table-dark table-hover align-middle">
+              <table class="table table-dark table-hover align-middle mb-0">
                 <thead>
-                  <tr>
+                  <tr class="text-secondary">
                     <th>Producto</th>
                     <th style="width: 90px">Cant</th>
                     <th style="width: 140px" class="text-end">PU</th>
@@ -189,25 +244,16 @@
                   </tr>
                 </tbody>
               </table>
-              <div class="d-flex justify-content-end align-items-center gap-2 mt-3 text-secondary small">
-  <button class="btn btn-sm btn-outline-light" @click="prevPage" :disabled="loading || !canPrev">◀</button>
-  <span>Página {{ page + 1 }} / {{ totalPages }}</span>
-  <button class="btn btn-sm btn-outline-light" @click="nextPage" :disabled="loading || !canNext">▶</button>
-
-  <select v-model.number="size" class="form-select form-select-sm bg-dark text-white border-secondary" style="width: 90px">
-    <option :value="10">10</option>
-    <option :value="20">20</option>
-    <option :value="50">50</option>
-  </select>
-</div>
             </div>
 
-            <div v-else class="text-secondary small mt-2">Agregá al menos 1 ítem.</div>
+            <div v-else class="text-secondary small mt-2">
+              Agregá al menos 1 ítem.
+            </div>
           </div>
 
           <div class="modal-footer border-secondary">
             <button class="btn btn-outline-light" data-bs-dismiss="modal">Cancelar</button>
-            <button class="btn btn-accent" :disabled="loading" @click="crearCompra">
+            <button class="btn btn-primary btn-accent" :disabled="loading" @click="crearCompra">
               {{ loading ? "Guardando..." : "Crear compra" }}
             </button>
           </div>
@@ -226,23 +272,26 @@
 
           <div class="modal-body">
             <div v-if="detalle?.compra">
-              <div class="d-flex flex-wrap gap-2 justify-content-between mb-2">
+              <div class="d-flex flex-wrap gap-2 justify-content-between mb-3">
                 <div class="text-secondary">
                   <div><b>#{{ detalle.compra.compraId }}</b></div>
                   <div>{{ proveedorName(detalle.compra.proveedorId) }}</div>
                   <div>{{ (detalle.compra.fecha || "").slice(0, 10) }}</div>
                 </div>
+
                 <div class="text-end">
                   <div class="text-secondary small">Estado</div>
-                  <div class="badge text-bg-dark border border-secondary">{{ detalle.compra.estado }}</div>
-                  <div class="mt-2"><b>{{ formatMoney(detalle.compra.total) }}</b></div>
+                  <div class="badge" :class="estadoBadgeClass(detalle.compra.estado)">
+                    {{ detalle.compra.estado }}
+                  </div>
+                  <div class="mt-2 fw-bold">{{ formatMoney(detalle.compra.total) }}</div>
                 </div>
               </div>
 
               <div class="table-responsive">
                 <table class="table table-dark table-hover align-middle">
                   <thead>
-                    <tr>
+                    <tr class="text-secondary">
                       <th>Producto</th>
                       <th style="width: 90px">Cant</th>
                       <th style="width: 140px" class="text-end">PU</th>
@@ -264,9 +313,9 @@
 
               <h6 class="mb-2">Pagos</h6>
               <div v-if="pagosDetalle.length" class="table-responsive">
-                <table class="table table-dark table-hover align-middle">
+                <table class="table table-dark table-hover align-middle mb-0">
                   <thead>
-                    <tr>
+                    <tr class="text-secondary">
                       <th style="width: 90px">ID</th>
                       <th style="width: 140px">Fecha</th>
                       <th class="text-end">Monto</th>
@@ -277,7 +326,7 @@
                     <tr v-for="p in pagosDetalle" :key="p.pagoProveedorId || p.id">
                       <td class="text-secondary">#{{ p.pagoProveedorId || p.id }}</td>
                       <td class="text-secondary">{{ (p.fecha || "").slice(0, 10) }}</td>
-                      <td class="text-end">{{ formatMoney(p.monto) }}</td>
+                      <td class="text-end fw-bold">{{ formatMoney(p.monto) }}</td>
                       <td class="text-secondary">{{ p.referencia || "—" }}</td>
                     </tr>
                   </tbody>
@@ -306,16 +355,18 @@
           </div>
 
           <div class="modal-body">
-            <div class="text-secondary small mb-2">Compra: <b>#{{ pagoForm.compraId }}</b></div>
+            <div class="text-secondary small mb-2">
+              Compra: <b>#{{ pagoForm.compraId }}</b>
+            </div>
 
             <div class="alert alert-warning py-2" v-if="!cajaAbierta?.cajaId">
               No hay caja abierta para tu turno. Abrí caja antes de registrar pagos.
             </div>
 
-            <label class="form-label small text-secondary">Monto</label>
+            <label class="form-label text-secondary">Monto</label>
             <input v-model.number="pagoForm.monto" type="number" min="0" step="0.01" class="form-control" />
 
-            <label class="form-label small text-secondary mt-2">Método de pago</label>
+            <label class="form-label text-secondary mt-3">Método de pago</label>
             <select v-model.number="pagoForm.metodoPagoId" class="form-select">
               <option :value="null">Seleccionar...</option>
               <option v-for="m in metodosPago" :key="m.metodoPagoId" :value="m.metodoPagoId">
@@ -323,13 +374,13 @@
               </option>
             </select>
 
-            <label class="form-label small text-secondary mt-2">Referencia</label>
+            <label class="form-label text-secondary mt-3">Referencia</label>
             <input v-model="pagoForm.referencia" type="text" class="form-control" placeholder="Opcional" />
           </div>
 
           <div class="modal-footer border-secondary">
             <button class="btn btn-outline-light" data-bs-dismiss="modal">Cancelar</button>
-            <button class="btn btn-accent" :disabled="loading || !cajaAbierta?.cajaId" @click="registrarPago">
+            <button class="btn btn-primary btn-accent" :disabled="loading || !cajaAbierta?.cajaId" @click="registrarPago">
               {{ loading ? "Procesando..." : "Registrar pago" }}
             </button>
           </div>
@@ -346,7 +397,7 @@ import { proveedoresApi } from "../services/proveedoresApi"
 import { productosApi } from "../services/productosApi"
 import { cajaApi } from "../services/cajaApi"
 import { metodosPagoApi } from "../services/metodopagoService"
-import { getSession, getShift } from "../auth/session"
+import { getSession } from "../auth/session"
 
 function unwrapPage(data) {
   if (Array.isArray(data)) {
@@ -371,8 +422,8 @@ export default {
       success: "",
 
       q: "",
+      sortBy: "fechaDesc",
 
-      // paginación
       page: 0,
       size: 10,
       totalElements: 0,
@@ -392,12 +443,12 @@ export default {
       },
       itemDraft: { productoId: null, cantidad: 1, precioUnitario: 0 },
 
-      detalle: null, // { compra, detalles }
+      detalle: null,
       pagosDetalle: [],
 
       pagoForm: { compraId: null, monto: 0, metodoPagoId: null, referencia: "" },
 
-      _t: null, // debounce timer
+      _t: null,
     }
   },
 
@@ -409,21 +460,48 @@ export default {
       )
     },
 
-    // OJO: con paginación, esto filtra sobre la página actual (perfecto para UX)
     comprasFiltradas() {
+      let arr = [...this.compras]
       const t = String(this.q || "").trim().toLowerCase()
-      if (!t) return this.compras
 
-      return this.compras.filter((c) => {
-        const id = String(c.compraId || "")
-        const prov = this.proveedorName(c.proveedorId).toLowerCase()
-        return id.includes(t) || prov.includes(t)
-      })
+      if (t) {
+        arr = arr.filter((c) => {
+          const id = String(c.compraId || "")
+          const prov = this.proveedorName(c.proveedorId).toLowerCase()
+          return id.includes(t) || prov.includes(t)
+        })
+      }
+
+      switch (this.sortBy) {
+        case "fechaAsc":
+          arr.sort((a, b) => String(a.fecha || "").localeCompare(String(b.fecha || "")))
+          break
+        case "fechaDesc":
+          arr.sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")))
+          break
+        case "totalAsc":
+          arr.sort((a, b) => Number(a.total || 0) - Number(b.total || 0))
+          break
+        case "totalDesc":
+          arr.sort((a, b) => Number(b.total || 0) - Number(a.total || 0))
+          break
+        case "proveedor":
+          arr.sort((a, b) =>
+            this.proveedorName(a.proveedorId).localeCompare(this.proveedorName(b.proveedorId), "es")
+          )
+          break
+        case "estado":
+          arr.sort((a, b) => String(a.estado || "").localeCompare(String(b.estado || ""), "es"))
+          break
+      }
+
+      return arr
     },
 
     canPrev() {
       return this.page > 0
     },
+
     canNext() {
       return this.page < this.totalPages - 1
     },
@@ -434,7 +512,6 @@ export default {
   },
 
   watch: {
-    // debounce de búsqueda: seteamos page=0, el watcher de page dispara refresh
     q() {
       clearTimeout(this._t)
       this._t = setTimeout(() => {
@@ -446,15 +523,21 @@ export default {
     },
     size() {
       this.page = 0
-      // refreshCompras lo dispara page watcher luego
     },
   },
 
   methods: {
-    // ===== Utils =====
     formatMoney(n) {
       const num = Number(n ?? 0)
       return num.toLocaleString("es-AR", { style: "currency", currency: "ARS" })
+    },
+
+    estadoBadgeClass(estado) {
+      const e = String(estado || "").toUpperCase()
+      if (e === "PAGADA") return "text-bg-success"
+      if (e === "PENDIENTE" || e === "PARCIAL") return "text-bg-warning"
+      if (e === "ANULADA") return "text-bg-secondary"
+      return "text-bg-dark border border-secondary"
     },
 
     toastSuccess(msg) {
@@ -475,7 +558,6 @@ export default {
       return p.displayName || `#${pid}`
     },
 
-    // ===== Mappers (API -> VM) =====
     mapProveedorApiToVM(raw) {
       const proveedorId = Number(raw?.proveedorId ?? raw?.id ?? 0)
       const tipo =
@@ -502,20 +584,17 @@ export default {
       }
     },
 
-    // ===== Data =====
     async refreshAll() {
       this.loading = true
       this.error = ""
       try {
         const session = getSession() ?? null
         const userId = Number(session?.userId ?? 1)
-        const turno = getShift()
 
-        // maestros + caja + metodos
         const [provRes, prodRes, cajaRes, mpRes] = await Promise.all([
           proveedoresApi.list(),
-          productosApi.list({ page: 0, size: 9999 }).catch(() => ({ data: [] })), // por si productos ahora es paginado
-         cajaApi.abierta({ userId }).catch(() => ({ data: null })),
+          productosApi.list({ page: 0, size: 9999 }).catch(() => ({ data: [] })),
+          cajaApi.abierta({ userId }).catch(() => ({ data: null })),
           metodosPagoApi.list().catch(() => ({ data: [] })),
         ])
 
@@ -533,7 +612,6 @@ export default {
           nombre: m?.nombre ?? m?.descripcion ?? "—",
         }))
 
-        // compras paginadas
         await this.refreshCompras()
       } catch (e) {
         this.error = e?.response?.data?.error || e?.message || "Error cargando compras"
@@ -551,9 +629,9 @@ export default {
           size: this.size,
           search: this.q.trim() || null,
         })
+
         const p = unwrapPage(res?.data)
         this.compras = p.content.map(this.mapCompraApiToVM)
-
         this.totalElements = p.totalElements
         this.totalPages = p.totalPages
         this.page = p.page
@@ -572,12 +650,12 @@ export default {
       if (!this.canPrev) return
       this.page--
     },
+
     nextPage() {
       if (!this.canNext) return
       this.page++
     },
 
-    // ===== Crear compra =====
     prepareCreate() {
       this.error = ""
       this.form = {
@@ -639,7 +717,6 @@ export default {
       }
     },
 
-    // ===== Detalle =====
     async openDetalle(compraId) {
       this.detalle = null
       this.pagosDetalle = []
@@ -653,7 +730,6 @@ export default {
 
         this.detalle = cRes?.data ?? null
 
-        // pagos puede venir paginado
         const pagosPage = unwrapPage(pRes?.data)
         this.pagosDetalle = pagosPage.content ?? pRes?.data ?? []
       } catch (e) {
@@ -663,7 +739,6 @@ export default {
       }
     },
 
-    // ===== Pago =====
     preparePago(compraId) {
       this.error = ""
       this.pagoForm = { compraId, monto: 0, metodoPagoId: null, referencia: "" }
@@ -711,23 +786,11 @@ export default {
 </script>
 
 <style scoped>
-.bg-panel {
-  background: rgba(18, 22, 32, 0.92);
-}
-.modal-round {
-  border-radius: 14px;
-}
+.bg-panel { background: rgba(18, 22, 32, .92); }
+.modal-round { border-radius: 14px; }
 
-.btn-accent {
-  background: #7c3aed;
-  border-color: #7c3aed;
-}
-.btn-accent:hover {
-  filter: brightness(1.05);
-}
+.btn-accent { background: #7c3aed; border-color: #7c3aed; }
+.btn-accent:hover { filter: brightness(1.05); }
 
-.table td,
-.table th {
-  vertical-align: middle;
-}
+.table td, .table th { vertical-align: middle; }
 </style>

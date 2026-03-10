@@ -1,11 +1,11 @@
 import { http } from "./http"
 
 export const cajaApi = {
-  // ✅ turno opcional
-  abierta({ userId, turno } = {}) {
+  abierta({ userId, turno, fecha } = {}) {
     const params = {}
     if (userId != null) params.userId = userId
     if (turno) params.turno = turno
+    if (fecha) params.fecha = fecha
     return http.get("/cajas/abierta", { params })
   },
 

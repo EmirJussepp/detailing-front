@@ -49,7 +49,7 @@
 
           <div class="col-12 col-md-4 d-flex justify-content-md-end">
             <span class="text-secondary small">
-              {{ filtered.length }} proveedor(es)
+              Total proveedores: <b>{{ totalElements }}</b> · Mostrando: <b>{{ filtered.length }}</b>
             </span>
           </div>
         </div>
@@ -158,8 +158,26 @@
         </table>
       </div>
 
-      <div class="card-footer border-secondary text-secondary small">
-        Tip: el saldo es <b>compras</b> menos <b>pagos</b>. Si queda negativo, el proveedor te queda “a favor”.
+      <div class="card-footer border-secondary d-flex flex-wrap justify-content-between align-items-center gap-2 text-secondary small">
+        <div>
+          Tip: el saldo es <b>compras</b> menos <b>pagos</b>. Si queda negativo, el proveedor te queda “a favor”.
+        </div>
+
+        <div class="d-flex align-items-center gap-2">
+          <button class="btn btn-sm btn-outline-light" @click="prevPage" :disabled="loading || !canPrev">◀</button>
+          <span>Página <b>{{ page + 1 }}</b> / <b>{{ totalPages }}</b></span>
+          <button class="btn btn-sm btn-outline-light" @click="nextPage" :disabled="loading || !canNext">▶</button>
+
+          <select
+            v-model.number="size"
+            class="form-select form-select-sm bg-dark text-white border-secondary"
+            style="width: 90px"
+          >
+            <option :value="10">10</option>
+            <option :value="20">20</option>
+            <option :value="50">50</option>
+          </select>
+        </div>
       </div>
     </div>
 
@@ -177,7 +195,6 @@
           <div class="modal-body">
             <div v-if="formError" class="alert alert-danger py-2">{{ formError }}</div>
 
-            <!-- Tipo -->
             <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
               <span class="text-secondary small">Tipo:</span>
 
@@ -202,7 +219,6 @@
             </div>
 
             <div class="row g-3">
-              <!-- PERSONA -->
               <template v-if="form.tipo !== 'EMPRESA'">
                 <div class="col-12 col-md-6">
                   <label class="form-label text-secondary">Nombre *</label>
@@ -230,7 +246,6 @@
                 </div>
               </template>
 
-              <!-- EMPRESA -->
               <template v-else>
                 <div class="col-12">
                   <label class="form-label text-secondary">Razón social *</label>
@@ -248,7 +263,6 @@
                 </div>
               </template>
 
-              <!-- Comunes -->
               <div class="col-12 col-md-6">
                 <label class="form-label text-secondary">Teléfono</label>
                 <input v-model="form.telefono" class="form-control" placeholder="Ej: 3564..." />
@@ -318,7 +332,6 @@
             <div v-if="pagoError" class="alert alert-danger py-2">{{ pagoError }}</div>
             <div v-if="pagoOk" class="alert alert-success py-2">{{ pagoOk }}</div>
 
-            <!-- Seleccionar compra -->
             <div class="row g-3">
               <div class="col-12 col-md-6">
                 <label class="form-label text-secondary">Compra a pagar *</label>
@@ -417,7 +430,28 @@ import { comprasApi } from "../services/comprasApi"
 import { pagosProveedorApi } from "../services/pagosProveedorApi"
 import { metodosPagoApi } from "../services/metodopagoService"
 import { cajaApi } from "../services/cajaApi"
-import { getSession, getShift } from "../auth/session"
+import { getSession } from "../auth/session"
+
+function unwrapPage(data) {
+  if (Array.isArray(data)) {
+    return {
+      content: data,
+      page: 0,
+      size: data.length || 10,
+      totalElements: data.length,
+      totalPages: 1,
+    }
+  }
+
+  const content = data?.content ?? data?.items ?? data?.data ?? []
+  return {
+    content: Array.isArray(content) ? content : [],
+    page: Number(data?.page ?? data?.number ?? 0),
+    size: Number(data?.size ?? data?.pageSize ?? 10),
+    totalElements: Number(data?.totalElements ?? data?.total ?? (Array.isArray(content) ? content.length : 0)),
+    totalPages: Number(data?.totalPages ?? data?.pages ?? 1),
+  }
+}
 
 export default {
   name: "ProveedoresView",
@@ -429,6 +463,11 @@ export default {
       q: "",
       sortBy: "displayName",
       includeInactive: false,
+
+      page: 0,
+      size: 10,
+      totalElements: 0,
+      totalPages: 1,
 
       error: "",
       success: "",
@@ -452,7 +491,6 @@ export default {
       },
       formError: "",
 
-      // pagos
       pagoProveedor: null,
       pagoCompraId: null,
       pagoMonto: "",
@@ -463,31 +501,22 @@ export default {
       comprasPendientes: [],
       pagosCompra: [],
 
-      // caja + metodos
       cajaAbierta: null,
       metodosPago: [],
 
-      // saldos
       deudasMap: new Map(),
+
+      _t: null,
     }
   },
 
   computed: {
     filtered() {
-      const q = this.q.trim().toLowerCase()
       let arr = [...this.proveedores]
 
-      if (q) {
-        arr = arr.filter((p) => {
-          const blob = [p.displayName, p.documentoLabel, p.telefono, p.email, p.direccion, p.notas]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase()
-          return blob.includes(q)
-        })
+      if (!this.includeInactive) {
+        arr = arr.filter((p) => p.activo !== false)
       }
-
-      if (!this.includeInactive) arr = arr.filter((p) => p.activo !== false)
 
       if (this.sortBy === "saldoDesc") {
         arr.sort((a, b) => (this.getSaldo(b).saldo ?? 0) - (this.getSaldo(a).saldo ?? 0))
@@ -502,6 +531,14 @@ export default {
 
       return arr
     },
+
+    canPrev() {
+      return this.page > 0
+    },
+
+    canNext() {
+      return this.page < this.totalPages - 1
+    },
   },
 
   mounted() {
@@ -509,12 +546,28 @@ export default {
   },
 
   watch: {
+    q() {
+      clearTimeout(this._t)
+      this._t = setTimeout(() => {
+        this.page = 0
+      }, 250)
+    },
+
+    page() {
+      this.refresh()
+    },
+
+    size() {
+      this.page = 0
+    },
+
     async pagoCompraId(newId) {
       this.pagosCompra = []
       if (!newId) return
       try {
         const res = await pagosProveedorApi.porCompra(newId)
-        this.pagosCompra = res?.data ?? []
+        const p = unwrapPage(res?.data)
+        this.pagosCompra = p.content ?? []
       } catch {
         this.pagosCompra = []
       }
@@ -582,6 +635,9 @@ export default {
         direccion: raw?.direccion ?? "",
         notas: raw?.notas ?? "",
         activo: raw?.activo !== false,
+
+        createdAt: raw?.createdAt ?? "",
+        updatedAt: raw?.updatedAt ?? "",
       }
     },
 
@@ -603,18 +659,24 @@ export default {
       try {
         const session = getSession() ?? null
         const userId = Number(session?.userId ?? 1)
-        const turno = getShift()
 
         const [provRes, deudasRes, cajaRes, mpRes] = await Promise.all([
-  proveedoresApi.list(),
-  proveedoresApi.deudas().catch(() => ({ data: [] })),
-  // ✅ sin turno: trae la caja abierta real del usuario
-  cajaApi.abierta({ userId }).catch(() => ({ data: null })),
-  metodosPagoApi.list().catch(() => ({ data: [] })),
-])
+          proveedoresApi.list({
+            page: this.page,
+            size: this.size,
+            search: this.q.trim() || null,
+          }),
+          proveedoresApi.deudas().catch(() => ({ data: [] })),
+          cajaApi.abierta({ userId }).catch(() => ({ data: null })),
+          metodosPagoApi.list().catch(() => ({ data: [] })),
+        ])
 
-        const provData = provRes?.data?.content ?? []
-this.proveedores = provData.map(this.mapProveedorApiToVM)
+        const provPage = unwrapPage(provRes?.data)
+        this.proveedores = provPage.content.map(this.mapProveedorApiToVM)
+        this.totalElements = provPage.totalElements
+        this.totalPages = provPage.totalPages
+        this.page = provPage.page
+        this.size = provPage.size
 
         const deudas = deudasRes?.data ?? []
         this.deudasMap = new Map(
@@ -630,15 +692,30 @@ this.proveedores = provData.map(this.mapProveedorApiToVM)
         )
 
         this.cajaAbierta = cajaRes?.data ?? null
-        this.metodosPago = (mpRes?.data ?? []).map((m) => ({
+
+        const mp = unwrapPage(mpRes?.data)
+        this.metodosPago = (mp.content ?? []).map((m) => ({
           metodoPagoId: Number(m?.metodoPagoId ?? m?.id ?? 0),
           nombre: m?.nombre ?? m?.descripcion ?? "—",
         }))
       } catch (e) {
         this.error = e?.response?.data?.error || e?.message || "Error cargando proveedores"
+        this.proveedores = []
+        this.totalElements = 0
+        this.totalPages = 1
       } finally {
         this.loading = false
       }
+    },
+
+    prevPage() {
+      if (!this.canPrev) return
+      this.page--
+    },
+
+    nextPage() {
+      if (!this.canNext) return
+      this.page++
     },
 
     setTipo(tipo) {
@@ -831,8 +908,14 @@ this.proveedores = provData.map(this.mapProveedorApiToVM)
 
       this.loading = true
       try {
-        const res = await comprasApi.list()
-        const allRaw = res?.data ?? []
+        const res = await comprasApi.list({
+          page: 0,
+          size: 9999,
+          proveedorId: Number(p.id),
+        })
+
+        const allPage = unwrapPage(res?.data)
+        const allRaw = allPage.content ?? []
         const pid = Number(p.id)
 
         const all = allRaw.map((x) => {
@@ -893,7 +976,8 @@ this.proveedores = provData.map(this.mapProveedorApiToVM)
         this.pagoNotas = ""
 
         const pagosRes = await pagosProveedorApi.porCompra(compraId)
-        this.pagosCompra = pagosRes?.data ?? []
+        const p = unwrapPage(pagosRes?.data)
+        this.pagosCompra = p.content ?? []
 
         await this.refresh()
       } catch (e) {

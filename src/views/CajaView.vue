@@ -155,11 +155,9 @@ async function refresh() {
   infoMsg.value = ""
 
   try {
-    const { data } = await cajaApi.abierta({
-      userId,
-      turno: turnoBE(selectedTurno.value),
-      fecha: todayISO(),
-    })
+   const { data } = await cajaApi.abierta({
+  turno: turnoBE(selectedTurno.value),
+})
 
     caja.value = data ?? null
 

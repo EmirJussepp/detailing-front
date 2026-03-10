@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
+import Pager from "../components/Pager.vue"
 
 import { clientesApi } from "../services/clientesService"
 import { cuentaCorrienteApi } from "../services/cuentaCorrienteService"
@@ -15,6 +16,7 @@ function formatMoney(n) {
   const num = Number(n ?? 0)
   return num.toLocaleString("es-AR", { minimumFractionDigits: 0 })
 }
+
 function formatDateTime(v) {
   if (!v) return "-"
   const d = new Date(v)
@@ -27,18 +29,45 @@ function formatDateTime(v) {
     minute: "2-digit",
   })
 }
+
 function unwrapPage(data) {
-  if (Array.isArray(data)) return data
+  if (Array.isArray(data)) {
+    return {
+      content: data,
+      page: 0,
+      size: data.length || 10,
+      totalElements: data.length,
+      totalPages: 1,
+    }
+  }
+
   const content = data?.content ?? data?.items ?? data?.data ?? []
-  return Array.isArray(content) ? content : []
+
+  return {
+    content: Array.isArray(content) ? content : [],
+    page: Number(data?.page ?? data?.number ?? 0),
+    size: Number(data?.size ?? data?.pageSize ?? 10),
+    totalElements: Number(
+      data?.totalElements ??
+        data?.total ??
+        (Array.isArray(content) ? content.length : 0)
+    ),
+    totalPages: Number(data?.totalPages ?? data?.pages ?? 1),
+  }
 }
 
 function badgeOrigen(tipo) {
   const t = String(tipo || "").toUpperCase()
-  if (t === "VENTA") return { text: "VENTA", cls: "badge text-bg-primary" }
-  if (t === "PAGO") return { text: "PAGO", cls: "badge text-bg-success" }
-  if (t === "NOTA_CREDITO" || t === "NC") return { text: "NC", cls: "badge text-bg-warning" }
-  return { text: t || "OTRO", cls: "badge text-bg-secondary" }
+  if (t === "VENTA") return { text: "VENTA", cls: "badge badge-soft-primary" }
+  if (t === "PAGO") return { text: "PAGO", cls: "badge badge-soft-success" }
+  if (t === "NOTA_CREDITO" || t === "NC") return { text: "NC", cls: "badge badge-soft-warning" }
+  return { text: t || "OTRO", cls: "badge badge-soft-secondary" }
+}
+
+function clampPage(p) {
+  const n = Number(p)
+  if (!Number.isFinite(n) || n < 0) return 0
+  return n
 }
 
 // =========================
@@ -54,13 +83,31 @@ const clienteIdSel = ref("")
 const deuda = ref(null)
 const estado = ref([])
 
-// filtros
-const filtroTexto = ref("")
-const filtroTipo = ref("TODOS") // TODOS | DEBE | HABER
-const filtroOrigen = ref("TODOS") // TODOS | VENTA | PAGO | NOTA_CREDITO
+const page = ref(0)
+const size = ref(10)
+const totalElements = ref(0)
+const totalPages = ref(1)
 
-// expandible
-const expanded = ref(new Set()) // guarda claves: `${tipo}:${id || idx}`
+const filtroTexto = ref("")
+const filtroTipo = ref("TODOS")
+const filtroOrigen = ref("TODOS")
+
+const expanded = ref(new Set())
+
+const searchMode = ref("DNI")
+const searchInput = ref("")
+const searching = ref(false)
+const searchError = ref("")
+const showSuggest = ref(false)
+const suggestions = ref([])
+
+let debounceTimer = null
+let requestSeq = 0
+const bootstrapped = ref(false)
+
+// =========================
+// Expandible
+// =========================
 function toggleRow(key) {
   const s = new Set(expanded.value)
   if (s.has(key)) s.delete(key)
@@ -73,14 +120,17 @@ function toggleRow(key) {
 // =========================
 function mapCliente(c) {
   return {
-    id: Number(c.clienteId ?? c.id),
-    nombre: c.nombre ?? "",
-    apellido: c.apellido ?? "",
-    dni: c.dni ?? null,
-    activo: c.activo ?? true,
+    id: Number(c?.clienteId ?? c?.id ?? 0),
+    nombre: c?.nombre ?? "",
+    apellido: c?.apellido ?? "",
+    dni: c?.dni ?? null,
+    activo: c?.activo ?? true,
   }
 }
-const clientesActivos = computed(() => (clientes.value || []).filter((c) => c.activo !== false))
+
+const clientesActivos = computed(() =>
+  (clientes.value || []).filter((c) => c.activo !== false)
+)
 
 const clienteSel = computed(() => {
   const id = Number(clienteIdSel.value)
@@ -95,16 +145,8 @@ const clienteTitulo = computed(() => {
 })
 
 // =========================
-// Buscador PRO (igual que el tuyo)
+// Buscador
 // =========================
-const searchMode = ref("DNI") // DNI | NOMBRE
-const searchInput = ref("")
-const searching = ref(false)
-const searchError = ref("")
-const showSuggest = ref(false)
-const suggestions = ref([])
-let debounceTimer = null
-
 function clienteLabel(c) {
   const full = `${c.nombre} ${c.apellido || ""}`.trim()
   const dni = c.dni ? ` · DNI ${c.dni}` : ""
@@ -114,6 +156,7 @@ function clienteLabel(c) {
 function buildSuggestions(txt) {
   const t = txt.trim().toLowerCase()
   if (!t) return []
+
   return clientesActivos.value
     .map((c) => ({
       id: c.id,
@@ -132,6 +175,7 @@ function selectCliente(c) {
   showSuggest.value = false
   suggestions.value = []
   searchError.value = ""
+  searchInput.value = clienteLabel(c)
 }
 
 async function searchByDni(dni) {
@@ -140,6 +184,7 @@ async function searchByDni(dni) {
 
   const local = buildSuggestions(clean)
   if (local.length === 1) return selectCliente(local[0].cliente)
+
   if (local.length > 1) {
     suggestions.value = local
     showSuggest.value = true
@@ -149,15 +194,19 @@ async function searchByDni(dni) {
   searching.value = true
   searchError.value = ""
   try {
-    // si no existe, va a fallar -> lo manejamos
     const { data } = await clientesApi.getByDni(clean)
     const c = mapCliente(data)
     if (!c?.id) throw new Error("Cliente inválido")
+
     selectCliente(c)
     okMsg.value = `Cliente encontrado: ${c.nombre} ${c.apellido || ""}`.trim()
-    setTimeout(() => (okMsg.value = ""), 1800)
+    setTimeout(() => {
+      if (okMsg.value.startsWith("Cliente encontrado:")) okMsg.value = ""
+    }, 1800)
   } catch (e) {
-    searchError.value = e?.response?.data?.error || "No se encontró cliente con ese DNI (o el endpoint no existe)."
+    searchError.value =
+      e?.response?.data?.error ||
+      "No se encontró cliente con ese DNI (o el endpoint no existe)."
   } finally {
     searching.value = false
   }
@@ -189,10 +238,12 @@ function onSearchInput() {
         showSuggest.value = true
         return
       }
+
       try {
         searching.value = true
         const { data } = await clientesApi.getByDni(clean)
         const c = mapCliente(data)
+
         if (c?.id) {
           suggestions.value = [{ id: c.id, label: clienteLabel(c), cliente: c }]
           showSuggest.value = true
@@ -219,8 +270,9 @@ async function doSearch() {
 
   if (searchMode.value === "NOMBRE") {
     const list = buildSuggestions(v)
-    if (list.length === 1) selectCliente(list[0].cliente)
-    else {
+    if (list.length === 1) {
+      selectCliente(list[0].cliente)
+    } else {
       suggestions.value = list
       showSuggest.value = list.length > 0
       if (!list.length) searchError.value = "No hay coincidencias."
@@ -241,8 +293,8 @@ function onGlobalClick(e) {
 // =========================
 async function fetchClientes() {
   const { data } = await clientesApi.list({ page: 0, size: 500 })
-  const arr = unwrapPage(data)
-  clientes.value = arr.map(mapCliente)
+  const paged = unwrapPage(data)
+  clientes.value = paged.content.map(mapCliente)
 }
 
 function setClienteFromQuery() {
@@ -250,6 +302,7 @@ function setClienteFromQuery() {
   if (!q) return
   clienteIdSel.value = String(q)
 }
+
 function pushQueryCliente() {
   if (!clienteIdSel.value) {
     const qq = { ...route.query }
@@ -257,26 +310,56 @@ function pushQueryCliente() {
     router.replace({ query: qq })
     return
   }
-  router.replace({ query: { ...route.query, clienteId: String(clienteIdSel.value) } })
+
+  router.replace({
+    query: {
+      ...route.query,
+      clienteId: String(clienteIdSel.value),
+    },
+  })
 }
 
 async function fetchCuenta(clienteId) {
+  const currentReq = ++requestSeq
+
   loading.value = true
   errorMsg.value = ""
   okMsg.value = ""
-  expanded.value = new Set()
 
   try {
     const [rDeuda, rEstado] = await Promise.all([
       cuentaCorrienteApi.deuda(clienteId),
-      cuentaCorrienteApi.estadoCuenta(clienteId),
+      cuentaCorrienteApi.estadoCuenta(clienteId, {
+        page: page.value,
+        size: size.value,
+      }),
     ])
 
+    if (currentReq !== requestSeq) return
+
     deuda.value = rDeuda?.data ?? null
-    estado.value = Array.isArray(rEstado?.data) ? rEstado.data : []
+
+    const paged = unwrapPage(rEstado?.data)
+
+    estado.value = paged.content
+    page.value = clampPage(paged.page)
+    size.value = Number(paged.size || 10)
+    totalElements.value = Math.max(0, Number(paged.totalElements || 0))
+    totalPages.value = Math.max(1, Number(paged.totalPages || 1))
+
+    if (page.value > totalPages.value - 1) {
+      page.value = Math.max(0, totalPages.value - 1)
+    }
+
+    expanded.value = new Set()
   } catch (e) {
+    if (currentReq !== requestSeq) return
+
     deuda.value = null
     estado.value = []
+    totalElements.value = 0
+    totalPages.value = 1
+
     errorMsg.value =
       e?.response?.data?.error ||
       e?.response?.data?.message ||
@@ -284,7 +367,9 @@ async function fetchCuenta(clienteId) {
       e?.message ||
       "Error cargando cuenta corriente."
   } finally {
-    loading.value = false
+    if (currentReq === requestSeq) {
+      loading.value = false
+    }
   }
 }
 
@@ -293,20 +378,14 @@ async function fetchCuenta(clienteId) {
 // =========================
 function normalizeRow(x, idx) {
   const fecha = x.fecha ?? x.createdAt ?? x.created_at ?? null
-  // const ref = x.referencia ?? x.ref ?? x.descripcion ?? x.detalle ?? x.concepto ?? null
-
   const debe = Number(x.debe ?? 0) || 0
   const haber = Number(x.haber ?? 0) || 0
   const saldo = x.saldo == null ? null : Number(x.saldo)
 
-  // origen real del back (por DTO)
   const origen = String(x.tipo ?? "OTRO").toUpperCase()
-
   const ventaId = x.ventaId ?? null
   const pagoId = x.pagoId ?? null
   const comprobanteId = x.comprobanteId ?? null
-
-  // items (solo VENTA normalmente)
   const items = Array.isArray(x.items) ? x.items : []
 
   let tipoMov = "OTRO"
@@ -316,39 +395,109 @@ function normalizeRow(x, idx) {
   const idKey = ventaId ?? pagoId ?? comprobanteId ?? idx
   const key = `${origen}:${idKey}`
 
-  // referencia “pro” fallback
   const referencia =
-    ref ??
+    x.referencia ??
+    x.ref ??
+    x.descripcion ??
+    x.detalle ??
+    x.concepto ??
     (origen === "VENTA" && ventaId ? `Venta #${ventaId}` : null) ??
     (origen === "PAGO" && ventaId ? `Pago venta #${ventaId}` : null) ??
     (origen === "NOTA_CREDITO" && comprobanteId ? `NC #${comprobanteId}` : null) ??
     "-"
 
-  return { fecha, referencia, debe, haber, saldo, tipoMov, origen, ventaId, pagoId, comprobanteId, items, key, raw: x }
+  return {
+    fecha,
+    referencia,
+    debe,
+    haber,
+    saldo,
+    tipoMov,
+    origen,
+    ventaId,
+    pagoId,
+    comprobanteId,
+    items,
+    key,
+    raw: x,
+  }
 }
 
-const estadoUI = computed(() => (estado.value || []).map((x, idx) => normalizeRow(x, idx)))
+const estadoUI = computed(() =>
+  (estado.value || []).map((x, idx) => normalizeRow(x, idx))
+)
 
 const estadoFiltrado = computed(() => {
   const txt = filtroTexto.value.trim().toLowerCase()
+
   return estadoUI.value.filter((r) => {
     if (filtroOrigen.value !== "TODOS" && r.origen !== filtroOrigen.value) return false
     if (filtroTipo.value !== "TODOS" && r.tipoMov !== filtroTipo.value) return false
+
     if (txt) {
       const blob = `${r.referencia ?? ""} ${r.origen ?? ""} ${r.ventaId ?? ""}`.toLowerCase()
       if (!blob.includes(txt)) return false
     }
+
     return true
   })
 })
 
-const totDebe = computed(() => estadoUI.value.reduce((a, r) => a + Number(r.debe || 0), 0))
-const totHaber = computed(() => estadoUI.value.reduce((a, r) => a + Number(r.haber || 0), 0))
+const totDebe = computed(() =>
+  estadoUI.value.reduce((a, r) => a + Number(r.debe || 0), 0)
+)
+
+const totHaber = computed(() =>
+  estadoUI.value.reduce((a, r) => a + Number(r.haber || 0), 0)
+)
+
 const saldoFinal = computed(() => {
   if (!estadoUI.value.length) return 0
   const last = estadoUI.value[estadoUI.value.length - 1]
   return Number(last.saldo ?? 0)
 })
+
+const pageInfoText = computed(() => {
+  if (!totalElements.value) return "Sin registros"
+  return `Página ${page.value + 1} de ${totalPages.value}`
+})
+
+// =========================
+// Pager handlers
+// =========================
+function onPageChange(newPage) {
+  const next = clampPage(newPage)
+  const maxPage = Math.max(0, totalPages.value - 1)
+  const safeNext = Math.min(next, maxPage)
+
+  if (safeNext === page.value) return
+
+  page.value = safeNext
+
+  if (clienteIdSel.value) {
+    fetchCuenta(Number(clienteIdSel.value))
+  }
+}
+
+function onSizeChange(newSize) {
+  const nextSize = Number(newSize)
+  if (!Number.isFinite(nextSize) || nextSize <= 0) return
+
+  const changed = nextSize !== size.value
+  size.value = nextSize
+
+  if (!clienteIdSel.value) return
+
+  if (page.value !== 0) {
+    page.value = 0
+    fetchCuenta(Number(clienteIdSel.value))
+    return
+  }
+
+  if (changed) {
+    fetchCuenta(Number(clienteIdSel.value))
+  }
+}
 
 // =========================
 // Export
@@ -366,7 +515,9 @@ function exportCSV() {
   const header = ["fecha", "origen", "referencia", "debe", "haber", "saldo"]
   const csvLines = [
     header.join(";"),
-    ...rows.map((obj) => header.map((k) => `"${String(obj[k] ?? "").replaceAll('"', '""')}"`).join(";")),
+    ...rows.map((obj) =>
+      header.map((k) => `"${String(obj[k] ?? "").replaceAll('"', '""')}"`).join(";")
+    ),
   ]
   const csv = csvLines.join("\n")
 
@@ -385,49 +536,76 @@ function exportCSV() {
 onMounted(async () => {
   await fetchClientes()
   setClienteFromQuery()
-  if (clienteIdSel.value) await fetchCuenta(Number(clienteIdSel.value))
+  bootstrapped.value = true
+
+  if (clienteIdSel.value) {
+    await fetchCuenta(Number(clienteIdSel.value))
+  }
+
   window.addEventListener("click", onGlobalClick)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener("click", onGlobalClick)
+  clearTimeout(debounceTimer)
 })
 
-watch(clienteIdSel, async (v) => {
+watch(clienteIdSel, async (v, oldV) => {
+  if (!bootstrapped.value) return
+  if (v === oldV) return
+
   pushQueryCliente()
+
   if (!v) {
     deuda.value = null
     estado.value = []
+    totalElements.value = 0
+    totalPages.value = 1
+    page.value = 0
     expanded.value = new Set()
     return
   }
+
+  page.value = 0
   await fetchCuenta(Number(v))
 })
 </script>
 
 <template>
-  <div>
-    <div class="mb-3">
-      <h1 class="h4 mb-1">{{ clienteTitulo }}</h1>
-      <div class="text-secondary">Historial + saldo acumulado + detalle de ventas (items)</div>
+  <div class="container py-4 cc-view">
+    <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+      <div>
+        <h1 class="h4 mb-1">{{ clienteTitulo }}</h1>
+        <div class="text-secondary small">
+          Historial + saldo acumulado + detalle expandible de ventas.
+        </div>
+      </div>
+
+      <div v-if="clienteIdSel" class="text-secondary small">
+        {{ pageInfoText }}
+      </div>
     </div>
 
     <div v-if="errorMsg" class="alert alert-danger py-2">{{ errorMsg }}</div>
     <div v-if="okMsg" class="alert alert-success py-2">{{ okMsg }}</div>
 
-    <!-- Buscador PRO -->
+    <!-- Buscador -->
     <div class="cc-search card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
         <div class="row g-3 align-items-end">
           <div class="col-12 col-md-3">
             <label class="form-label text-secondary">Buscar</label>
-            <select v-model="searchMode" class="form-select bg-dark text-white border-secondary" :disabled="loading">
+            <select
+              v-model="searchMode"
+              class="form-select bg-dark text-white border-secondary"
+              :disabled="loading"
+            >
               <option value="DNI">Por DNI</option>
               <option value="NOMBRE">Por nombre/apellido</option>
             </select>
           </div>
 
-          <div class="col-12 col-md-5" style="position: relative;">
+          <div class="col-12 col-md-5 position-relative">
             <label class="form-label text-secondary">
               {{ searchMode === "DNI" ? "DNI" : "Nombre / Apellido" }}
             </label>
@@ -445,13 +623,12 @@ watch(clienteIdSel, async (v) => {
 
             <div
               v-if="showSuggest"
-              class="border border-secondary bg-dark rounded mt-1"
-              style="position:absolute; z-index: 50; width: 100%; max-height: 260px; overflow:auto;"
+              class="suggest-box border border-secondary rounded mt-1"
             >
               <button
                 v-for="s in suggestions"
                 :key="s.id"
-                class="btn btn-dark w-100 text-start border-0"
+                class="btn btn-dark w-100 text-start border-0 suggestion-item"
                 type="button"
                 @click="selectCliente(s.cliente)"
               >
@@ -463,7 +640,11 @@ watch(clienteIdSel, async (v) => {
           </div>
 
           <div class="col-12 col-md-2 d-flex gap-2">
-            <button class="btn btn-outline-light w-100" @click="doSearch" :disabled="loading || searching">
+            <button
+              class="btn btn-outline-light w-100"
+              @click="doSearch"
+              :disabled="loading || searching"
+            >
               {{ searching ? "Buscando..." : "Buscar" }}
             </button>
           </div>
@@ -480,22 +661,29 @@ watch(clienteIdSel, async (v) => {
         </div>
 
         <div class="text-secondary small mt-3" v-if="clienteIdSel">
-          Totales: Debe <b>$ {{ formatMoney(totDebe) }}</b> · Haber <b>$ {{ formatMoney(totHaber) }}</b> ·
-          Saldo <b>$ {{ formatMoney(saldoFinal) }}</b>
+          Totales página:
+          Debe <b>$ {{ formatMoney(totDebe) }}</b> ·
+          Haber <b>$ {{ formatMoney(totHaber) }}</b> ·
+          Saldo final visible <b>$ {{ formatMoney(saldoFinal) }}</b>
+
           <span v-if="deuda?.deudaTotal != null" class="ms-2">
-            · Deuda (endpoint): <b>$ {{ formatMoney(deuda.deudaTotal) }}</b>
+            · Deuda total: <b>$ {{ formatMoney(deuda.deudaTotal) }}</b>
           </span>
         </div>
       </div>
     </div>
 
-    <!-- Selector + acciones -->
+    <!-- Selector -->
     <div class="card bg-panel border-0 shadow-sm mb-4">
       <div class="card-body">
         <div class="row g-3 align-items-end">
-          <div class="col-12 col-md-6">
+          <div class="col-12 col-md-7">
             <label class="form-label text-secondary">Cliente</label>
-            <select v-model="clienteIdSel" class="form-select bg-dark text-white border-secondary" :disabled="loading">
+            <select
+              v-model="clienteIdSel"
+              class="form-select bg-dark text-white border-secondary"
+              :disabled="loading"
+            >
               <option value="">Seleccionar…</option>
               <option v-for="c in clientesActivos" :key="c.id" :value="String(c.id)">
                 #{{ c.id }} — {{ c.nombre }} {{ c.apellido || "" }} (DNI: {{ c.dni || "-" }})
@@ -503,8 +691,12 @@ watch(clienteIdSel, async (v) => {
             </select>
           </div>
 
-          <div class="col-12 col-md-6 d-flex justify-content-md-end gap-2">
-            <button class="btn btn-outline-light" @click="exportCSV" :disabled="!estadoFiltrado.length">
+          <div class="col-12 col-md-5 d-flex justify-content-md-end gap-2">
+            <button
+              class="btn btn-outline-light"
+              @click="exportCSV"
+              :disabled="!estadoFiltrado.length"
+            >
               Exportar CSV
             </button>
           </div>
@@ -515,7 +707,7 @@ watch(clienteIdSel, async (v) => {
     <!-- Filtros -->
     <div class="card bg-panel border-0 shadow-sm mb-3" v-if="clienteIdSel">
       <div class="card-body">
-        <div class="row g-2">
+        <div class="row g-2 align-items-center">
           <div class="col-12 col-md-3">
             <select v-model="filtroOrigen" class="form-select bg-dark text-white border-secondary">
               <option value="TODOS">Todos los orígenes</option>
@@ -524,6 +716,7 @@ watch(clienteIdSel, async (v) => {
               <option value="NOTA_CREDITO">Notas de crédito</option>
             </select>
           </div>
+
           <div class="col-12 col-md-3">
             <select v-model="filtroTipo" class="form-select bg-dark text-white border-secondary">
               <option value="TODOS">Debe + Haber</option>
@@ -531,12 +724,19 @@ watch(clienteIdSel, async (v) => {
               <option value="HABER">Solo Haber</option>
             </select>
           </div>
-          <div class="col-12 col-md-6">
+
+          <div class="col-12 col-md-4">
             <input
               v-model="filtroTexto"
               class="form-control bg-dark text-white border-secondary"
               placeholder="Buscar por referencia / origen / id..."
             />
+          </div>
+
+          <div class="col-12 col-md-2 d-flex justify-content-md-end">
+            <span class="text-secondary small">
+              Mostrando: <b>{{ estadoFiltrado.length }}</b>
+            </span>
           </div>
         </div>
       </div>
@@ -548,38 +748,40 @@ watch(clienteIdSel, async (v) => {
         <div v-if="loading" class="text-secondary">Cargando...</div>
 
         <div v-else-if="!estadoFiltrado.length" class="text-secondary">
-          No hay movimientos para este cliente (o no matchean los filtros).
+          No hay movimientos para este cliente o no coinciden con los filtros.
         </div>
 
         <div v-else class="table-responsive">
           <table class="table table-dark table-hover align-middle mb-0">
             <thead>
-              <tr>
+              <tr class="text-secondary">
                 <th style="width: 170px">Fecha</th>
-                <th style="width: 95px">Origen</th>
-                
+                <th style="width: 110px">Origen</th>
+                <th>Referencia</th>
                 <th style="width: 140px" class="text-end">Debe</th>
                 <th style="width: 140px" class="text-end">Haber</th>
                 <th style="width: 160px" class="text-end">Saldo</th>
-                <th style="width: 60px"></th>
+                <th style="width: 70px" class="text-end">Ver</th>
               </tr>
             </thead>
 
             <tbody>
-              <template v-for="(r, idx) in estadoFiltrado" :key="r.key">
+              <template v-for="r in estadoFiltrado" :key="r.key">
                 <tr>
                   <td class="text-secondary">{{ formatDateTime(r.fecha) }}</td>
 
                   <td>
-                    <span :class="badgeOrigen(r.origen).cls">{{ badgeOrigen(r.origen).text }}</span>
+                    <span :class="badgeOrigen(r.origen).cls">
+                      {{ badgeOrigen(r.origen).text }}
+                    </span>
                   </td>
 
-                  <!-- <td class="text-secondary">
+                  <td>
                     <div class="fw-semibold text-white">{{ r.referencia || "-" }}</div>
                     <div class="small text-secondary" v-if="r.ventaId">
                       Venta ID: #{{ r.ventaId }}
                     </div>
-                  </td> -->
+                  </td>
 
                   <td class="text-end" :class="r.debe > 0 ? 'text-danger fw-bold' : 'text-secondary'">
                     {{ r.debe > 0 ? "$ " + formatMoney(r.debe) : "-" }}
@@ -594,7 +796,7 @@ watch(clienteIdSel, async (v) => {
                   <td class="text-end">
                     <button
                       v-if="r.origen === 'VENTA'"
-                      class="btn btn-sm btn-outline-light"
+                      class="btn btn-sm btn-outline-light btn-expand"
                       type="button"
                       @click="toggleRow(r.key)"
                       :disabled="!r.items?.length"
@@ -605,7 +807,6 @@ watch(clienteIdSel, async (v) => {
                   </td>
                 </tr>
 
-                <!-- Detalle expandible (VENTA) -->
                 <tr v-if="expanded.has(r.key)">
                   <td colspan="7" class="p-0">
                     <div class="cc-detail p-3 border-top border-secondary">
@@ -638,10 +839,15 @@ watch(clienteIdSel, async (v) => {
                                 </div>
                                 <div class="small text-secondary">ID: #{{ it.productoId }}</div>
                               </td>
-                              <td class="text-end text-white fw-semibold">{{ it.cantidad ?? "-" }}</td>
+
+                              <td class="text-end text-white fw-semibold">
+                                {{ it.cantidad ?? "-" }}
+                              </td>
+
                               <td class="text-end text-secondary">
                                 {{ it.precioUnitario != null ? "$ " + formatMoney(it.precioUnitario) : "-" }}
                               </td>
+
                               <td class="text-end text-white fw-semibold">
                                 {{ it.subtotal != null ? "$ " + formatMoney(it.subtotal) : "-" }}
                               </td>
@@ -651,7 +857,7 @@ watch(clienteIdSel, async (v) => {
                       </div>
 
                       <div class="text-secondary small mt-2">
-                        Mostrando productos/cantidades desde el backend (Opción A).
+                        Detalle expandible obtenido desde backend.
                       </div>
                     </div>
                   </td>
@@ -661,8 +867,30 @@ watch(clienteIdSel, async (v) => {
           </table>
         </div>
 
-        <div class="text-secondary small mt-2">
-          Cuenta corriente: debe/haber/saldo + detalle expandible para ventas.
+        <div class="cc-footer d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
+          <div class="text-secondary small">
+            Total registros: <b>{{ totalElements }}</b>
+          </div>
+
+          <div class="text-secondary small">
+            Página <b>{{ page + 1 }}</b> / <b>{{ totalPages }}</b>
+          </div>
+        </div>
+
+        <div class="mt-3">
+          <Pager
+            :page="page"
+            :size="size"
+            :total-elements="totalElements"
+            :total-pages="totalPages"
+            :loading="loading"
+            @update:page="onPageChange"
+            @update:size="onSizeChange"
+          />
+        </div>
+
+        <div class="text-secondary small mt-3">
+          Cuenta corriente paginada con filtros visuales sobre la página actual.
         </div>
       </div>
     </div>
@@ -674,6 +902,77 @@ watch(clienteIdSel, async (v) => {
 </template>
 
 <style scoped>
-.bg-panel { background: rgba(18, 22, 32, .92); }
-.cc-detail { background: rgba(10, 12, 18, .75); }
+.cc-view {
+  color: #e5e7eb;
+}
+
+.bg-panel {
+  background: rgba(18, 22, 32, 0.92);
+  backdrop-filter: blur(4px);
+}
+
+.cc-search .card-body,
+.bg-panel .card-body {
+  padding: 1rem;
+}
+
+.suggest-box {
+  position: absolute;
+  z-index: 50;
+  width: 100%;
+  max-height: 260px;
+  overflow: auto;
+  background: #111827;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.suggestion-item:hover {
+  background: rgba(124, 58, 237, 0.16) !important;
+}
+
+.cc-detail {
+  background: rgba(10, 12, 18, 0.82);
+}
+
+.badge-soft-primary {
+  background: rgba(59, 130, 246, 0.18);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.badge-soft-success {
+  background: rgba(34, 197, 94, 0.18);
+  color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+
+.badge-soft-warning {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fcd34d;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.badge-soft-secondary {
+  background: rgba(107, 114, 128, 0.18);
+  color: #d1d5db;
+  border: 1px solid rgba(107, 114, 128, 0.35);
+}
+
+.table td,
+.table th {
+  vertical-align: middle;
+}
+
+.table-dark.table-hover tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.btn-expand {
+  min-width: 34px;
+}
+
+.cc-footer {
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  padding-top: 0.75rem;
+}
 </style>

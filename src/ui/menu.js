@@ -1,4 +1,3 @@
-// src/ui/menu.js
 import { getSession } from "../auth/session"
 
 // =========================
@@ -14,7 +13,6 @@ export function isAdminFromPermissions(perms = getPermissions()) {
 }
 
 export function canPerm(item, perms = getPermissions()) {
-  // si no tiene perm, se ve
   if (!item?.perm && !item?.permAny) return true
 
   const set = new Set(perms || [])
@@ -36,40 +34,49 @@ export function canPerm(item, perms = getPermissions()) {
 // =========================
 export function buildMenuFromPermissions(perms = getPermissions()) {
   const items = [
-    { label: "Dashboard", to: { name: "dashboard" }, icon: "🏠" },
+  { label: "Dashboard", to: { name: "dashboard" }, icon: "🏠" },
 
-    { section: "Operación" },
-    { label: "Caja", to: { name: "caja.dashboard" }, icon: "💰", perm: "movimientos_caja:ver" },
-    { label: "Ventas", to: { name: "caja.ventas" }, icon: "🧾", perm: "ventas:ver" },
-    { label: "Movimientos", to: { name: "caja.movimientos" }, icon: "📊", perm: "movimientos_caja:ver" },
-    { label: "Cuenta Corriente", to: { name: "caja.cuenta" }, icon: "📒", perm: "pagos:ver" },
+  { section: "Operación" },
+  { label: "Caja", to: { name: "caja.dashboard" }, icon: "💰", perm: "movimientos_caja:ver" },
+  { label: "Ventas", to: { name: "caja.ventas" }, icon: "🛒", perm: "ventas:ver" },
+  { label: "Movimientos", to: { name: "caja.movimientos" }, icon: "🔄", perm: "movimientos_caja:ver" },
+  { label: "Cuenta Corriente", to: { name: "caja.cuenta" }, icon: "📘", perm: "pagos:ver" },
 
-    { section: "Clientes" },
-    { label: "Clientes", to: { name: "clientes" }, icon: "👤", perm: "clientes:ver" },
+  { section: "Clientes" },
+  { label: "Clientes", to: { name: "clientes" }, icon: "👥", perm: "clientes:ver" },
 
-    { section: "Inventario" },
-    { label: "Productos", to: { name: "productos" }, icon: "📦", perm: "productos:ver" },
+  { section: "Inventario" },
+  { label: "Productos", to: { name: "productos" }, icon: "📦", perm: "productos:ver" },
 
-    // Compras / Proveedores (solo si hay permiso)
-    { section: "Compras", permAny: ["compras:ver", "proveedores:ver"] },
-    { label: "Compras", to: { name: "compras" }, icon: "🧾", perm: "compras:ver" },
-    { label: "Proveedores", to: { name: "compras.proveedores" }, icon: "🏭", perm: "proveedores:ver" },
-    {
-  label: "Reportes",
-  icon: "📊",
-  to: { name: "reportes" },
-  permission: "usuarios:ver",
-},
+  { section: "Compras" },
+  { label: "Compras", to: { name: "compras" }, icon: "🛍️", perm: "compras:ver" },
+  { label: "Proveedores", to: { name: "compras.proveedores" }, icon: "🚚", perm: "proveedores:ver" },
 
-    // Config (si puede ver/gestionar usuarios)
-    { section: "Configuración", permAny: ["usuarios:ver", "usuarios:gestionar"] },
-    { label: "Panel Config", to: { name: "configuracion" }, icon: "⚙️", permAny: ["usuarios:ver", "usuarios:gestionar"] },
-    { label: "Localidades", to: { name: "config-localidades" }, icon: "📍", perm: "usuarios:gestionar" },
-    { label: "Tipos de cliente", to: { name: "config-tipos-cliente" }, icon: "🏷️", perm: "usuarios:gestionar" },
-    { label: "Métodos de pago (Config)", to: { name: "config-metodos-pago" }, icon: "💳", perm: "usuarios:gestionar" },
-  ]
+  { section: "Reportes" },
+  { label: "Reportes", to: { name: "reportes" }, icon: "📈", perm: "usuarios:ver" },
 
-  return items.filter((it) => canPerm(it, perms))
+  { section: "Configuración" },
+  { label: "Panel Config", to: { name: "configuracion" }, icon: "⚙️", permAny: ["usuarios:ver", "usuarios:gestionar"] },
+  { label: "Localidades", to: { name: "config-localidades" }, icon: "📍", perm: "usuarios:gestionar" },
+  { label: "Tipos de cliente", to: { name: "config-tipos-cliente" }, icon: "🏷️", perm: "usuarios:gestionar" },
+  { label: "Métodos de pago (Config)", to: { name: "config-metodos-pago" }, icon: "💳", perm: "usuarios:gestionar" },
+]
+
+  const visible = items.filter((it) => canPerm(it, perms))
+
+  const cleaned = []
+  for (let i = 0; i < visible.length; i++) {
+    const item = visible[i]
+
+    if (item.section) {
+      const next = visible[i + 1]
+      if (next && !next.section) cleaned.push(item)
+    } else {
+      cleaned.push(item)
+    }
+  }
+
+  return cleaned
 }
 
 // =========================
@@ -78,10 +85,12 @@ export function buildMenuFromPermissions(perms = getPermissions()) {
 export function getRole() {
   return getSession()?.role || "CASHIER"
 }
+
 export function canAccess(item, role = getRole()) {
   if (!item?.roles || item.roles.length === 0) return true
   return item.roles.includes(role)
 }
+
 export function buildMenu(role = getRole()) {
   const items = [
     { label: "Dashboard", to: { name: "dashboard" }, icon: "🏠", roles: ["ADMIN", "CASHIER"] },

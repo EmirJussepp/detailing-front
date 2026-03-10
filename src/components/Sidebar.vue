@@ -42,7 +42,7 @@ const route = useRoute()
 
 const session = computed(() => getSession())
 const permissions = computed(() => session.value?.permissions || [])
-const role = computed(() => (isAdminFromPermissions(permissions.value) ? "ADMIN" : "EMPLEADO"))
+const role = computed(() => session.value?.role || "EMPLEADO")
 
 const shift = computed(() => session.value?.shift || null)
 const menu = computed(() => buildMenuFromPermissions(permissions.value))

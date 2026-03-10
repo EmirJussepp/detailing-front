@@ -152,7 +152,7 @@ async function fetchProductosOnce() {
   if (productosLoaded.value) return
   try {
     const { data } = await productosApi.list({ page: 0, size: 1000, search: "" })
-    const arr = unwrapPageAny(data)
+    const arr = unwrapPage(data).content
     const m = new Map()
     for (const p of arr) {
       const id = safeId(p?.productoId ?? p?.id)
@@ -165,6 +165,7 @@ async function fetchProductosOnce() {
     productosLoaded.value = true
   }
 }
+
 
 // =========================
 // Cache clientes (para mostrar nombre)
@@ -191,18 +192,7 @@ const clienteById = computed(() => {
   return m
 })
 
-async function fetchClientesOnce() {
-  if (clientesLoaded.value) return
-  try {
-    const { data } = await clientesApi.list({ page: 0, size: 500 })
-    const arr = unwrapPage(data).map(mapCliente)
-    clientes.value = arr
-  } catch {
-    clientes.value = []
-  } finally {
-    clientesLoaded.value = true
-  }
-}
+
 function clienteTxtById(clienteId) {
   const cid = safeId(clienteId)
   if (!cid) return "Mostrador"

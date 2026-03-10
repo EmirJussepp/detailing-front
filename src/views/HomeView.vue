@@ -45,14 +45,33 @@
           <div class="text-secondary small">Acciones frecuentes</div>
         </div>
 
-        <div class="d-flex flex-wrap gap-2 mt-3">
-          <RouterLink class="btn btn-sm btn-outline-light" to="/ventas">🧾 Nueva venta</RouterLink>
-          <RouterLink class="btn btn-sm btn-outline-light" to="/clientes">👤 Alta cliente</RouterLink>
-          <RouterLink class="btn btn-sm btn-outline-light" to="/productos">📦 Alta producto</RouterLink>
-          <RouterLink class="btn btn-sm btn-outline-light" to="/proveedores">🏢 Proveedores</RouterLink>
-          <RouterLink class="btn btn-sm btn-outline-light" to="/compras">🧾 Compras</RouterLink>
-          <RouterLink class="btn btn-sm btn-outline-light" to="/configuracion">⚙ Configuración</RouterLink>
-        </div>
+       <div class="d-flex flex-wrap gap-2 mt-3">
+
+  <RouterLink class="btn btn-sm btn-outline-light" to="/ventas">
+    <i class="bi bi-cart-check me-1"></i> Nueva venta
+  </RouterLink>
+
+  <RouterLink class="btn btn-sm btn-outline-light" to="/clientes">
+    <i class="bi bi-person-plus me-1"></i> Alta cliente
+  </RouterLink>
+
+  <RouterLink class="btn btn-sm btn-outline-light" to="/productos">
+    <i class="bi bi-box-seam me-1"></i> Alta producto
+  </RouterLink>
+
+  <RouterLink class="btn btn-sm btn-outline-light" to="/proveedores">
+    <i class="bi bi-truck me-1"></i> Proveedores
+  </RouterLink>
+
+  <RouterLink class="btn btn-sm btn-outline-light" to="/compras">
+    <i class="bi bi-bag-check me-1"></i> Compras
+  </RouterLink>
+
+  <RouterLink class="btn btn-sm btn-outline-light" to="/configuracion">
+    <i class="bi bi-gear me-1"></i> Configuración
+  </RouterLink>
+
+</div>
       </div>
     </div>
   </div>
