@@ -1,6 +1,5 @@
 <template>
   <div class="container py-4">
-    <!-- Header -->
     <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
       <div>
         <h2 class="mb-1">Proveedores</h2>
@@ -26,7 +25,6 @@
       </div>
     </div>
 
-    <!-- Filtros -->
     <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
         <div class="row g-2 align-items-center">
@@ -41,7 +39,6 @@
           <div class="col-12 col-md-3">
             <select v-model="sortBy" class="form-select bg-dark text-white border-secondary">
               <option value="displayName">Orden: Nombre</option>
-              <option value="updatedAt">Orden: Última edición</option>
               <option value="createdAt">Orden: Creación</option>
               <option value="saldoDesc">Orden: Saldo (mayor deuda)</option>
             </select>
@@ -59,7 +56,6 @@
     <div v-if="error" class="alert alert-danger py-2">{{ error }}</div>
     <div v-if="success" class="alert alert-success py-2">{{ success }}</div>
 
-    <!-- Tabla -->
     <div class="card bg-panel border-0 shadow-sm">
       <div class="table-responsive">
         <table class="table table-dark table-hover align-middle mb-0">
@@ -158,14 +154,16 @@
         </table>
       </div>
 
-      <div class="card-footer border-secondary d-flex flex-wrap justify-content-between align-items-center gap-2 text-secondary small">
+      <div
+        class="card-footer border-secondary d-flex flex-wrap justify-content-between align-items-center gap-2 text-secondary small"
+      >
         <div>
           Tip: el saldo es <b>compras</b> menos <b>pagos</b>. Si queda negativo, el proveedor te queda “a favor”.
         </div>
 
         <div class="d-flex align-items-center gap-2">
           <button class="btn btn-sm btn-outline-light" @click="prevPage" :disabled="loading || !canPrev">◀</button>
-          <span>Página <b>{{ page + 1 }}</b> / <b>{{ totalPages }}</b></span>
+          <span>Página <b>{{ page }}</b> / <b>{{ totalPages }}</b></span>
           <button class="btn btn-sm btn-outline-light" @click="nextPage" :disabled="loading || !canNext">▶</button>
 
           <select
@@ -181,7 +179,6 @@
       </div>
     </div>
 
-    <!-- MODAL: Crear/Editar Proveedor -->
     <div class="modal fade" id="proveedorModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content bg-dark border-secondary modal-round">
@@ -242,7 +239,12 @@
 
                 <div class="col-12 col-md-8">
                   <label class="form-label text-secondary">Nro doc.</label>
-                  <input v-model="form.documentoNro" class="form-control" inputmode="numeric" placeholder="Ej: 40111222" />
+                  <input
+                    v-model="form.documentoNro"
+                    class="form-control"
+                    inputmode="numeric"
+                    placeholder="Ej: 40111222"
+                  />
                 </div>
               </template>
 
@@ -306,7 +308,6 @@
       </div>
     </div>
 
-    <!-- MODAL: Registrar Pago -->
     <div class="modal fade" id="pagoModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content bg-dark border-secondary modal-round">
@@ -325,10 +326,6 @@
           </div>
 
           <div class="modal-body">
-            <div class="alert alert-warning py-2" v-if="!cajaAbierta?.cajaId">
-              No hay caja abierta para tu turno. Abrí caja antes de registrar pagos.
-            </div>
-
             <div v-if="pagoError" class="alert alert-danger py-2">{{ pagoError }}</div>
             <div v-if="pagoOk" class="alert alert-success py-2">{{ pagoOk }}</div>
 
@@ -338,7 +335,7 @@
                 <select v-model.number="pagoCompraId" class="form-select">
                   <option :value="null">Seleccionar compra pendiente...</option>
                   <option v-for="c in comprasPendientes" :key="c.compraId" :value="c.compraId">
-                    #{{ c.compraId }} · {{ (c.fecha || '').slice(0,10) }} · {{ formatMoney(c.total) }} · {{ c.estado }}
+                    #{{ c.compraId }} · {{ formatDate(c.fecha) }} · {{ formatMoney(c.total) }} · {{ c.estado }}
                   </option>
                 </select>
                 <div class="text-secondary small mt-1" v-if="!comprasPendientes.length">
@@ -370,7 +367,7 @@
                 <button
                   class="btn btn-primary btn-accent"
                   @click="registrarPago"
-                  :disabled="loading || !pagoCompraId || !pagoMetodoPagoId || !cajaAbierta?.cajaId"
+                  :disabled="loading || !pagoCompraId || !pagoMetodoPagoId"
                 >
                   Guardar pago
                 </button>
@@ -401,7 +398,7 @@
                 <tbody>
                   <tr v-for="pg in pagosCompra" :key="pg.pagoProveedorId || pg.id">
                     <td class="text-secondary">#{{ pg.pagoProveedorId || pg.id }}</td>
-                    <td class="text-secondary">{{ (pg.fecha || '').slice(0, 10) }}</td>
+                    <td class="text-secondary">{{ formatDate(pg.fecha) }}</td>
                     <td class="text-end fw-bold">$ {{ formatMoney(pg.monto) }}</td>
                     <td class="text-secondary">{{ pg.referencia || "—" }}</td>
                   </tr>
@@ -410,7 +407,7 @@
             </div>
 
             <div class="text-secondary small mt-3">
-              Nota: el pago se registra contra una compra (por diseño del backend).
+              Nota: el pago se registra contra una compra.
             </div>
           </div>
 
@@ -420,7 +417,6 @@
         </div>
       </div>
     </div>
-
   </div>
 </template>
 
@@ -429,14 +425,12 @@ import { proveedoresApi } from "../services/proveedoresApi"
 import { comprasApi } from "../services/comprasApi"
 import { pagosProveedorApi } from "../services/pagosProveedorApi"
 import { metodosPagoApi } from "../services/metodopagoService"
-import { cajaApi } from "../services/cajaApi"
-import { getSession } from "../auth/session"
 
 function unwrapPage(data) {
   if (Array.isArray(data)) {
     return {
       content: data,
-      page: 0,
+      page: 1,
       size: data.length || 10,
       totalElements: data.length,
       totalPages: 1,
@@ -446,15 +440,18 @@ function unwrapPage(data) {
   const content = data?.content ?? data?.items ?? data?.data ?? []
   return {
     content: Array.isArray(content) ? content : [],
-    page: Number(data?.page ?? data?.number ?? 0),
+    page: Number(data?.page ?? data?.number ?? 1),
     size: Number(data?.size ?? data?.pageSize ?? 10),
-    totalElements: Number(data?.totalElements ?? data?.total ?? (Array.isArray(content) ? content.length : 0)),
+    totalElements: Number(
+      data?.totalElements ?? data?.total ?? (Array.isArray(content) ? content.length : 0)
+    ),
     totalPages: Number(data?.totalPages ?? data?.pages ?? 1),
   }
 }
 
 export default {
   name: "ProveedoresView",
+
   data() {
     return {
       loading: false,
@@ -464,7 +461,7 @@ export default {
       sortBy: "displayName",
       includeInactive: false,
 
-      page: 0,
+      page: 1,
       size: 10,
       totalElements: 0,
       totalPages: 1,
@@ -501,9 +498,7 @@ export default {
       comprasPendientes: [],
       pagosCompra: [],
 
-      cajaAbierta: null,
       metodosPago: [],
-
       deudasMap: new Map(),
 
       _t: null,
@@ -525,19 +520,19 @@ export default {
 
       if (this.sortBy === "displayName") {
         arr.sort((a, b) => (a.displayName || "").localeCompare(b.displayName || "", "es"))
-      } else {
-        arr.sort((a, b) => String(b[this.sortBy] || "").localeCompare(String(a[this.sortBy] || "")))
+      } else if (this.sortBy === "createdAt") {
+        arr.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
       }
 
       return arr
     },
 
     canPrev() {
-      return this.page > 0
+      return this.page > 1
     },
 
     canNext() {
-      return this.page < this.totalPages - 1
+      return this.page < this.totalPages
     },
   },
 
@@ -545,12 +540,20 @@ export default {
     this.refresh()
   },
 
+  beforeUnmount() {
+    if (this._t) clearTimeout(this._t)
+  },
+
   watch: {
     q() {
       clearTimeout(this._t)
       this._t = setTimeout(() => {
-        this.page = 0
-      }, 250)
+        if (this.page !== 1) {
+          this.page = 1
+        } else {
+          this.refresh()
+        }
+      }, 300)
     },
 
     page() {
@@ -558,12 +561,17 @@ export default {
     },
 
     size() {
-      this.page = 0
+      if (this.page !== 1) {
+        this.page = 1
+      } else {
+        this.refresh()
+      }
     },
 
     async pagoCompraId(newId) {
       this.pagosCompra = []
       if (!newId) return
+
       try {
         const res = await pagosProveedorApi.porCompra(newId)
         const p = unwrapPage(res?.data)
@@ -578,6 +586,11 @@ export default {
     formatMoney(n) {
       const num = Number(n ?? 0)
       return num.toLocaleString("es-AR", { minimumFractionDigits: 0 })
+    },
+
+    formatDate(v) {
+      const s = String(v || "")
+      return s ? s.slice(0, 10) : "—"
     },
 
     onlyDigits(v) {
@@ -598,7 +611,16 @@ export default {
 
     toastSuccess(msg) {
       this.success = msg
-      setTimeout(() => (this.success = ""), 2200)
+      setTimeout(() => {
+        this.success = ""
+      }, 2200)
+    },
+
+    hideModal(id) {
+      const modalEl = document.getElementById(id)
+      if (!modalEl || !window.bootstrap?.Modal) return
+      const instance = window.bootstrap.Modal.getInstance(modalEl)
+      instance?.hide()
     },
 
     mapProveedorApiToVM(raw) {
@@ -611,7 +633,9 @@ export default {
       const razonSocial = raw?.razonSocial ?? ""
       const cuit = raw?.cuit ?? ""
 
-      const displayName = tipo === "EMPRESA" ? (razonSocial || "—") : `${nombre} ${apellido}`.trim() || "—"
+      const displayName =
+        tipo === "EMPRESA" ? (razonSocial || "—") : `${nombre} ${apellido}`.trim() || "—"
+
       const documentoLabel =
         tipo === "EMPRESA" ? (cuit ? `CUIT ${cuit}` : "CUIT —") : (dni ? `DNI ${dni}` : "DOC —")
 
@@ -637,14 +661,16 @@ export default {
         activo: raw?.activo !== false,
 
         createdAt: raw?.createdAt ?? "",
-        updatedAt: raw?.updatedAt ?? "",
       }
     },
 
     getSaldo(p) {
       const id = Number(p?.id ?? 0)
       const d = this.deudasMap.get(id)
-      if (!id || !d) return { deudaCompras: 0, pagosTotal: 0, saldo: 0 }
+
+      if (!id || !d) {
+        return { deudaCompras: 0, pagosTotal: 0, saldo: 0 }
+      }
 
       const deudaCompras = Number(d.deudaCompras ?? d.deuda ?? 0)
       const pagosTotal = Number(d.pagosTotal ?? d.pagos ?? 0)
@@ -656,27 +682,24 @@ export default {
     async refresh() {
       this.loading = true
       this.error = ""
-      try {
-        const session = getSession() ?? null
-        const userId = Number(session?.userId ?? 1)
 
-        const [provRes, deudasRes, cajaRes, mpRes] = await Promise.all([
+      try {
+        const [provRes, deudasRes, mpRes] = await Promise.all([
           proveedoresApi.list({
             page: this.page,
             size: this.size,
             search: this.q.trim() || null,
           }),
           proveedoresApi.deudas().catch(() => ({ data: [] })),
-          cajaApi.abierta({ userId }).catch(() => ({ data: null })),
           metodosPagoApi.list().catch(() => ({ data: [] })),
         ])
 
         const provPage = unwrapPage(provRes?.data)
         this.proveedores = provPage.content.map(this.mapProveedorApiToVM)
         this.totalElements = provPage.totalElements
-        this.totalPages = provPage.totalPages
-        this.page = provPage.page
-        this.size = provPage.size
+        this.totalPages = Math.max(1, provPage.totalPages || 1)
+        this.page = Math.max(1, provPage.page || 1)
+        this.size = provPage.size || this.size
 
         const deudas = deudasRes?.data ?? []
         this.deudasMap = new Map(
@@ -690,8 +713,6 @@ export default {
             },
           ])
         )
-
-        this.cajaAbierta = cajaRes?.data ?? null
 
         const mp = unwrapPage(mpRes?.data)
         this.metodosPago = (mp.content ?? []).map((m) => ({
@@ -760,6 +781,7 @@ export default {
       this.formError = ""
 
       const tipo = p.tipo === "EMPRESA" ? "EMPRESA" : "PERSONA"
+
       this.form = {
         tipo,
         nombre: p.nombre ?? "",
@@ -787,13 +809,17 @@ export default {
 
       const email = String(this.form.email || "").trim()
       if (email && !email.includes("@")) return "El email no tiene un formato válido."
+
       return ""
     },
 
     async saveProveedor() {
       this.formError = ""
       const err = this.validateForm()
-      if (err) return (this.formError = err)
+      if (err) {
+        this.formError = err
+        return
+      }
 
       this.loading = true
       try {
@@ -824,19 +850,15 @@ export default {
           const payload = {
             proveedorId: Number(this.editingId),
             tipoProveedor,
-
             nombre: safeNombre,
             apellido: tipoProveedor === "PERSONA" ? (this.form.apellido || "").trim() || null : null,
             dni: tipoProveedor === "PERSONA" ? this.onlyDigits(this.form.documentoNro) : null,
-
             razonSocial: tipoProveedor === "EMPRESA" ? (this.form.razonSocial || "").trim() : null,
             cuit: tipoProveedor === "EMPRESA" ? this.onlyDigits(this.form.cuit) : null,
-
             telefono: (this.form.telefono || "").trim() || null,
             email: (this.form.email || "").trim() || null,
             direccion: (this.form.direccion || "").trim() || null,
             notas: (this.form.notas || "").trim() || null,
-
             activo: !!this.form.activo,
           }
 
@@ -845,10 +867,7 @@ export default {
         }
 
         await this.refresh()
-
-        const modalEl = document.getElementById("proveedorModal")
-        const closeBtn = modalEl?.querySelector("[data-bs-dismiss='modal']")
-        closeBtn?.click()
+        this.hideModal("proveedorModal")
       } catch (e) {
         this.formError = e?.response?.data?.error || e?.message || "No se pudo guardar"
       } finally {
@@ -859,6 +878,7 @@ export default {
     async toggleActivo(p) {
       this.error = ""
       this.loading = true
+
       try {
         const tipoProveedor = p.tipo === "EMPRESA" ? "EMPRESA" : "PERSONA"
         const safeNombre =
@@ -869,19 +889,15 @@ export default {
         const payload = {
           proveedorId: Number(p.id),
           tipoProveedor,
-
           nombre: safeNombre,
           apellido: tipoProveedor === "PERSONA" ? (p.apellido || "").trim() || null : null,
           dni: tipoProveedor === "PERSONA" ? this.onlyDigits(p.documentoNro) : null,
-
           razonSocial: tipoProveedor === "EMPRESA" ? (p.razonSocial || "").trim() : null,
           cuit: tipoProveedor === "EMPRESA" ? this.onlyDigits(p.cuit) : null,
-
           telefono: (p.telefono || "").trim() || null,
           email: (p.email || "").trim() || null,
           direccion: (p.direccion || "").trim() || null,
           notas: (p.notas || "").trim() || null,
-
           activo: !p.activo,
         }
 
@@ -909,9 +925,9 @@ export default {
       this.loading = true
       try {
         const res = await comprasApi.list({
-          page: 0,
+          page: 1,
           size: 9999,
-          proveedorId: Number(p.id),
+          search: "",
         })
 
         const allPage = unwrapPage(res?.data)
@@ -944,26 +960,34 @@ export default {
       this.pagoError = ""
       this.pagoOk = ""
 
-      const p = this.pagoProveedor
-      if (!p?.id) return (this.pagoError = "Proveedor inválido")
-
-      const cajaId = Number(this.cajaAbierta?.cajaId ?? 0)
-      if (!cajaId) return (this.pagoError = "No hay caja abierta para tu turno.")
+      const proveedor = this.pagoProveedor
+      if (!proveedor?.id) {
+        this.pagoError = "Proveedor inválido"
+        return
+      }
 
       const compraId = Number(this.pagoCompraId || 0)
-      if (!compraId) return (this.pagoError = "Seleccioná una compra")
+      if (!compraId) {
+        this.pagoError = "Seleccioná una compra"
+        return
+      }
 
       const metodoPagoId = Number(this.pagoMetodoPagoId || 0)
-      if (!metodoPagoId) return (this.pagoError = "Seleccioná un método de pago")
+      if (!metodoPagoId) {
+        this.pagoError = "Seleccioná un método de pago"
+        return
+      }
 
       const monto = Number(String(this.pagoMonto || "").replace(/[^\d.]/g, "") || 0)
-      if (monto <= 0) return (this.pagoError = "Monto inválido")
+      if (monto <= 0) {
+        this.pagoError = "Monto inválido"
+        return
+      }
 
       this.loading = true
       try {
         const payload = {
           compraId,
-          cajaId,
           metodoPagoId,
           monto,
           referencia: (this.pagoNotas || "").trim() || null,
@@ -976,8 +1000,8 @@ export default {
         this.pagoNotas = ""
 
         const pagosRes = await pagosProveedorApi.porCompra(compraId)
-        const p = unwrapPage(pagosRes?.data)
-        this.pagosCompra = p.content ?? []
+        const pagosPage = unwrapPage(pagosRes?.data)
+        this.pagosCompra = pagosPage.content ?? []
 
         await this.refresh()
       } catch (e) {
@@ -991,11 +1015,25 @@ export default {
 </script>
 
 <style scoped>
-.bg-panel{ background: rgba(18, 22, 32, .92); }
-.modal-round{ border-radius: 14px; }
+.bg-panel {
+  background: rgba(18, 22, 32, .92);
+}
 
-.btn-accent { background: #7c3aed; border-color: #7c3aed; }
-.btn-accent:hover { filter: brightness(1.05); }
+.modal-round {
+  border-radius: 14px;
+}
 
-.table td, .table th { vertical-align: middle; }
+.btn-accent {
+  background: #7c3aed;
+  border-color: #7c3aed;
+}
+
+.btn-accent:hover {
+  filter: brightness(1.05);
+}
+
+.table td,
+.table th {
+  vertical-align: middle;
+}
 </style>

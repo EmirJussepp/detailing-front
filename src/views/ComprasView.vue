@@ -1,6 +1,5 @@
 <template>
   <div class="container py-4">
-    <!-- Header -->
     <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
       <div>
         <h2 class="mb-1">Compras</h2>
@@ -25,7 +24,6 @@
       </div>
     </div>
 
-    <!-- Filtros -->
     <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
         <div class="row g-2 align-items-center">
@@ -33,7 +31,7 @@
             <input
               v-model="q"
               class="form-control bg-dark text-white border-secondary"
-              placeholder="Buscar por proveedor o ID de compra…"
+              placeholder="Buscar por ID de compra o proveedor visible en la página…"
             />
           </div>
 
@@ -60,7 +58,6 @@
     <div v-if="error" class="alert alert-danger py-2">{{ error }}</div>
     <div v-if="success" class="alert alert-success py-2">{{ success }}</div>
 
-    <!-- Tabla -->
     <div class="card bg-panel border-0 shadow-sm">
       <div class="table-responsive">
         <table class="table table-dark table-hover align-middle mb-0">
@@ -91,7 +88,7 @@
               </td>
 
               <td class="text-secondary">
-                {{ (c.fecha || "").slice(0, 10) }}
+                {{ formatDate(c.fecha) }}
               </td>
 
               <td class="text-end fw-bold">
@@ -130,14 +127,16 @@
         </table>
       </div>
 
-      <div class="card-footer border-secondary d-flex flex-wrap justify-content-between align-items-center gap-2 text-secondary small">
+      <div
+        class="card-footer border-secondary d-flex flex-wrap justify-content-between align-items-center gap-2 text-secondary small"
+      >
         <div>
           Tip: desde acá podés <b>crear compras</b>, consultar el <b>detalle</b> y registrar <b>pagos</b>.
         </div>
 
         <div class="d-flex align-items-center gap-2">
           <button class="btn btn-sm btn-outline-light" @click="prevPage" :disabled="loading || !canPrev">◀</button>
-          <span>Página <b>{{ page + 1 }}</b> / <b>{{ totalPages }}</b></span>
+          <span>Página <b>{{ page }}</b> / <b>{{ totalPages }}</b></span>
           <button class="btn btn-sm btn-outline-light" @click="nextPage" :disabled="loading || !canNext">▶</button>
 
           <select
@@ -153,7 +152,6 @@
       </div>
     </div>
 
-    <!-- MODAL: Nueva compra -->
     <div class="modal fade" id="compraModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content bg-dark border-secondary modal-round">
@@ -194,7 +192,7 @@
                 <label class="form-label text-secondary">Producto</label>
                 <select v-model.number="itemDraft.productoId" class="form-select">
                   <option :value="null">Seleccionar...</option>
-                  <option v-for="p in productos" :key="p.productoId" :value="p.productoId">
+                  <option v-for="p in productos" :key="p.productoId || p.id" :value="Number(p.productoId ?? p.id)">
                     {{ p.nombre }}
                   </option>
                 </select>
@@ -237,7 +235,7 @@
                     <td>{{ productoName(d.productoId) }}</td>
                     <td>{{ d.cantidad }}</td>
                     <td class="text-end">{{ formatMoney(d.precioUnitario) }}</td>
-                    <td class="text-end">{{ formatMoney(d.cantidad * d.precioUnitario) }}</td>
+                    <td class="text-end">{{ formatMoney(Number(d.cantidad) * Number(d.precioUnitario)) }}</td>
                     <td class="text-end">
                       <button class="btn btn-sm btn-outline-danger" @click="removeItem(idx)">X</button>
                     </td>
@@ -261,7 +259,6 @@
       </div>
     </div>
 
-    <!-- MODAL: Detalle -->
     <div class="modal fade" id="detalleModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content bg-dark border-secondary modal-round">
@@ -276,7 +273,7 @@
                 <div class="text-secondary">
                   <div><b>#{{ detalle.compra.compraId }}</b></div>
                   <div>{{ proveedorName(detalle.compra.proveedorId) }}</div>
-                  <div>{{ (detalle.compra.fecha || "").slice(0, 10) }}</div>
+                  <div>{{ formatDate(detalle.compra.fecha) }}</div>
                 </div>
 
                 <div class="text-end">
@@ -303,7 +300,7 @@
                       <td>{{ productoName(d.productoId) }}</td>
                       <td>{{ d.cantidad }}</td>
                       <td class="text-end">{{ formatMoney(d.precioUnitario) }}</td>
-                      <td class="text-end">{{ formatMoney(d.cantidad * d.precioUnitario) }}</td>
+                      <td class="text-end">{{ formatMoney(Number(d.cantidad) * Number(d.precioUnitario)) }}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -325,7 +322,7 @@
                   <tbody>
                     <tr v-for="p in pagosDetalle" :key="p.pagoProveedorId || p.id">
                       <td class="text-secondary">#{{ p.pagoProveedorId || p.id }}</td>
-                      <td class="text-secondary">{{ (p.fecha || "").slice(0, 10) }}</td>
+                      <td class="text-secondary">{{ formatDate(p.fecha) }}</td>
                       <td class="text-end fw-bold">{{ formatMoney(p.monto) }}</td>
                       <td class="text-secondary">{{ p.referencia || "—" }}</td>
                     </tr>
@@ -345,7 +342,6 @@
       </div>
     </div>
 
-    <!-- MODAL: Pago -->
     <div class="modal fade" id="pagoModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content bg-dark border-secondary modal-round">
@@ -357,10 +353,6 @@
           <div class="modal-body">
             <div class="text-secondary small mb-2">
               Compra: <b>#{{ pagoForm.compraId }}</b>
-            </div>
-
-            <div class="alert alert-warning py-2" v-if="!cajaAbierta?.cajaId">
-              No hay caja abierta para tu turno. Abrí caja antes de registrar pagos.
             </div>
 
             <label class="form-label text-secondary">Monto</label>
@@ -380,7 +372,7 @@
 
           <div class="modal-footer border-secondary">
             <button class="btn btn-outline-light" data-bs-dismiss="modal">Cancelar</button>
-            <button class="btn btn-primary btn-accent" :disabled="loading || !cajaAbierta?.cajaId" @click="registrarPago">
+            <button class="btn btn-primary btn-accent" :disabled="loading" @click="registrarPago">
               {{ loading ? "Procesando..." : "Registrar pago" }}
             </button>
           </div>
@@ -395,26 +387,36 @@ import { comprasApi } from "../services/comprasApi"
 import { pagosProveedorApi } from "../services/pagosProveedorApi"
 import { proveedoresApi } from "../services/proveedoresApi"
 import { productosApi } from "../services/productosApi"
-import { cajaApi } from "../services/cajaApi"
 import { metodosPagoApi } from "../services/metodopagoService"
 import { getSession } from "../auth/session"
 
 function unwrapPage(data) {
   if (Array.isArray(data)) {
-    return { content: data, page: 0, size: data.length, totalElements: data.length, totalPages: 1 }
+    return {
+      content: data,
+      page: 1,
+      size: data.length || 10,
+      totalElements: data.length,
+      totalPages: 1,
+    }
   }
+
   const content = data?.content ?? data?.items ?? data?.data ?? []
+
   return {
     content: Array.isArray(content) ? content : [],
-    page: Number(data?.page ?? data?.number ?? 0),
+    page: Number(data?.page ?? data?.number ?? 1),
     size: Number(data?.size ?? data?.pageSize ?? 10),
-    totalElements: Number(data?.totalElements ?? data?.total ?? (Array.isArray(content) ? content.length : 0)),
+    totalElements: Number(
+      data?.totalElements ?? data?.total ?? (Array.isArray(content) ? content.length : 0)
+    ),
     totalPages: Number(data?.totalPages ?? data?.pages ?? 1),
   }
 }
 
 export default {
   name: "ComprasView",
+
   data() {
     return {
       loading: false,
@@ -424,7 +426,7 @@ export default {
       q: "",
       sortBy: "fechaDesc",
 
-      page: 0,
+      page: 1,
       size: 10,
       totalElements: 0,
       totalPages: 1,
@@ -432,8 +434,6 @@ export default {
       proveedores: [],
       productos: [],
       compras: [],
-
-      cajaAbierta: null,
       metodosPago: [],
 
       form: {
@@ -441,12 +441,22 @@ export default {
         fecha: new Date().toISOString().slice(0, 10),
         detalles: [],
       },
-      itemDraft: { productoId: null, cantidad: 1, precioUnitario: 0 },
+
+      itemDraft: {
+        productoId: null,
+        cantidad: 1,
+        precioUnitario: 0,
+      },
 
       detalle: null,
       pagosDetalle: [],
 
-      pagoForm: { compraId: null, monto: 0, metodoPagoId: null, referencia: "" },
+      pagoForm: {
+        compraId: null,
+        monto: 0,
+        metodoPagoId: null,
+        referencia: "",
+      },
 
       _t: null,
     }
@@ -454,10 +464,9 @@ export default {
 
   computed: {
     totalDraft() {
-      return (this.form.detalles || []).reduce(
-        (acc, d) => acc + Number(d.cantidad) * Number(d.precioUnitario),
-        0
-      )
+      return (this.form.detalles || []).reduce((acc, d) => {
+        return acc + Number(d.cantidad || 0) * Number(d.precioUnitario || 0)
+      }, 0)
     },
 
     comprasFiltradas() {
@@ -499,11 +508,11 @@ export default {
     },
 
     canPrev() {
-      return this.page > 0
+      return this.page > 1
     },
 
     canNext() {
-      return this.page < this.totalPages - 1
+      return this.page < this.totalPages
     },
   },
 
@@ -511,25 +520,47 @@ export default {
     this.refreshAll()
   },
 
+  beforeUnmount() {
+    if (this._t) clearTimeout(this._t)
+  },
+
   watch: {
     q() {
       clearTimeout(this._t)
       this._t = setTimeout(() => {
-        this.page = 0
-      }, 250)
+        if (this.page !== 1) {
+          this.page = 1
+        } else {
+          this.refreshCompras()
+        }
+      }, 300)
     },
+
     page() {
       this.refreshCompras()
     },
+
     size() {
-      this.page = 0
+      if (this.page !== 1) {
+        this.page = 1
+      } else {
+        this.refreshCompras()
+      }
     },
   },
 
   methods: {
     formatMoney(n) {
       const num = Number(n ?? 0)
-      return num.toLocaleString("es-AR", { style: "currency", currency: "ARS" })
+      return num.toLocaleString("es-AR", {
+        style: "currency",
+        currency: "ARS",
+      })
+    },
+
+    formatDate(value) {
+      const s = String(value || "")
+      return s ? s.slice(0, 10) : "—"
     },
 
     estadoBadgeClass(estado) {
@@ -542,7 +573,9 @@ export default {
 
     toastSuccess(msg) {
       this.success = msg
-      setTimeout(() => (this.success = ""), 2200)
+      setTimeout(() => {
+        this.success = ""
+      }, 2200)
     },
 
     productoName(id) {
@@ -560,8 +593,7 @@ export default {
 
     mapProveedorApiToVM(raw) {
       const proveedorId = Number(raw?.proveedorId ?? raw?.id ?? 0)
-      const tipo =
-        (raw?.tipoProveedor ?? raw?.tipo ?? "PERSONA") === "EMPRESA" ? "EMPRESA" : "PERSONA"
+      const tipo = (raw?.tipoProveedor ?? raw?.tipo ?? "PERSONA") === "EMPRESA" ? "EMPRESA" : "PERSONA"
 
       const nombre = raw?.nombre ?? ""
       const apellido = raw?.apellido ?? ""
@@ -570,11 +602,16 @@ export default {
       const displayName =
         tipo === "EMPRESA" ? (razonSocial || "—") : `${nombre} ${apellido}`.trim() || "—"
 
-      return { proveedorId, tipo, displayName }
+      return {
+        proveedorId,
+        tipo,
+        displayName,
+      }
     },
 
     mapCompraApiToVM(raw) {
       const c = raw?.compra ?? raw ?? {}
+
       return {
         compraId: Number(c?.compraId ?? c?.id ?? 0),
         proveedorId: Number(c?.proveedorId ?? 0),
@@ -584,58 +621,62 @@ export default {
       }
     },
 
-    async refreshAll() {
-      this.loading = true
-      this.error = ""
-      try {
-        const session = getSession() ?? null
-        const userId = Number(session?.userId ?? 1)
-
-        const [provRes, prodRes, cajaRes, mpRes] = await Promise.all([
-          proveedoresApi.list(),
-          productosApi.list({ page: 0, size: 9999 }).catch(() => ({ data: [] })),
-          cajaApi.abierta({ userId }).catch(() => ({ data: null })),
-          metodosPagoApi.list().catch(() => ({ data: [] })),
-        ])
-
-        const provPage = unwrapPage(provRes?.data)
-        this.proveedores = provPage.content.map(this.mapProveedorApiToVM)
-
-        const prodPage = unwrapPage(prodRes?.data)
-        this.productos = prodPage.content ?? prodRes?.data ?? []
-
-        this.cajaAbierta = cajaRes?.data ?? null
-
-        const mpPage = unwrapPage(mpRes?.data)
-        this.metodosPago = (mpPage.content ?? mpRes?.data ?? []).map((m) => ({
-          metodoPagoId: Number(m?.metodoPagoId ?? m?.id ?? 0),
-          nombre: m?.nombre ?? m?.descripcion ?? "—",
-        }))
-
-        await this.refreshCompras()
-      } catch (e) {
-        this.error = e?.response?.data?.error || e?.message || "Error cargando compras"
-      } finally {
-        this.loading = false
-      }
+    hideModal(id) {
+      const modalEl = document.getElementById(id)
+      if (!modalEl || !window.bootstrap?.Modal) return
+      const instance = window.bootstrap.Modal.getInstance(modalEl)
+      instance?.hide()
     },
+
+   async refreshAll() {
+  this.loading = true
+  this.error = ""
+
+  try {
+    const [provRes, prodRes, mpRes] = await Promise.all([
+      proveedoresApi.list({ page: 1, size: 9999, search: "" }).catch(() => ({ data: [] })),
+      productosApi.list({ page: 1, size: 9999 }).catch(() => ({ data: [] })),
+      metodosPagoApi.list().catch(() => ({ data: [] })),
+    ])
+
+    const provPage = unwrapPage(provRes?.data)
+    this.proveedores = provPage.content.map(this.mapProveedorApiToVM)
+
+    const prodPage = unwrapPage(prodRes?.data)
+    this.productos = Array.isArray(prodPage.content) ? prodPage.content : (prodRes?.data ?? [])
+
+    const mpPage = unwrapPage(mpRes?.data)
+    this.metodosPago = (mpPage.content ?? mpRes?.data ?? []).map((m) => ({
+      metodoPagoId: Number(m?.metodoPagoId ?? m?.id ?? 0),
+      nombre: m?.nombre ?? m?.descripcion ?? "—",
+    }))
+
+    await this.refreshCompras()
+  } catch (e) {
+    this.error = e?.response?.data?.error || e?.message || "Error cargando compras"
+  } finally {
+    this.loading = false
+  }
+},
 
     async refreshCompras() {
       this.loading = true
       this.error = ""
+
       try {
         const res = await comprasApi.list({
           page: this.page,
           size: this.size,
-          search: this.q.trim() || null,
+          search: this.q.trim() || "",
         })
 
         const p = unwrapPage(res?.data)
+
         this.compras = p.content.map(this.mapCompraApiToVM)
         this.totalElements = p.totalElements
-        this.totalPages = p.totalPages
-        this.page = p.page
-        this.size = p.size
+        this.totalPages = Math.max(1, Number(p.totalPages || 1))
+        this.page = Math.max(1, Number(p.page || 1))
+        this.size = Number(p.size || this.size)
       } catch (e) {
         this.compras = []
         this.totalElements = 0
@@ -663,21 +704,46 @@ export default {
         fecha: new Date().toISOString().slice(0, 10),
         detalles: [],
       }
-      this.itemDraft = { productoId: null, cantidad: 1, precioUnitario: 0 }
+      this.itemDraft = {
+        productoId: null,
+        cantidad: 1,
+        precioUnitario: 0,
+      }
     },
 
     addItem() {
       this.error = ""
+
       const productoId = Number(this.itemDraft.productoId || 0)
       const cantidad = Number(this.itemDraft.cantidad || 0)
       const precioUnitario = Number(this.itemDraft.precioUnitario || 0)
 
-      if (!productoId) return (this.error = "Elegí un producto")
-      if (cantidad <= 0) return (this.error = "Cantidad inválida")
-      if (precioUnitario < 0) return (this.error = "Precio inválido")
+      if (!productoId) {
+        this.error = "Elegí un producto"
+        return
+      }
 
-      this.form.detalles.push({ productoId, cantidad, precioUnitario })
-      this.itemDraft = { productoId: null, cantidad: 1, precioUnitario: 0 }
+      if (cantidad <= 0) {
+        this.error = "Cantidad inválida"
+        return
+      }
+
+      if (precioUnitario < 0) {
+        this.error = "Precio inválido"
+        return
+      }
+
+      this.form.detalles.push({
+        productoId,
+        cantidad,
+        precioUnitario,
+      })
+
+      this.itemDraft = {
+        productoId: null,
+        cantidad: 1,
+        precioUnitario: 0,
+      }
     },
 
     removeItem(idx) {
@@ -687,6 +753,7 @@ export default {
     async crearCompra() {
       this.loading = true
       this.error = ""
+
       try {
         const session = getSession() ?? null
         const userId = Number(session?.userId ?? 1)
@@ -699,17 +766,19 @@ export default {
           proveedorId: Number(this.form.proveedorId),
           fecha: this.form.fecha,
           detalles: this.form.detalles.map((d) => ({
-            productoId: d.productoId,
-            cantidad: d.cantidad,
-            precioUnitario: d.precioUnitario,
+            productoId: Number(d.productoId),
+            cantidad: Number(d.cantidad),
+            precioUnitario: Number(d.precioUnitario),
           })),
         }
 
         await comprasApi.create(payload)
-        this.toastSuccess("Compra creada ✅")
 
-        this.page = 0
+        this.toastSuccess("Compra creada ✅")
+        this.prepareCreate()
+        this.page = 1
         await this.refreshCompras()
+        this.hideModal("compraModal")
       } catch (e) {
         this.error = e?.response?.data?.error || e?.message || "Error creando compra"
       } finally {
@@ -722,16 +791,26 @@ export default {
       this.pagosDetalle = []
       this.loading = true
       this.error = ""
+
       try {
         const [cRes, pRes] = await Promise.all([
           comprasApi.porId(compraId),
           pagosProveedorApi.porCompra(compraId),
         ])
 
-        this.detalle = cRes?.data ?? null
+        const detalleData = cRes?.data ?? null
+
+        this.detalle = detalleData?.compra
+          ? detalleData
+          : detalleData
+            ? {
+                compra: detalleData,
+                detalles: Array.isArray(detalleData.detalles) ? detalleData.detalles : [],
+              }
+            : null
 
         const pagosPage = unwrapPage(pRes?.data)
-        this.pagosDetalle = pagosPage.content ?? pRes?.data ?? []
+        this.pagosDetalle = Array.isArray(pagosPage.content) ? pagosPage.content : []
       } catch (e) {
         this.error = e?.response?.data?.error || e?.message || "Error cargando detalle"
       } finally {
@@ -741,16 +820,19 @@ export default {
 
     preparePago(compraId) {
       this.error = ""
-      this.pagoForm = { compraId, monto: 0, metodoPagoId: null, referencia: "" }
+      this.pagoForm = {
+        compraId,
+        monto: 0,
+        metodoPagoId: null,
+        referencia: "",
+      }
     },
 
     async registrarPago() {
       this.loading = true
       this.error = ""
-      try {
-        const cajaId = Number(this.cajaAbierta?.cajaId ?? 0)
-        if (!cajaId) throw new Error("No hay caja abierta para tu turno. Abrí caja antes de pagar.")
 
+      try {
         const compraId = Number(this.pagoForm.compraId || 0)
         const monto = Number(this.pagoForm.monto || 0)
         const metodoPagoId = Number(this.pagoForm.metodoPagoId || 0)
@@ -761,20 +843,21 @@ export default {
 
         const payload = {
           compraId,
-          cajaId,
           metodoPagoId,
           monto,
           referencia: (this.pagoForm.referencia || "").trim() || null,
         }
 
         await pagosProveedorApi.create(payload)
-        this.toastSuccess("Pago registrado ✅")
 
+        this.toastSuccess("Pago registrado ✅")
         await this.refreshCompras()
 
         if (this.detalle?.compra?.compraId === compraId) {
           await this.openDetalle(compraId)
         }
+
+        this.hideModal("pagoModal")
       } catch (e) {
         this.error = e?.response?.data?.error || e?.message || "Error registrando pago"
       } finally {
@@ -786,11 +869,25 @@ export default {
 </script>
 
 <style scoped>
-.bg-panel { background: rgba(18, 22, 32, .92); }
-.modal-round { border-radius: 14px; }
+.bg-panel {
+  background: rgba(18, 22, 32, .92);
+}
 
-.btn-accent { background: #7c3aed; border-color: #7c3aed; }
-.btn-accent:hover { filter: brightness(1.05); }
+.modal-round {
+  border-radius: 14px;
+}
 
-.table td, .table th { vertical-align: middle; }
+.btn-accent {
+  background: #7c3aed;
+  border-color: #7c3aed;
+}
+
+.btn-accent:hover {
+  filter: brightness(1.05);
+}
+
+.table td,
+.table th {
+  vertical-align: middle;
+}
 </style>

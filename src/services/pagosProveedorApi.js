@@ -7,7 +7,6 @@ export const pagosProveedorApi = {
   porCompra(compraId) {
     return http.get(`/pagos-proveedor/compra/${compraId}`)
   },
-  // si agregaste GET /pagos-proveedor
   list() {
     return http.get("/pagos-proveedor")
   },
