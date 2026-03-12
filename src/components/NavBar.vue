@@ -1,9 +1,8 @@
 <script setup>
 import { computed, ref, onMounted, watch, onBeforeUnmount } from "vue"
-import { getTurnoOperativo } from "../ui/turnoOperativo"
 import { useRouter } from "vue-router"
 import { clearSession, getSession } from "../auth/session"
-
+import { getTurnoOperativo, turnoLabel } from "../ui/turnoOperativo"
 import { cajaApi } from "../services/cajaApi"
 
 const props = defineProps({
@@ -13,10 +12,14 @@ const props = defineProps({
 const emit = defineEmits(["toggle-sidebar"])
 
 const router = useRouter()
-const session = computed(() => getSession())
-const turno = getTurnoOperativo()
+const session = computed(() => getSession() ?? null)
 
-const isAdmin = computed(() => session.value?.role === "ADMIN")
+function roleLabel(role) {
+  const raw = String(role || "").toUpperCase()
+  if (raw === "ADMIN") return "ADMIN"
+  if (raw === "CAJERO") return "CAJERO"
+  return "EMPLEADO"
+}
 
 function logout() {
   clearSession()
@@ -27,50 +30,41 @@ function toggleSidebar() {
   emit("toggle-sidebar")
 }
 
-// -------- helpers turno --------
-function turnoBE(t) {
-  const s = String(t ?? "").toUpperCase()
-  if (s === "MAÑANA" || s === "MANIANA") return "MANIANA"
-  return "TARDE"
-}
-function todayISO() {
-  const d = new Date()
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, "0")
-  const day = String(d.getDate()).padStart(2, "0")
-  return `${y}-${m}-${day}`
-}
-
-// -------- Caja status global --------
-const cajaStatus = ref("SIN_CAJA") // ABIERTA | CERRADA | SIN_CAJA
-const cajaId = ref(null)
+const turnoActual = ref(getTurnoOperativo())
+const cajaStatus = ref("SIN_CAJA")
 
 async function fetchCajaStatus() {
   try {
-    const turno = getTurnoOperativo()
-
-    const { data } = await cajaApi.abierta({
-      turno,
-    })
+    const { data } = await cajaApi.abierta({ turno: turnoActual.value })
 
     if (!data) {
       cajaStatus.value = "SIN_CAJA"
-      cajaId.value = null
       return
     }
 
-    cajaId.value = data.cajaId ?? data.id ?? null
-    const estado = String(data.estado || "").toUpperCase()
+    const estado = String(data.estado || "ABIERTA").toUpperCase()
 
     if (estado === "ABIERTA") cajaStatus.value = "ABIERTA"
     else if (estado === "CERRADA") cajaStatus.value = "CERRADA"
     else cajaStatus.value = "SIN_CAJA"
-
   } catch {
     cajaStatus.value = "SIN_CAJA"
-    cajaId.value = null
   }
 }
+
+const turnoActualLabel = computed(() => turnoLabel(turnoActual.value))
+
+const cajaStatusText = computed(() => {
+  if (cajaStatus.value === "ABIERTA") return "Caja abierta"
+  if (cajaStatus.value === "CERRADA") return "Caja cerrada"
+  return "Sin caja"
+})
+
+const cajaStatusClass = computed(() => {
+  if (cajaStatus.value === "ABIERTA") return "pill--success"
+  if (cajaStatus.value === "CERRADA") return "pill--danger"
+  return "pill--warn"
+})
 
 function goCaja() {
   router.push({ name: "caja.dashboard" })
@@ -80,18 +74,24 @@ function onCajaChanged() {
   fetchCajaStatus()
 }
 
+function onTurnoChanged(event) {
+  turnoActual.value = event?.detail?.turno || getTurnoOperativo()
+  fetchCajaStatus()
+}
+
 onMounted(() => {
   fetchCajaStatus()
   window.addEventListener("caja:changed", onCajaChanged)
+  window.addEventListener("turno:changed", onTurnoChanged)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener("caja:changed", onCajaChanged)
+  window.removeEventListener("turno:changed", onTurnoChanged)
 })
 
-// si cambia turno o usuario, refresco
 watch(
-  () => [session.value?.shift, session.value?.userId],
+  () => session.value?.userId,
   () => fetchCajaStatus()
 )
 </script>
@@ -99,8 +99,12 @@ watch(
 <template>
   <nav class="topbar">
     <div class="topbar__left">
-      <!-- hamburger solo mobile -->
-      <button class="iconbtn topbar__hamb" type="button" @click="toggleSidebar" aria-label="Menu">
+      <button
+        class="iconbtn topbar__hamb"
+        type="button"
+        @click="toggleSidebar"
+        aria-label="Menú"
+      >
         ☰
       </button>
 
@@ -109,22 +113,21 @@ watch(
       </button>
 
       <span class="pill pill--soft" v-if="session?.role">
-        {{ session.role }}<span v-if="session?.role !== 'ADMIN' && session?.shift"> • {{ session.shift }}</span>
+        {{ roleLabel(session.role) }}
       </span>
 
       <button
         class="pill pill--status"
+        :class="cajaStatusClass"
         type="button"
-        @click="(cajaStatus !== 'ABIERTA') && goCaja()"
-        :title="cajaStatus === 'ABIERTA' ? 'Caja abierta' : 'Ir a Caja para abrir/cerrar'"
+        @click="goCaja"
+        :title="cajaStatusText"
       >
-        <span v-if="cajaStatus === 'ABIERTA'">🟢 CAJA ABIERTA</span>
-        <span v-else-if="cajaStatus === 'CERRADA'">🔴 CAJA CERRADA</span>
-        <span v-else>⚠️ SIN CAJA</span>
-        <span v-if="cajaId"> • #{{ cajaId }}</span>
+        <span class="status-dot" :class="cajaStatusClass"></span>
+        <span>{{ cajaStatusText }}</span>
+        <span class="sep">·</span>
+        <span>Turno {{ turnoActualLabel }}</span>
       </button>
-
-      <span class="hint" v-if="isAdmin">ADMIN</span>
     </div>
 
     <div class="topbar__right">
@@ -134,92 +137,169 @@ watch(
 </template>
 
 <style scoped>
-.topbar{
+.topbar {
   height: 56px;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding: 0 12px;
-  background: #0b0b10;
-  border-bottom: 1px solid rgba(255,255,255,.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  background: rgba(11, 11, 16, 0.96);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
 }
 
-.topbar__left{
-  display:flex;
-  align-items:center;
+.topbar__left {
+  display: flex;
+  align-items: center;
   gap: 10px;
   min-width: 0;
 }
 
-.brand{
+.topbar__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand {
   border: none;
   background: transparent;
-  color: rgba(255,255,255,.92);
-  font-weight: 800;
-  letter-spacing: .2px;
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 900;
+  letter-spacing: 0.2px;
   padding: 6px 8px;
   border-radius: 10px;
-  cursor:pointer;
+  cursor: pointer;
+  white-space: nowrap;
 }
-.brand:hover{ background: rgba(255,255,255,.06); }
 
-.iconbtn{
-  border:none;
+.brand:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.iconbtn {
+  border: none;
   background: transparent;
-  color: rgba(255,255,255,.9);
+  color: rgba(255, 255, 255, 0.92);
   font-size: 18px;
   padding: 6px 10px;
   border-radius: 10px;
-  cursor:pointer;
+  cursor: pointer;
 }
-.iconbtn:hover{ background: rgba(255,255,255,.06); }
 
-/* pills */
-.pill{
-  border: 1px solid rgba(255,255,255,.14);
-  background: rgba(255,255,255,.04);
-  color: rgba(255,255,255,.9);
-  padding: 6px 10px;
+.iconbtn:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.92);
+  padding: 6px 12px;
   border-radius: 999px;
   font-size: 12px;
   white-space: nowrap;
 }
-.pill--soft{
-  border-color: rgba(202,166,255,.20);
-}
-.pill--status{
-  border-color: rgba(202,166,255,.25);
-}
-.pill--status:hover{
-  background: rgba(202,166,255,.10);
+
+.pill--soft {
+  border-color: rgba(202, 166, 255, 0.22);
+  background: rgba(202, 166, 255, 0.06);
 }
 
-.hint{
-  font-size: 11px;
-  opacity: .65;
+.pill--status {
+  cursor: pointer;
+  transition: 0.18s ease;
 }
 
-.btnlogout{
-  border: 1px solid rgba(202,166,255,.35);
+.pill--status:hover {
+  transform: translateY(-1px);
+}
+
+.pill--success {
+  border-color: rgba(39, 209, 127, 0.24);
+  background: rgba(39, 209, 127, 0.08);
+}
+
+.pill--danger {
+  border-color: rgba(255, 107, 107, 0.22);
+  background: rgba(255, 107, 107, 0.08);
+}
+
+.pill--warn {
+  border-color: rgba(255, 193, 7, 0.24);
+  background: rgba(255, 193, 7, 0.08);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.status-dot.pill--success {
+  background: #27d17f;
+  box-shadow: 0 0 0 4px rgba(39, 209, 127, 0.12);
+}
+
+.status-dot.pill--danger {
+  background: #ff6b6b;
+  box-shadow: 0 0 0 4px rgba(255, 107, 107, 0.10);
+}
+
+.status-dot.pill--warn {
+  background: #ffc107;
+  box-shadow: 0 0 0 4px rgba(255, 193, 7, 0.10);
+}
+
+.sep {
+  opacity: 0.45;
+}
+
+.btnlogout {
+  border: 1px solid rgba(202, 166, 255, 0.35);
   background: transparent;
-  color: rgba(255,255,255,.9);
+  color: rgba(255, 255, 255, 0.92);
   padding: 8px 12px;
   border-radius: 12px;
   cursor: pointer;
-}
-.btnlogout:hover{
-  background: rgba(202,166,255,.12);
+  transition: 0.18s ease;
 }
 
-/* mobile tweaks */
-.topbar__hamb{ display:none; }
-
-@media (max-width: 991.98px){
-  .topbar__hamb{ display:inline-flex; }
-  .pill--soft{ display:none; }     /* deja respirar */
-  .hint{ display:none; }
+.btnlogout:hover {
+  background: rgba(202, 166, 255, 0.12);
 }
-@media (max-width: 520px){
-  .pill--status{ display:none; }   /* en muy chico, fuera */
+
+.topbar__hamb {
+  display: none;
+}
+
+@media (max-width: 991.98px) {
+  .topbar__hamb {
+    display: inline-flex;
+  }
+
+  .pill--soft {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .pill--status {
+    display: none;
+  }
+
+  .topbar {
+    padding: 0 10px;
+  }
+
+  .brand {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 </style>

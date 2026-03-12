@@ -63,9 +63,7 @@ export function buildMenuFromPermissions(perms = getPermissions()) {
 
     { section: "Configuración" },
     { label: "Panel Config", to: { name: "configuracion" }, icon: "⚙️", permAny: ["usuarios:ver", "usuarios:gestionar"] },
-    { label: "Localidades", to: { name: "config-localidades" }, icon: "📍", perm: "usuarios:gestionar" },
-    { label: "Tipos de cliente", to: { name: "config-tipos-cliente" }, icon: "🏷️", perm: "usuarios:gestionar" },
-    { label: "Métodos de pago (Config)", to: { name: "config-metodos-pago" }, icon: "💳", perm: "usuarios:gestionar" },
+    
   ]
 
   const visible = items.filter((it) => canPerm(it, perms))
@@ -123,7 +121,6 @@ export function buildMenu(role = getRole()) {
     { section: "Configuración", roles: ["ADMIN"] },
     { label: "Panel Config", to: { name: "configuracion" }, icon: "⚙️", roles: ["ADMIN"] },
     { label: "Localidades", to: { name: "config-localidades" }, icon: "📍", roles: ["ADMIN"] },
-    { label: "Tipos de cliente", to: { name: "config-tipos-cliente" }, icon: "🏷️", roles: ["ADMIN"] },
     { label: "Métodos de pago (Config)", to: { name: "config-metodos-pago" }, icon: "💳", roles: ["ADMIN"] },
   ]
 

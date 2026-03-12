@@ -14,11 +14,14 @@ const router = useRouter()
 // =========================
 function formatMoney(n) {
   const num = Number(n ?? 0)
-  return num.toLocaleString("es-AR", { minimumFractionDigits: 0 })
+  return num.toLocaleString("es-AR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })
 }
 
 function formatDateTime(v) {
-  if (!v) return "-"
+  if (!v) return "—"
   const d = new Date(v)
   if (Number.isNaN(d.getTime())) return String(v)
   return d.toLocaleString("es-AR", {
@@ -76,6 +79,7 @@ function clampPage(p) {
 const loading = ref(false)
 const errorMsg = ref("")
 const okMsg = ref("")
+const infoMsg = ref("")
 
 const clientes = ref([])
 const clienteIdSel = ref("")
@@ -140,8 +144,16 @@ const clienteSel = computed(() => {
 const clienteTitulo = computed(() => {
   if (!clienteSel.value) return "Cuenta Corriente"
   const c = clienteSel.value
-  const full = `${c.nombre} ${c.apellido || ""}`.trim()
-  return `Cuenta Corriente · ${full} (ID #${c.id})`
+  return `${`${c.nombre} ${c.apellido || ""}`.trim()}`
+})
+
+const clienteSubtitulo = computed(() => {
+  if (!clienteSel.value) {
+    return "Seguimiento de deuda, historial y detalle de movimientos por cliente."
+  }
+  return clienteSel.value.dni
+    ? `DNI: ${clienteSel.value.dni}`
+    : "Seguimiento de deuda e historial del cliente."
 })
 
 // =========================
@@ -150,7 +162,7 @@ const clienteTitulo = computed(() => {
 function clienteLabel(c) {
   const full = `${c.nombre} ${c.apellido || ""}`.trim()
   const dni = c.dni ? ` · DNI ${c.dni}` : ""
-  return `${full} (ID #${c.id})${dni}`
+  return `${full}${dni}`
 }
 
 function buildSuggestions(txt) {
@@ -176,6 +188,7 @@ function selectCliente(c) {
   suggestions.value = []
   searchError.value = ""
   searchInput.value = clienteLabel(c)
+  infoMsg.value = ""
 }
 
 async function searchByDni(dni) {
@@ -200,13 +213,14 @@ async function searchByDni(dni) {
 
     selectCliente(c)
     okMsg.value = `Cliente encontrado: ${c.nombre} ${c.apellido || ""}`.trim()
+
     setTimeout(() => {
       if (okMsg.value.startsWith("Cliente encontrado:")) okMsg.value = ""
     }, 1800)
   } catch (e) {
     searchError.value =
       e?.response?.data?.error ||
-      "No se encontró cliente con ese DNI (o el endpoint no existe)."
+      "No se encontró cliente con ese DNI."
   } finally {
     searching.value = false
   }
@@ -283,6 +297,15 @@ async function doSearch() {
   await searchByDni(v)
 }
 
+function clearCliente() {
+  clienteIdSel.value = ""
+  searchInput.value = ""
+  suggestions.value = []
+  showSuggest.value = false
+  searchError.value = ""
+  infoMsg.value = "Elegí un cliente para ver su cuenta corriente."
+}
+
 function onGlobalClick(e) {
   const el = e.target
   if (!el?.closest?.(".cc-search")) showSuggest.value = false
@@ -325,6 +348,7 @@ async function fetchCuenta(clienteId) {
   loading.value = true
   errorMsg.value = ""
   okMsg.value = ""
+  infoMsg.value = ""
 
   try {
     const [rDeuda, rEstado] = await Promise.all([
@@ -352,6 +376,10 @@ async function fetchCuenta(clienteId) {
     }
 
     expanded.value = new Set()
+
+    if (!paged.content.length) {
+      infoMsg.value = "Este cliente todavía no tiene movimientos en cuenta corriente."
+    }
   } catch (e) {
     if (currentReq !== requestSeq) return
 
@@ -401,10 +429,10 @@ function normalizeRow(x, idx) {
     x.descripcion ??
     x.detalle ??
     x.concepto ??
-    (origen === "VENTA" && ventaId ? `Venta #${ventaId}` : null) ??
-    (origen === "PAGO" && ventaId ? `Pago venta #${ventaId}` : null) ??
-    (origen === "NOTA_CREDITO" && comprobanteId ? `NC #${comprobanteId}` : null) ??
-    "-"
+    (origen === "VENTA" ? "Venta" : null) ??
+    (origen === "PAGO" ? "Pago" : null) ??
+    (origen === "NOTA_CREDITO" ? "Nota de crédito" : null) ??
+    "—"
 
   return {
     fecha,
@@ -419,7 +447,6 @@ function normalizeRow(x, idx) {
     comprobanteId,
     items,
     key,
-    raw: x,
   }
 }
 
@@ -435,7 +462,7 @@ const estadoFiltrado = computed(() => {
     if (filtroTipo.value !== "TODOS" && r.tipoMov !== filtroTipo.value) return false
 
     if (txt) {
-      const blob = `${r.referencia ?? ""} ${r.origen ?? ""} ${r.ventaId ?? ""}`.toLowerCase()
+      const blob = `${r.referencia ?? ""} ${r.origen ?? ""}`.toLowerCase()
       if (!blob.includes(txt)) return false
     }
 
@@ -457,11 +484,6 @@ const saldoFinal = computed(() => {
   return Number(last.saldo ?? 0)
 })
 
-const pageInfoText = computed(() => {
-  if (!totalElements.value) return "Sin registros"
-  return `Página ${page.value + 1} de ${totalPages.value}`
-})
-
 // =========================
 // Pager handlers
 // =========================
@@ -479,24 +501,9 @@ function onPageChange(newPage) {
   }
 }
 
-function onSizeChange(newSize) {
-  const nextSize = Number(newSize)
-  if (!Number.isFinite(nextSize) || nextSize <= 0) return
-
-  const changed = nextSize !== size.value
-  size.value = nextSize
-
-  if (!clienteIdSel.value) return
-
-  if (page.value !== 0) {
-    page.value = 0
-    fetchCuenta(Number(clienteIdSel.value))
-    return
-  }
-
-  if (changed) {
-    fetchCuenta(Number(clienteIdSel.value))
-  }
+function onSizeChange() {
+  // Se deja vacío a propósito porque tu paginador final
+  // ya no debería exponer selector de tamaño.
 }
 
 // =========================
@@ -519,8 +526,8 @@ function exportCSV() {
       header.map((k) => `"${String(obj[k] ?? "").replaceAll('"', '""')}"`).join(";")
     ),
   ]
-  const csv = csvLines.join("\n")
 
+  const csv = csvLines.join("\n")
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
@@ -540,15 +547,24 @@ onMounted(async () => {
 
   if (clienteIdSel.value) {
     await fetchCuenta(Number(clienteIdSel.value))
+  } else {
+    infoMsg.value = "Elegí un cliente para ver su cuenta corriente."
   }
 
   window.addEventListener("click", onGlobalClick)
+  window.addEventListener("cuentaCorriente:changed", refreshCurrentCuenta)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener("click", onGlobalClick)
+  window.removeEventListener("cuentaCorriente:changed", refreshCurrentCuenta)
   clearTimeout(debounceTimer)
 })
+
+async function refreshCurrentCuenta() {
+  if (!clienteIdSel.value) return
+  await fetchCuenta(Number(clienteIdSel.value))
+}
 
 watch(clienteIdSel, async (v, oldV) => {
   if (!bootstrapped.value) return
@@ -563,6 +579,7 @@ watch(clienteIdSel, async (v, oldV) => {
     totalPages.value = 1
     page.value = 0
     expanded.value = new Set()
+    infoMsg.value = "Elegí un cliente para ver su cuenta corriente."
     return
   }
 
@@ -572,47 +589,77 @@ watch(clienteIdSel, async (v, oldV) => {
 </script>
 
 <template>
-  <div class="container py-4 cc-view">
-    <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+  <div class="cc-page">
+    <section class="page-hero">
       <div>
-        <h1 class="h4 mb-1">{{ clienteTitulo }}</h1>
-        <div class="text-secondary small">
-          Historial + saldo acumulado + detalle expandible de ventas.
-        </div>
+        <p class="eyebrow mb-1">Clientes</p>
+        <h1 class="page-title mb-1">
+          {{ clienteSel ? clienteTitulo : "Cuenta Corriente" }}
+        </h1>
+        <p class="page-subtitle mb-0">
+          {{ clienteSubtitulo }}
+        </p>
       </div>
 
-      <div v-if="clienteIdSel" class="text-secondary small">
-        {{ pageInfoText }}
+      <div class="hero-actions">
+        <button
+          class="btn btn-outline-light"
+          @click="refreshCurrentCuenta"
+          :disabled="loading || !clienteIdSel"
+        >
+          {{ loading ? "Actualizando..." : "Actualizar" }}
+        </button>
+
+        <button
+          class="btn btn-outline-light"
+          @click="clearCliente"
+          :disabled="loading && !clienteIdSel"
+        >
+          Limpiar
+        </button>
+
+        <button
+          class="btn btn-outline-light"
+          @click="exportCSV"
+          :disabled="!estadoFiltrado.length"
+        >
+          Exportar CSV
+        </button>
       </div>
-    </div>
+    </section>
 
-    <div v-if="errorMsg" class="alert alert-danger py-2">{{ errorMsg }}</div>
-    <div v-if="okMsg" class="alert alert-success py-2">{{ okMsg }}</div>
+    <div v-if="errorMsg" class="alert alert-danger py-2 mb-3">{{ errorMsg }}</div>
+    <div v-if="okMsg" class="alert alert-success py-2 mb-3">{{ okMsg }}</div>
+    <div v-if="infoMsg" class="alert alert-secondary py-2 mb-3">{{ infoMsg }}</div>
 
-    <!-- Buscador -->
-    <div class="cc-search card bg-panel border-0 shadow-sm mb-3">
+    <div class="card bg-panel border-0 shadow-sm mb-3 cc-search">
       <div class="card-body">
+        <div class="section-header mb-3">
+          <h2 class="section-title mb-0">Buscar cliente</h2>
+          <div class="helper-text">Buscá por DNI o por nombre para ver su historial.</div>
+        </div>
+
         <div class="row g-3 align-items-end">
           <div class="col-12 col-md-3">
-            <label class="form-label text-secondary">Buscar</label>
+            <label class="form-label field-label">Modo de búsqueda</label>
             <select
               v-model="searchMode"
-              class="form-select bg-dark text-white border-secondary"
+              class="form-select app-input"
               :disabled="loading"
             >
               <option value="DNI">Por DNI</option>
-              <option value="NOMBRE">Por nombre/apellido</option>
+              <option value="NOMBRE">Por nombre / apellido</option>
             </select>
           </div>
 
           <div class="col-12 col-md-5 position-relative">
-            <label class="form-label text-secondary">
+            <label class="form-label field-label">
               {{ searchMode === "DNI" ? "DNI" : "Nombre / Apellido" }}
             </label>
 
             <input
               v-model="searchInput"
-              class="form-control bg-dark text-white border-secondary"
+              class="form-control app-input"
               :placeholder="searchMode === 'DNI' ? 'Ej: 40111222' : 'Ej: Juan Pérez'"
               :inputmode="searchMode === 'DNI' ? 'numeric' : 'text'"
               @input="onSearchInput"
@@ -621,25 +668,22 @@ watch(clienteIdSel, async (v, oldV) => {
               :disabled="loading"
             />
 
-            <div
-              v-if="showSuggest"
-              class="suggest-box border border-secondary rounded mt-1"
-            >
+            <div v-if="showSuggest" class="suggest-box rounded mt-1">
               <button
                 v-for="s in suggestions"
                 :key="s.id"
-                class="btn btn-dark w-100 text-start border-0 suggestion-item"
+                class="suggestion-item"
                 type="button"
                 @click="selectCliente(s.cliente)"
               >
-                <div class="small text-white">{{ s.label }}</div>
+                {{ s.label }}
               </button>
             </div>
 
             <div v-if="searchError" class="text-danger small mt-2">{{ searchError }}</div>
           </div>
 
-          <div class="col-12 col-md-2 d-flex gap-2">
+          <div class="col-12 col-md-2">
             <button
               class="btn btn-outline-light w-100"
               @click="doSearch"
@@ -650,270 +694,357 @@ watch(clienteIdSel, async (v, oldV) => {
           </div>
 
           <div class="col-12 col-md-2">
-            <button
-              class="btn btn-outline-light w-100"
-              @click="clienteIdSel && fetchCuenta(Number(clienteIdSel))"
-              :disabled="loading || !clienteIdSel"
-            >
-              {{ loading ? "Cargando..." : "Refrescar" }}
-            </button>
-          </div>
-        </div>
-
-        <div class="text-secondary small mt-3" v-if="clienteIdSel">
-          Totales página:
-          Debe <b>$ {{ formatMoney(totDebe) }}</b> ·
-          Haber <b>$ {{ formatMoney(totHaber) }}</b> ·
-          Saldo final visible <b>$ {{ formatMoney(saldoFinal) }}</b>
-
-          <span v-if="deuda?.deudaTotal != null" class="ms-2">
-            · Deuda total: <b>$ {{ formatMoney(deuda.deudaTotal) }}</b>
-          </span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Selector -->
-    <div class="card bg-panel border-0 shadow-sm mb-4">
-      <div class="card-body">
-        <div class="row g-3 align-items-end">
-          <div class="col-12 col-md-7">
-            <label class="form-label text-secondary">Cliente</label>
+            <label class="form-label field-label">Cliente</label>
             <select
               v-model="clienteIdSel"
-              class="form-select bg-dark text-white border-secondary"
+              class="form-select app-input"
               :disabled="loading"
             >
               <option value="">Seleccionar…</option>
               <option v-for="c in clientesActivos" :key="c.id" :value="String(c.id)">
-                #{{ c.id }} — {{ c.nombre }} {{ c.apellido || "" }} (DNI: {{ c.dni || "-" }})
+                {{ c.nombre }} {{ c.apellido || "" }} · DNI: {{ c.dni || "-" }}
               </option>
             </select>
           </div>
-
-          <div class="col-12 col-md-5 d-flex justify-content-md-end gap-2">
-            <button
-              class="btn btn-outline-light"
-              @click="exportCSV"
-              :disabled="!estadoFiltrado.length"
-            >
-              Exportar CSV
-            </button>
-          </div>
         </div>
       </div>
     </div>
 
-    <!-- Filtros -->
-    <div class="card bg-panel border-0 shadow-sm mb-3" v-if="clienteIdSel">
-      <div class="card-body">
-        <div class="row g-2 align-items-center">
-          <div class="col-12 col-md-3">
-            <select v-model="filtroOrigen" class="form-select bg-dark text-white border-secondary">
-              <option value="TODOS">Todos los orígenes</option>
-              <option value="VENTA">Ventas</option>
-              <option value="PAGO">Pagos</option>
-              <option value="NOTA_CREDITO">Notas de crédito</option>
-            </select>
+    <template v-if="clienteIdSel">
+      <div class="row g-3 mb-3">
+        <div class="col-6 col-md-3">
+          <div class="kpi-card">
+            <div class="kpi-label">Debe</div>
+            <div class="kpi-value text-danger">$ {{ formatMoney(totDebe) }}</div>
           </div>
+        </div>
 
-          <div class="col-12 col-md-3">
-            <select v-model="filtroTipo" class="form-select bg-dark text-white border-secondary">
-              <option value="TODOS">Debe + Haber</option>
-              <option value="DEBE">Solo Debe</option>
-              <option value="HABER">Solo Haber</option>
-            </select>
+        <div class="col-6 col-md-3">
+          <div class="kpi-card">
+            <div class="kpi-label">Haber</div>
+            <div class="kpi-value text-success">$ {{ formatMoney(totHaber) }}</div>
           </div>
+        </div>
 
-          <div class="col-12 col-md-4">
-            <input
-              v-model="filtroTexto"
-              class="form-control bg-dark text-white border-secondary"
-              placeholder="Buscar por referencia / origen / id..."
-            />
+        <div class="col-6 col-md-3">
+          <div class="kpi-card">
+            <div class="kpi-label">Saldo visible</div>
+            <div class="kpi-value">$ {{ formatMoney(saldoFinal) }}</div>
           </div>
+        </div>
 
-          <div class="col-12 col-md-2 d-flex justify-content-md-end">
-            <span class="text-secondary small">
-              Mostrando: <b>{{ estadoFiltrado.length }}</b>
-            </span>
+        <div class="col-6 col-md-3">
+          <div class="kpi-card">
+            <div class="kpi-label">Deuda total</div>
+            <div class="kpi-value">$ {{ formatMoney(deuda?.deudaTotal ?? saldoFinal) }}</div>
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- Tabla -->
-    <div class="card bg-panel border-0 shadow-sm" v-if="clienteIdSel">
-      <div class="card-body">
-        <div v-if="loading" class="text-secondary">Cargando...</div>
+      <div class="card bg-panel border-0 shadow-sm mb-3">
+        <div class="card-body">
+          <div class="section-header mb-3">
+            <h2 class="section-title mb-0">Filtros</h2>
+            <div class="helper-text">
+              Mostrando {{ estadoFiltrado.length }} de {{ totalElements }} registro(s)
+            </div>
+          </div>
 
-        <div v-else-if="!estadoFiltrado.length" class="text-secondary">
-          No hay movimientos para este cliente o no coinciden con los filtros.
+          <div class="row g-3 align-items-end">
+            <div class="col-12 col-md-3">
+              <label class="form-label field-label">Origen</label>
+              <select v-model="filtroOrigen" class="form-select app-input">
+                <option value="TODOS">Todos los orígenes</option>
+                <option value="VENTA">Ventas</option>
+                <option value="PAGO">Pagos</option>
+                <option value="NOTA_CREDITO">Notas de crédito</option>
+              </select>
+            </div>
+
+            <div class="col-12 col-md-3">
+              <label class="form-label field-label">Tipo</label>
+              <select v-model="filtroTipo" class="form-select app-input">
+                <option value="TODOS">Debe + Haber</option>
+                <option value="DEBE">Solo Debe</option>
+                <option value="HABER">Solo Haber</option>
+              </select>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label class="form-label field-label">Buscar en historial</label>
+              <input
+                v-model="filtroTexto"
+                class="form-control app-input"
+                placeholder="Referencia u origen..."
+              />
+            </div>
+          </div>
         </div>
+      </div>
 
-        <div v-else class="table-responsive">
-          <table class="table table-dark table-hover align-middle mb-0">
-            <thead>
-              <tr class="text-secondary">
-                <th style="width: 170px">Fecha</th>
-                <th style="width: 110px">Origen</th>
-                <th>Referencia</th>
-                <th style="width: 140px" class="text-end">Debe</th>
-                <th style="width: 140px" class="text-end">Haber</th>
-                <th style="width: 160px" class="text-end">Saldo</th>
-                <th style="width: 70px" class="text-end">Ver</th>
-              </tr>
-            </thead>
+      <div class="card bg-panel border-0 shadow-sm">
+        <div class="card-body">
+          <div class="section-header mb-3">
+            <h2 class="section-title mb-0">Historial</h2>
+            <div class="helper-text">Movimientos paginados del cliente seleccionado.</div>
+          </div>
 
-            <tbody>
-              <template v-for="r in estadoFiltrado" :key="r.key">
+          <div v-if="loading" class="empty-block">
+            <div class="empty-title">Cargando movimientos</div>
+            <div class="helper-text">Esperá un momento.</div>
+          </div>
+
+          <div v-else-if="!estadoFiltrado.length" class="empty-block">
+            <div class="empty-title">No hay movimientos para mostrar</div>
+            <div class="helper-text">
+              Este cliente no tiene historial o no coincide con los filtros actuales.
+            </div>
+          </div>
+
+          <div v-else class="table-responsive">
+            <table class="table table-dark table-hover align-middle app-table mb-0">
+              <thead>
                 <tr>
-                  <td class="text-secondary">{{ formatDateTime(r.fecha) }}</td>
-
-                  <td>
-                    <span :class="badgeOrigen(r.origen).cls">
-                      {{ badgeOrigen(r.origen).text }}
-                    </span>
-                  </td>
-
-                  <td>
-                    <div class="fw-semibold text-white">{{ r.referencia || "-" }}</div>
-                    <div class="small text-secondary" v-if="r.ventaId">
-                      Venta ID: #{{ r.ventaId }}
-                    </div>
-                  </td>
-
-                  <td class="text-end" :class="r.debe > 0 ? 'text-danger fw-bold' : 'text-secondary'">
-                    {{ r.debe > 0 ? "$ " + formatMoney(r.debe) : "-" }}
-                  </td>
-
-                  <td class="text-end" :class="r.haber > 0 ? 'text-success fw-bold' : 'text-secondary'">
-                    {{ r.haber > 0 ? "$ " + formatMoney(r.haber) : "-" }}
-                  </td>
-
-                  <td class="text-end fw-bold">$ {{ formatMoney(r.saldo ?? 0) }}</td>
-
-                  <td class="text-end">
-                    <button
-                      v-if="r.origen === 'VENTA'"
-                      class="btn btn-sm btn-outline-light btn-expand"
-                      type="button"
-                      @click="toggleRow(r.key)"
-                      :disabled="!r.items?.length"
-                      :title="r.items?.length ? 'Ver detalle' : 'Sin items'"
-                    >
-                      {{ expanded.has(r.key) ? "−" : "+" }}
-                    </button>
-                  </td>
+                  <th style="width: 170px">Fecha</th>
+                  <th style="width: 110px">Origen</th>
+                  <th>Referencia</th>
+                  <th style="width: 140px" class="text-end">Debe</th>
+                  <th style="width: 140px" class="text-end">Haber</th>
+                  <th style="width: 160px" class="text-end">Saldo</th>
+                  <th style="width: 120px" class="text-end">Detalle</th>
                 </tr>
+              </thead>
 
-                <tr v-if="expanded.has(r.key)">
-                  <td colspan="7" class="p-0">
-                    <div class="cc-detail p-3 border-top border-secondary">
-                      <div class="d-flex justify-content-between align-items-center mb-2">
-                        <div class="text-white fw-semibold">Detalle de la venta</div>
-                        <div class="text-secondary small">
-                          Items: <b class="text-white">{{ r.items.length }}</b>
+              <tbody>
+                <template v-for="r in estadoFiltrado" :key="r.key">
+                  <tr>
+                    <td class="text-secondary">{{ formatDateTime(r.fecha) }}</td>
+
+                    <td>
+                      <span :class="badgeOrigen(r.origen).cls">
+                        {{ badgeOrigen(r.origen).text }}
+                      </span>
+                    </td>
+
+                    <td>
+                      <div class="fw-semibold text-white">{{ r.referencia || "—" }}</div>
+                    </td>
+
+                    <td
+                      class="text-end"
+                      :class="r.debe > 0 ? 'text-danger fw-bold' : 'text-secondary'"
+                    >
+                      {{ r.debe > 0 ? "$ " + formatMoney(r.debe) : "—" }}
+                    </td>
+
+                    <td
+                      class="text-end"
+                      :class="r.haber > 0 ? 'text-success fw-bold' : 'text-secondary'"
+                    >
+                      {{ r.haber > 0 ? "$ " + formatMoney(r.haber) : "—" }}
+                    </td>
+
+                    <td class="text-end fw-bold">$ {{ formatMoney(r.saldo ?? 0) }}</td>
+
+                    <td class="text-end">
+                      <button
+                        v-if="r.origen === 'VENTA'"
+                        class="btn btn-sm btn-outline-light btn-expand"
+                        type="button"
+                        @click="toggleRow(r.key)"
+                        :disabled="!r.items?.length"
+                      >
+                        {{ expanded.has(r.key) ? "Ocultar" : "Ver" }}
+                      </button>
+                    </td>
+                  </tr>
+
+                  <tr v-if="expanded.has(r.key)">
+                    <td colspan="7" class="p-0">
+                      <div class="cc-detail p-3 border-top border-secondary">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                          <div class="text-white fw-semibold">Detalle de la venta</div>
+                          <div class="text-secondary small">
+                            Items: <b class="text-white">{{ r.items.length }}</b>
+                          </div>
+                        </div>
+
+                        <div v-if="!r.items?.length" class="text-secondary small">
+                          No hay items para mostrar.
+                        </div>
+
+                        <div v-else class="table-responsive">
+                          <table class="table table-dark table-sm align-middle app-table mb-0">
+                            <thead>
+                              <tr>
+                                <th>Producto</th>
+                                <th style="width: 110px" class="text-end">Cantidad</th>
+                                <th style="width: 160px" class="text-end">Precio</th>
+                                <th style="width: 160px" class="text-end">Subtotal</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr v-for="(it, i) in r.items" :key="i">
+                                <td>
+                                  <div class="text-white fw-semibold">
+                                    {{ it.productoNombre || "Producto" }}
+                                  </div>
+                                </td>
+
+                                <td class="text-end text-white fw-semibold">
+                                  {{ it.cantidad ?? "—" }}
+                                </td>
+
+                                <td class="text-end text-secondary">
+                                  {{
+                                    it.precioUnitario != null
+                                      ? "$ " + formatMoney(it.precioUnitario)
+                                      : "—"
+                                  }}
+                                </td>
+
+                                <td class="text-end text-white fw-semibold">
+                                  {{
+                                    it.subtotal != null
+                                      ? "$ " + formatMoney(it.subtotal)
+                                      : "—"
+                                  }}
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
                         </div>
                       </div>
-
-                      <div v-if="!r.items?.length" class="text-secondary small">
-                        No hay items para mostrar.
-                      </div>
-
-                      <div v-else class="table-responsive">
-                        <table class="table table-dark table-sm align-middle mb-0">
-                          <thead>
-                            <tr>
-                              <th>Producto</th>
-                              <th style="width: 110px" class="text-end">Cantidad</th>
-                              <th style="width: 160px" class="text-end">Precio</th>
-                              <th style="width: 160px" class="text-end">Subtotal</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr v-for="(it, i) in r.items" :key="i">
-                              <td class="text-secondary">
-                                <div class="text-white fw-semibold">
-                                  {{ it.productoNombre || ("Producto #" + it.productoId) }}
-                                </div>
-                                <div class="small text-secondary">ID: #{{ it.productoId }}</div>
-                              </td>
-
-                              <td class="text-end text-white fw-semibold">
-                                {{ it.cantidad ?? "-" }}
-                              </td>
-
-                              <td class="text-end text-secondary">
-                                {{ it.precioUnitario != null ? "$ " + formatMoney(it.precioUnitario) : "-" }}
-                              </td>
-
-                              <td class="text-end text-white fw-semibold">
-                                {{ it.subtotal != null ? "$ " + formatMoney(it.subtotal) : "-" }}
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-
-                      <div class="text-secondary small mt-2">
-                        Detalle expandible obtenido desde backend.
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="cc-footer d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
-          <div class="text-secondary small">
-            Total registros: <b>{{ totalElements }}</b>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
           </div>
 
-          <div class="text-secondary small">
-            Página <b>{{ page + 1 }}</b> / <b>{{ totalPages }}</b>
+          <div class="cc-footer">
+            <div class="helper-text">
+              Total registros: <b>{{ totalElements }}</b>
+            </div>
+
+            <Pager
+              class="mt-3"
+              :page="page"
+              :size="size"
+              :total-elements="totalElements"
+              :total-pages="totalPages"
+              :loading="loading"
+              @update:page="onPageChange"
+              @update:size="onSizeChange"
+            />
           </div>
-        </div>
-
-        <div class="mt-3">
-          <Pager
-            :page="page"
-            :size="size"
-            :total-elements="totalElements"
-            :total-pages="totalPages"
-            :loading="loading"
-            @update:page="onPageChange"
-            @update:size="onSizeChange"
-          />
-        </div>
-
-        <div class="text-secondary small mt-3">
-          Cuenta corriente paginada con filtros visuales sobre la página actual.
         </div>
       </div>
-    </div>
-
-    <div v-else class="text-secondary">
-      Elegí un cliente para ver su cuenta corriente.
-    </div>
+    </template>
   </div>
 </template>
 
 <style scoped>
-.cc-view {
-  color: #e5e7eb;
+.cc-page {
+  min-height: 100%;
+}
+
+.page-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.eyebrow {
+  color: #9f8cff;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.page-title {
+  font-size: 2rem;
+  font-weight: 800;
+  color: #fff;
+}
+
+.page-subtitle {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.hero-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .bg-panel {
-  background: rgba(18, 22, 32, 0.92);
-  backdrop-filter: blur(4px);
+  background: linear-gradient(180deg, rgba(21, 26, 38, 0.98) 0%, rgba(15, 19, 29, 0.96) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 18px;
 }
 
-.cc-search .card-body,
-.bg-panel .card-body {
-  padding: 1rem;
+.field-label {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.helper-text {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.85rem;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.section-title {
+  color: #fff;
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.app-input {
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  min-height: 44px;
+}
+
+.app-input:focus {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  border-color: rgba(123, 104, 255, 0.55);
+  box-shadow: 0 0 0 0.18rem rgba(123, 104, 255, 0.16);
+}
+
+.kpi-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  height: 100%;
+}
+
+.kpi-label {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.82rem;
+  margin-bottom: 6px;
+}
+
+.kpi-value {
+  color: #fff;
+  font-weight: 800;
+  font-size: 1.05rem;
 }
 
 .suggest-box {
@@ -923,11 +1054,21 @@ watch(clienteIdSel, async (v, oldV) => {
   max-height: 260px;
   overflow: auto;
   background: #111827;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
 }
 
+.suggestion-item {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  padding: 10px 12px;
+}
+
 .suggestion-item:hover {
-  background: rgba(124, 58, 237, 0.16) !important;
+  background: rgba(124, 58, 237, 0.16);
 }
 
 .cc-detail {
@@ -958,6 +1099,16 @@ watch(clienteIdSel, async (v, oldV) => {
   border: 1px solid rgba(107, 114, 128, 0.35);
 }
 
+.app-table thead th {
+  color: rgba(255, 255, 255, 0.72);
+  font-weight: 600;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.app-table tbody td {
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
 .table td,
 .table th {
   vertical-align: middle;
@@ -968,11 +1119,28 @@ watch(clienteIdSel, async (v, oldV) => {
 }
 
 .btn-expand {
-  min-width: 34px;
+  min-width: 88px;
+}
+
+.empty-block {
+  padding: 14px 0;
+}
+
+.empty-title {
+  color: #fff;
+  font-weight: 700;
+  margin-bottom: 4px;
 }
 
 .cc-footer {
   border-top: 1px solid rgba(148, 163, 184, 0.12);
-  padding-top: 0.75rem;
+  padding-top: 16px;
+  margin-top: 16px;
+}
+
+@media (max-width: 768px) {
+  .page-title {
+    font-size: 1.6rem;
+  }
 }
 </style>

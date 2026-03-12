@@ -30,11 +30,14 @@ function daysAgoISO(days) {
 
 function formatMoney(n) {
   const num = Number(n ?? 0)
-  return num.toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+  return num.toLocaleString("es-AR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })
 }
 
 function formatDateTime(v) {
-  if (!v) return "-"
+  if (!v) return "—"
   const d = new Date(v)
   if (Number.isNaN(d.getTime())) return String(v)
   return d.toLocaleString("es-AR", {
@@ -54,12 +57,7 @@ function safeId(x) {
 function normalizeFecha(v) {
   if (!v) return null
 
-  if (typeof v === "string") {
-    const d = new Date(v)
-    return Number.isNaN(d.getTime()) ? null : d.toISOString()
-  }
-
-  if (typeof v === "number") {
+  if (typeof v === "string" || typeof v === "number") {
     const d = new Date(v)
     return Number.isNaN(d.getTime()) ? null : d.toISOString()
   }
@@ -79,8 +77,7 @@ function normalizeFecha(v) {
       return Number.isNaN(d.getTime()) ? null : d.toISOString()
     }
 
-    const s = String(v)
-    const d = new Date(s)
+    const d = new Date(String(v))
     return Number.isNaN(d.getTime()) ? null : d.toISOString()
   }
 
@@ -134,12 +131,18 @@ function unwrapPage(data) {
     }
   }
 
+  const content = data?.content ?? data?.items ?? data?.data ?? []
+
   return {
-    content: Array.isArray(data?.content) ? data.content : [],
+    content: Array.isArray(content) ? content : [],
     page: Number(data?.page ?? data?.number ?? 0),
     size: Number(data?.size ?? 10),
-    totalElements: Number(data?.totalElements ?? data?.total ?? 0),
-    totalPages: Number(data?.totalPages ?? 1),
+    totalElements: Number(
+      data?.totalElements ??
+        data?.total ??
+        (Array.isArray(content) ? content.length : 0)
+    ),
+    totalPages: Number(data?.totalPages ?? data?.pages ?? 1),
   }
 }
 
@@ -155,6 +158,7 @@ const admin = computed(() => Boolean(session && isAdmin()))
 const loading = ref(false)
 const errorMsg = ref("")
 const okMsg = ref("")
+const infoMsg = ref("")
 
 const page = ref(0)
 const size = ref(20)
@@ -164,7 +168,7 @@ const totalPages = ref(1)
 const movimientos = ref([])
 
 // =========================
-// Filtros backend
+// Filtros
 // =========================
 const desde = ref(daysAgoISO(7))
 const hasta = ref(todayISO())
@@ -196,7 +200,7 @@ async function fetchMetodosPagoOnce() {
   if (metodosLoaded.value) return
   try {
     const { data } = await metodosPagoApi.list()
-    const arr = Array.isArray(data) ? data : []
+    const arr = Array.isArray(data) ? data : unwrapPage(data).content
     metodosPago.value = arr.map(normalizeMetodoPago).filter((m) => m.id > 0)
   } catch {
     metodosPago.value = []
@@ -208,7 +212,7 @@ async function fetchMetodosPagoOnce() {
 function metodoNombreById(id) {
   const mid = safeId(id)
   const m = metodosPago.value.find((x) => Number(x.id) === mid)
-  return m?.nombre ?? (mid ? `#${mid}` : "-")
+  return m?.nombre ?? "-"
 }
 
 async function fetchProductosOnce() {
@@ -216,12 +220,16 @@ async function fetchProductosOnce() {
   try {
     const { data } = await productosApi.list({ page: 0, size: 1000, search: "" })
     const arr = unwrapPage(data).content
-    const m = new Map()
+    const map = new Map()
+
     for (const p of arr) {
       const id = safeId(p?.productoId ?? p?.id)
-      if (id) m.set(id, String(p?.nombre ?? `Prod #${id}`))
+      if (id) {
+        map.set(id, String(p?.nombre ?? `Producto #${id}`))
+      }
     }
-    productosById.value = m
+
+    productosById.value = map
   } catch {
     productosById.value = new Map()
   } finally {
@@ -252,12 +260,11 @@ async function fetchClientesOnce() {
 }
 
 const clienteById = computed(() => {
-  const m = new Map()
+  const map = new Map()
   for (const c of clientes.value) {
-    const id = safeId(c.id)
-    if (id) m.set(id, c)
+    map.set(Number(c.id), c)
   }
-  return m
+  return map
 })
 
 function clienteTxtById(clienteId) {
@@ -267,21 +274,19 @@ function clienteTxtById(clienteId) {
   const c = clienteById.value.get(cid)
   if (!c) return `Cliente #${cid}`
 
-  const nombre = `${c.nombre ?? ""} ${c.apellido ?? ""}`.trim()
+  const full = `${c.nombre ?? ""} ${c.apellido ?? ""}`.trim()
   const dni = c.dni ? `DNI ${c.dni}` : null
-  return [nombre || `Cliente #${cid}`, dni].filter(Boolean).join(" · ")
+
+  return [full || `Cliente #${cid}`, dni].filter(Boolean).join(" · ")
 }
 
 function pickClienteIdFromVenta(venta) {
-  const v = venta ?? {}
   const raw =
-    v.clienteId ??
-    v.cliente_id ??
-    v.clienteID ??
-    v.cliente?.clienteId ??
-    v.cliente?.id ??
-    v.cliente?.cliente_id ??
-    v.clienteIdStr ??
+    venta?.clienteId ??
+    venta?.cliente_id ??
+    venta?.cliente?.clienteId ??
+    venta?.cliente?.id ??
+    venta?.cliente?.cliente_id ??
     null
 
   const n = Number(raw)
@@ -298,6 +303,7 @@ async function hydrateVentaInfoFromVentaId(ventaId) {
     const venta = data?.venta ?? data?.ventaActualizada ?? data ?? null
 
     const clienteId = pickClienteIdFromVenta(venta)
+    const total = Number(venta?.total ?? 0) || 0
 
     const detalles =
       venta?.detallesVenta ??
@@ -309,14 +315,14 @@ async function hydrateVentaInfoFromVentaId(ventaId) {
     const itemsTxt = Array.isArray(detalles)
       ? detalles
           .map((d) => {
-            const cant = Number(d.cantidad ?? d.qty ?? 0) || 0
-            const pid = safeId(d.productoId ?? d.producto_id)
+            const cant = Number(d?.cantidad ?? d?.qty ?? 0) || 0
+            const pid = safeId(d?.productoId ?? d?.producto_id)
             const nombre =
-              d.productoNombre ??
-              d.producto?.nombre ??
-              d.nombreProducto ??
+              d?.productoNombre ??
+              d?.producto?.nombre ??
+              d?.nombreProducto ??
               productosById.value.get(pid) ??
-              (pid ? `Prod #${pid}` : "Producto")
+              (pid ? `Producto #${pid}` : "Producto")
 
             return cant > 0 ? `${cant}× ${nombre}` : nombre
           })
@@ -325,16 +331,22 @@ async function hydrateVentaInfoFromVentaId(ventaId) {
           .join(" · ")
       : ""
 
-    const total = Number(venta?.total ?? 0) || 0
-
     ventaInfoCache.value = {
       ...ventaInfoCache.value,
-      [vid]: { clienteId, total, itemsTxt },
+      [vid]: {
+        clienteId,
+        total,
+        itemsTxt,
+      },
     }
   } catch {
     ventaInfoCache.value = {
       ...ventaInfoCache.value,
-      [vid]: { clienteId: null, total: 0, itemsTxt: "" },
+      [vid]: {
+        clienteId: null,
+        total: 0,
+        itemsTxt: "",
+      },
     }
   }
 }
@@ -352,6 +364,7 @@ async function refreshHistorico() {
   loading.value = true
   errorMsg.value = ""
   okMsg.value = ""
+  infoMsg.value = ""
 
   try {
     await Promise.all([
@@ -371,30 +384,33 @@ async function refreshHistorico() {
 
     const { data } = await movimientosCajaApi.list(params)
     const paged = unwrapPage(data)
-    const arrRaw = paged.content
 
     page.value = paged.page
     size.value = paged.size
     totalElements.value = paged.totalElements
     totalPages.value = paged.totalPages
 
-    const arr = arrRaw
+    const arr = paged.content
       .map((m) => ({
         ...m,
         fecha: pickFecha(m),
-        tipo: String(m.tipo ?? "").toUpperCase(),
-        concepto: String(m.concepto ?? "").toUpperCase(),
-        monto: Number(m.monto ?? m.importe ?? 0) || 0,
-        ventaId: m.ventaId ?? m.venta_id ?? m.venta ?? null,
-        metodoPagoId: m.metodoPagoId ?? m.metodo_pago_id ?? m.metodoId ?? null,
+        tipo: String(m?.tipo ?? "").toUpperCase(),
+        concepto: String(m?.concepto ?? "").toUpperCase(),
+        monto: Number(m?.monto ?? m?.importe ?? 0) || 0,
+        ventaId: m?.ventaId ?? m?.venta_id ?? m?.venta ?? null,
+        metodoPagoId: m?.metodoPagoId ?? m?.metodo_pago_id ?? m?.metodoId ?? null,
       }))
       .sort((a, b) => new Date(b.fecha ?? 0) - new Date(a.fecha ?? 0))
 
     movimientos.value = arr
 
-    const ventaIds = [...new Set(arr.map((x) => safeId(x.ventaId)).filter((v) => v > 0))]
+    const ventaIds = [...new Set(arr.map((x) => safeId(x.ventaId)).filter(Boolean))]
     for (const vid of ventaIds) {
       await hydrateVentaInfoFromVentaId(vid)
+    }
+
+    if (!arr.length) {
+      infoMsg.value = "No hay movimientos para ese rango o filtro."
     }
   } catch (e) {
     errorMsg.value =
@@ -411,20 +427,25 @@ async function refreshHistorico() {
 // KPIs
 // =========================
 const ingresos = computed(() =>
-  movimientos.value.filter((m) => m.tipo === "INGRESO").reduce((a, m) => a + m.monto, 0)
+  movimientos.value
+    .filter((m) => m.tipo === "INGRESO")
+    .reduce((a, m) => a + Number(m.monto ?? 0), 0)
 )
 
 const egresos = computed(() =>
-  movimientos.value.filter((m) => m.tipo === "EGRESO").reduce((a, m) => a + m.monto, 0)
+  movimientos.value
+    .filter((m) => m.tipo === "EGRESO")
+    .reduce((a, m) => a + Number(m.monto ?? 0), 0)
 )
 
 const neto = computed(() => ingresos.value - egresos.value)
 
 const totalesPorConcepto = computed(() => {
   const map = new Map()
+
   for (const m of movimientos.value) {
     const key = m.concepto || "SIN_CONCEPTO"
-    const signed = m.tipo === "EGRESO" ? -m.monto : m.monto
+    const signed = m.tipo === "EGRESO" ? -Number(m.monto ?? 0) : Number(m.monto ?? 0)
     map.set(key, (map.get(key) ?? 0) + signed)
   }
 
@@ -449,9 +470,11 @@ function rowClass(m) {
 
 function clienteTxtTemplate(ventaId) {
   const vid = safeId(ventaId)
-  if (!vid) return "-"
+  if (!vid) return "—"
+
   const info = ventaInfoCache.value[vid]
   if (!info) return "Cargando…"
+
   return clienteTxtById(info.clienteId)
 }
 
@@ -464,36 +487,28 @@ function exportCSV() {
     const info = vid ? ventaInfoCache.value[vid] : null
 
     return {
-      id: m.movimientoCajaId ?? m.movimientoId ?? m.id ?? "",
       fecha: m.fecha ?? "",
-      cajaId: m.cajaId ?? "",
-      userId: m.userId ?? "",
       tipo: m.tipo ?? "",
       concepto: m.concepto ?? "",
-      ventaId: vid ? String(vid) : "",
+      venta: vid ? `#${vid}` : "",
       cliente: info?.clienteId ? clienteTxtById(info.clienteId) : "Mostrador",
-      items: info?.itemsTxt ?? "",
-      totalVenta: info?.total ?? 0,
-      descripcion: m.descripcion ?? "",
+      detalleVenta: info?.itemsTxt ?? "",
       metodo: m.metodoPagoId ? metodoNombreById(m.metodoPagoId) : "",
+      descripcion: m.descripcion ?? "",
       monto: m.monto ?? 0,
     }
   })
 
   const header = Object.keys(
     rows[0] || {
-      id: "",
       fecha: "",
-      cajaId: "",
-      userId: "",
       tipo: "",
       concepto: "",
-      ventaId: "",
+      venta: "",
       cliente: "",
-      items: "",
-      totalVenta: 0,
-      descripcion: "",
+      detalleVenta: "",
       metodo: "",
+      descripcion: "",
       monto: 0,
     }
   )
@@ -518,14 +533,12 @@ function exportCSV() {
 // Events
 // =========================
 function onPageChange(newPage) {
-  page.value = Number(newPage)
+  page.value = Number(newPage ?? 0)
   refreshHistorico()
 }
 
-function onSizeChange(newSize) {
-  size.value = Number(newSize)
-  page.value = 0
-  refreshHistorico()
+function onSizeChange() {
+  // pager minimalista
 }
 
 function aplicarFiltros() {
@@ -533,7 +546,7 @@ function aplicarFiltros() {
   refreshHistorico()
 }
 
-watch([tipo], () => {
+watch(tipo, () => {
   page.value = 0
   refreshHistorico()
 })
@@ -544,39 +557,56 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="container py-4">
-    <div class="mb-3 d-flex flex-wrap justify-content-between align-items-end gap-2">
+  <div class="historico-page">
+    <section class="page-hero">
       <div>
-        <h1 class="h4 mb-1">Histórico de Movimientos de Caja</h1>
-        <div class="text-secondary">
-          Solo disponible para ADMIN.
-        </div>
+        <p class="eyebrow mb-1">Caja</p>
+        <h1 class="page-title mb-1">Histórico de movimientos</h1>
+        <p class="page-subtitle mb-0">
+          Auditoría de ingresos y egresos con detalle de ventas asociadas.
+        </p>
       </div>
 
-      <button class="btn btn-outline-light" @click="refreshHistorico" :disabled="loading">
-        {{ loading ? "Actualizando..." : "Refresh" }}
-      </button>
-    </div>
+      <div class="hero-actions">
+        <button class="btn btn-outline-light" @click="refreshHistorico" :disabled="loading">
+          {{ loading ? "Actualizando..." : "Actualizar" }}
+        </button>
 
-    <div v-if="errorMsg" class="alert alert-danger py-2">{{ errorMsg }}</div>
-    <div v-if="okMsg" class="alert alert-success py-2">{{ okMsg }}</div>
+        <button
+          class="btn btn-outline-light"
+          @click="exportCSV"
+          :disabled="!movimientos.length"
+        >
+          Exportar CSV
+        </button>
+      </div>
+    </section>
+
+    <div v-if="errorMsg" class="alert alert-danger py-2 mb-3">{{ errorMsg }}</div>
+    <div v-if="okMsg" class="alert alert-success py-2 mb-3">{{ okMsg }}</div>
+    <div v-if="infoMsg" class="alert alert-secondary py-2 mb-3">{{ infoMsg }}</div>
 
     <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
+        <div class="section-header mb-3">
+          <h2 class="section-title mb-0">Filtros</h2>
+          <div class="helper-text">Consultá movimientos por rango, tipo o descripción.</div>
+        </div>
+
         <div class="row g-3 align-items-end">
           <div class="col-12 col-md-3">
-            <label class="form-label text-secondary">Desde</label>
-            <input v-model="desde" type="date" class="form-control bg-dark text-white border-secondary" />
+            <label class="form-label field-label">Desde</label>
+            <input v-model="desde" type="date" class="form-control app-input" />
           </div>
 
           <div class="col-12 col-md-3">
-            <label class="form-label text-secondary">Hasta</label>
-            <input v-model="hasta" type="date" class="form-control bg-dark text-white border-secondary" />
+            <label class="form-label field-label">Hasta</label>
+            <input v-model="hasta" type="date" class="form-control app-input" />
           </div>
 
           <div class="col-12 col-md-2">
-            <label class="form-label text-secondary">Tipo</label>
-            <select v-model="tipo" class="form-select bg-dark text-white border-secondary">
+            <label class="form-label field-label">Tipo</label>
+            <select v-model="tipo" class="form-select app-input">
               <option value="TODOS">Todos</option>
               <option value="INGRESO">INGRESO</option>
               <option value="EGRESO">EGRESO</option>
@@ -584,12 +614,12 @@ onMounted(() => {
           </div>
 
           <div class="col-12 col-md-4">
-            <label class="form-label text-secondary">Buscar</label>
+            <label class="form-label field-label">Buscar</label>
             <div class="d-flex gap-2">
               <input
                 v-model="search"
-                class="form-control bg-dark text-white border-secondary"
-                placeholder="Descripción..."
+                class="form-control app-input"
+                placeholder="Descripción, venta o referencia..."
                 @keyup.enter="aplicarFiltros"
               />
               <button class="btn btn-primary btn-accent" @click="aplicarFiltros">
@@ -601,90 +631,72 @@ onMounted(() => {
       </div>
     </div>
 
-    <div class="row g-3 mb-4" v-if="movimientos.length">
-      <div class="col-12 col-md-3">
-        <div class="card bg-panel border-0 shadow-sm">
-          <div class="card-body">
-            <div class="text-secondary small">Movimientos</div>
-            <div class="fs-4 fw-bold">{{ totalElements }}</div>
-          </div>
+    <div class="row g-3 mb-3" v-if="movimientos.length">
+      <div class="col-6 col-md-3">
+        <div class="kpi-card">
+          <div class="kpi-label">Movimientos</div>
+          <div class="kpi-value">{{ totalElements }}</div>
         </div>
       </div>
 
-      <div class="col-12 col-md-3">
-        <div class="card bg-panel border-0 shadow-sm">
-          <div class="card-body">
-            <div class="text-secondary small">Ingresos</div>
-            <div class="fs-4 fw-bold">$ {{ formatMoney(ingresos) }}</div>
-          </div>
+      <div class="col-6 col-md-3">
+        <div class="kpi-card">
+          <div class="kpi-label">Ingresos</div>
+          <div class="kpi-value text-success">$ {{ formatMoney(ingresos) }}</div>
         </div>
       </div>
 
-      <div class="col-12 col-md-3">
-        <div class="card bg-panel border-0 shadow-sm">
-          <div class="card-body">
-            <div class="text-secondary small">Egresos</div>
-            <div class="fs-4 fw-bold">$ {{ formatMoney(egresos) }}</div>
-          </div>
+      <div class="col-6 col-md-3">
+        <div class="kpi-card">
+          <div class="kpi-label">Egresos</div>
+          <div class="kpi-value text-danger">$ {{ formatMoney(egresos) }}</div>
         </div>
       </div>
 
-      <div class="col-12 col-md-3">
-        <div class="card bg-panel border-0 shadow-sm">
-          <div class="card-body">
-            <div class="text-secondary small">Neto</div>
-            <div class="fs-4 fw-bold">$ {{ formatMoney(neto) }}</div>
-          </div>
+      <div class="col-6 col-md-3">
+        <div class="kpi-card">
+          <div class="kpi-label">Neto</div>
+          <div class="kpi-value">$ {{ formatMoney(neto) }}</div>
         </div>
       </div>
     </div>
 
     <div class="card bg-panel border-0 shadow-sm">
       <div class="card-body">
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-          <h2 class="h6 mb-0">Resultados</h2>
-
-          <div class="d-flex gap-2">
-            <button
-              class="btn btn-outline-light btn-sm"
-              @click="exportCSV"
-              :disabled="!movimientos.length"
-            >
-              Exportar CSV
-            </button>
+        <div class="section-header mb-3">
+          <h2 class="section-title mb-0">Resultados</h2>
+          <div class="helper-text">
+            {{ movimientos.length }} registro(s) en la página actual
           </div>
         </div>
 
         <div v-if="totalesPorConcepto.length" class="mb-3">
-          <div class="text-secondary small mb-2">Totales por concepto</div>
-          <div class="d-flex flex-wrap gap-2">
+          <div class="helper-text mb-2">Totales por concepto</div>
+          <div class="totales-wrap">
             <span
               v-for="t in totalesPorConcepto"
               :key="t.concepto"
-              class="badge bg-dark border border-secondary"
-              style="padding: 8px 10px;"
+              class="concept-chip"
             >
-              <span class="text-secondary">{{ t.concepto }}</span>
-              <span class="ms-2 fw-bold">$ {{ formatMoney(t.total) }}</span>
+              {{ t.concepto }} · $ {{ formatMoney(t.total) }}
             </span>
           </div>
         </div>
 
-        <div v-if="!movimientos.length" class="text-secondary small">
-          No hay movimientos para ese rango/filtro.
+        <div v-if="!movimientos.length" class="empty-block">
+          <div class="empty-title">No hay movimientos para mostrar</div>
+          <div class="helper-text">Probá cambiando el rango o los filtros.</div>
         </div>
 
         <div v-else class="table-responsive">
-          <table class="table table-dark table-hover align-middle mb-0">
+          <table class="table table-dark table-hover align-middle app-table mb-0">
             <thead>
               <tr>
-                <th style="width: 90px">ID</th>
                 <th style="width: 170px">Fecha</th>
-                <th style="width: 90px">Caja</th>
-                <th style="width: 90px">User</th>
                 <th style="width: 90px">Venta</th>
-                <th style="width: 260px">Cliente</th>
-                <th style="width: 110px">Tipo</th>
+                <th style="width: 280px">Cliente</th>
+                <th style="width: 300px">Detalle venta</th>
+                <th style="width: 120px">Tipo</th>
                 <th style="width: 160px">Concepto</th>
                 <th>Descripción</th>
                 <th style="width: 160px">Método</th>
@@ -698,37 +710,50 @@ onMounted(() => {
                 :key="m.movimientoCajaId ?? m.movimientoId ?? m.id"
                 :class="rowClass(m)"
               >
-                <td class="text-secondary">{{ m.movimientoCajaId ?? m.movimientoId ?? m.id ?? "-" }}</td>
                 <td class="text-secondary">{{ formatDateTime(m.fecha) }}</td>
-                <td class="text-secondary">{{ m.cajaId ?? "-" }}</td>
-                <td class="text-secondary">{{ m.userId ?? "-" }}</td>
 
                 <td class="text-secondary">
                   <span v-if="m.ventaId">#{{ m.ventaId }}</span>
-                  <span v-else>-</span>
-                </td>
-
-                <td class="text-secondary">
-                  <span v-if="m.ventaId">
-                    {{ clienteTxtTemplate(m.ventaId) }}
-                    <div class="text-secondary small">
-                      {{ ventaInfoCache[safeId(m.ventaId)]?.itemsTxt || "" }}
-                    </div>
-                  </span>
-                  <span v-else>-</span>
+                  <span v-else>—</span>
                 </td>
 
                 <td>
-                  <span class="badge" :class="m.tipo === 'INGRESO' ? 'bg-success' : 'bg-danger'">
+                  <div v-if="m.ventaId" class="mov-detail">
+                    <div class="mov-detail-main">
+                      {{ clienteTxtTemplate(m.ventaId) }}
+                    </div>
+                  </div>
+                  <span v-else class="text-secondary">—</span>
+                </td>
+
+                <td>
+                  <div v-if="m.ventaId" class="mov-detail">
+                    <div class="mov-detail-sub">
+                      {{ ventaInfoCache[safeId(m.ventaId)]?.itemsTxt || "Sin detalle de productos" }}
+                    </div>
+                  </div>
+                  <span v-else class="text-secondary">—</span>
+                </td>
+
+                <td>
+                  <span
+                    class="badge"
+                    :class="m.tipo === 'INGRESO' ? 'badge-soft-success' : 'badge-soft-danger'"
+                  >
                     {{ m.tipo }}
                   </span>
                 </td>
 
-                <td class="text-secondary">{{ m.concepto || "-" }}</td>
-                <td class="text-secondary">{{ m.descripcion ?? "-" }}</td>
+                <td>
+                  <span class="concept-chip">
+                    {{ m.concepto || "—" }}
+                  </span>
+                </td>
+
+                <td class="text-secondary">{{ m.descripcion ?? "—" }}</td>
 
                 <td class="text-secondary">
-                  {{ m.metodoPagoId ? metodoNombreById(m.metodoPagoId) : "-" }}
+                  {{ m.metodoPagoId ? metodoNombreById(m.metodoPagoId) : "—" }}
                 </td>
 
                 <td class="text-end fw-bold">{{ signedMoney(m) }}</td>
@@ -743,6 +768,7 @@ onMounted(() => {
             :size="size"
             :total-elements="totalElements"
             :total-pages="totalPages"
+            :loading="loading"
             @update:page="onPageChange"
             @update:size="onSizeChange"
           />
@@ -753,12 +779,56 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.bg-panel { background: rgba(18, 22, 32, .92); }
-.btn-accent { background: #6f5cff; border: none; }
-.btn-accent:hover { background: #5f4de6; }
+.historico-page {
+  min-height: 100%;
+}
 
-.row-ingreso td { background: rgba(25, 135, 84, 0.08) !important; }
-.row-egreso td { background: rgba(220, 53, 69, 0.08) !important; }
+.row-ingreso td {
+  background: rgba(25, 135, 84, 0.08) !important;
+}
 
-.table-dark.table-hover tbody tr:hover td { filter: brightness(1.05); }
+.row-egreso td {
+  background: rgba(220, 53, 69, 0.08) !important;
+}
+
+.mov-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mov-detail-main {
+  color: #fff;
+  font-weight: 600;
+}
+
+.mov-detail-sub {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.82rem;
+}
+
+.concept-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.totales-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 768px) {
+  .mov-detail-main,
+  .mov-detail-sub {
+    white-space: normal;
+  }
+}
 </style>

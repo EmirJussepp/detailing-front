@@ -16,5 +16,10 @@ export const cajaApi = {
 
   saldo(cajaId) {
     return http.get(`/cajas/${cajaId}/saldo`)
+  },
+  reporteCierre(turno) {
+    return http.get("/cajas/reporte-cierre", {
+      params: { turno }
+    })
   }
 }

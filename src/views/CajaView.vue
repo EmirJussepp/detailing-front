@@ -6,12 +6,12 @@ import { emitCajaChanged } from "../ui/cajaEvents"
 import { cajaApi } from "../services/cajaApi"
 import { movimientosCajaApi } from "../services/movimientosCajaApi"
 import { getTurnoOperativo, setTurnoOperativo } from "../ui/turnoOperativo"
+import { metodosPagoApi } from "../services/metodopagoService"
+import { ventasApi } from "../services/ventasApi"
+import { productosApi } from "../services/productosApi"
+import { clientesApi } from "../services/clientesApi"
 
-// =========================
-// Session
-// =========================
 const session = getSession() ?? null
-const userId = Number(session?.userId ?? 0)
 const permissions = Array.isArray(session?.permissions) ? session.permissions : []
 
 function hasPermission(permission) {
@@ -25,28 +25,25 @@ const canCerrarCajaPerm = computed(() => hasPermission("caja:cerrar"))
 const canCrearMovimientoPerm = computed(() => hasPermission("movimientos_caja:crear"))
 const isAdmin = computed(() => permissions.includes("admin:all"))
 
-// =========================
-// Helpers
-// =========================
-function todayISO() {
-  const d = new Date()
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, "0")
-  const day = String(d.getDate()).padStart(2, "0")
-  return `${y}-${m}-${day}`
-}
 
 function formatMoney(n) {
   const num = Number(n ?? 0)
-  return num.toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+  return num.toLocaleString("es-AR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })
 }
 
 function toMoneyNumber(v) {
-  const x = Number(String(v ?? "").replace(",", ".").replace(/[^\d.-]/g, ""))
-  return Number.isFinite(x) ? x : NaN
+  const raw = String(v ?? "").trim()
+  if (!raw) return null
+  const normalized = raw.replace(",", ".").replace(/[^\d.-]/g, "")
+  if (!normalized) return null
+  const x = Number(normalized)
+  return Number.isFinite(x) ? x : null
 }
 
-function safeDateLabel(v) {
+function formatDateTime(v) {
   if (!v) return "—"
   try {
     const text = String(v).includes("T") ? String(v) : `${v}T00:00:00`
@@ -64,18 +61,25 @@ function tipoPorConcepto(concepto) {
 
 function badgeTipoClass(tipo) {
   return String(tipo || "").toUpperCase() === "INGRESO"
-    ? "text-bg-success"
-    : "text-bg-danger"
+    ? "badge-soft-success"
+    : "badge-soft-danger"
 }
 
-// =========================
-// Turno
-// =========================
+function turnoLabel(turno) {
+  return turno === "MANIANA" ? "MAÑANA" : "TARDE"
+}
+
+function pickError(e, fallback = "Ocurrió un error.") {
+  return (
+    e?.response?.data?.error ||
+    e?.response?.data?.message ||
+    e?.message ||
+    fallback
+  )
+}
+
 const selectedTurno = ref(getTurnoOperativo())
 
-// =========================
-// UI State
-// =========================
 const loading = ref(false)
 const errorMsg = ref("")
 const okMsg = ref("")
@@ -84,6 +88,16 @@ const infoMsg = ref("")
 const caja = ref(null)
 const saldoActual = ref(0)
 const movimientos = ref([])
+const metodosPago = ref([])
+const metodosLoaded = ref(false)
+
+const productosById = ref(new Map())
+const productosLoaded = ref(false)
+
+const clientes = ref([])
+const clientesLoaded = ref(false)
+
+const ventaInfoCache = ref({})
 
 const abrirMontoInicial = ref("")
 const montoContado = ref("")
@@ -96,14 +110,253 @@ const movForm = ref({
   descripcion: "",
 })
 
+const confirmState = ref({
+  open: false,
+  title: "",
+  message: "",
+  variant: "primary",
+  onConfirm: null,
+})
+
+function clearMsgs() {
+  errorMsg.value = ""
+  okMsg.value = ""
+  infoMsg.value = ""
+}
+
+function openConfirm({ title, message, variant = "primary", onConfirm }) {
+  confirmState.value = {
+    open: true,
+    title,
+    message,
+    variant,
+    onConfirm,
+  }
+}
+
+function closeConfirm() {
+  confirmState.value = {
+    open: false,
+    title: "",
+    message: "",
+    variant: "primary",
+    onConfirm: null,
+  }
+}
+function safeId(x) {
+  const n = Number(x ?? 0)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+function normalizeMetodoPago(x) {
+  return {
+    id: safeId(x?.metodoPagoId ?? x?.id),
+    nombre: String(x?.nombre ?? x?.name ?? x?.descripcion ?? "SIN NOMBRE"),
+  }
+}
+
+async function fetchMetodosPagoOnce() {
+  if (metodosLoaded.value) return
+  try {
+    const { data } = await metodosPagoApi.list()
+    const arr = Array.isArray(data) ? data : []
+    metodosPago.value = arr.map(normalizeMetodoPago).filter((m) => m.id > 0)
+  } catch {
+    metodosPago.value = []
+  } finally {
+    metodosLoaded.value = true
+  }
+}
+
+function metodoNombreById(id) {
+  const mid = safeId(id)
+  const m = metodosPago.value.find((x) => Number(x.id) === mid)
+  return m?.nombre ?? "-"
+}
+
+function unwrapPageLite(data) {
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data?.content)) return data.content
+  if (Array.isArray(data?.items)) return data.items
+  if (Array.isArray(data?.data)) return data.data
+  return []
+}
+
+async function fetchProductosOnce() {
+  if (productosLoaded.value) return
+  try {
+    const { data } = await productosApi.list({ page: 0, size: 1000, search: "" })
+    const arr = unwrapPageLite(data)
+    const map = new Map()
+
+    for (const p of arr) {
+      const id = safeId(p?.productoId ?? p?.id)
+      if (id) {
+        map.set(id, String(p?.nombre ?? `Producto #${id}`))
+      }
+    }
+
+    productosById.value = map
+  } catch {
+    productosById.value = new Map()
+  } finally {
+    productosLoaded.value = true
+  }
+}
+
+function mapClienteLite(c) {
+  return {
+    id: safeId(c?.clienteId ?? c?.id),
+    nombre: c?.nombre ?? "",
+    apellido: c?.apellido ?? "",
+    dni: c?.dni ?? null,
+  }
+}
+
+async function fetchClientesOnce() {
+  if (clientesLoaded.value) return
+  try {
+    const { data } = await clientesApi.list({ page: 0, size: 1000, search: "" })
+    const arr = unwrapPageLite(data)
+    clientes.value = arr.map(mapClienteLite).filter((c) => c.id > 0)
+  } catch {
+    clientes.value = []
+  } finally {
+    clientesLoaded.value = true
+  }
+}
+
+const clienteById = computed(() => {
+  const map = new Map()
+  for (const c of clientes.value) {
+    map.set(Number(c.id), c)
+  }
+  return map
+})
+
+function clienteTxtById(clienteId) {
+  const cid = safeId(clienteId)
+  if (!cid) return "Mostrador"
+
+  const c = clienteById.value.get(cid)
+  if (!c) return `Cliente #${cid}`
+
+  const full = `${c.nombre ?? ""} ${c.apellido ?? ""}`.trim()
+  return full || `Cliente #${cid}`
+}
+
+function pickClienteIdFromVenta(venta) {
+  const raw =
+    venta?.clienteId ??
+    venta?.cliente_id ??
+    venta?.cliente?.clienteId ??
+    venta?.cliente?.id ??
+    venta?.cliente?.cliente_id ??
+    null
+
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+async function hydrateVentaInfoFromVentaId(ventaId) {
+  const vid = safeId(ventaId)
+  if (!vid) return
+  if (ventaInfoCache.value[vid]) return
+
+  try {
+    const { data } = await ventasApi.porId(vid)
+    const venta = data?.venta ?? data?.ventaActualizada ?? data ?? null
+
+    const clienteId = pickClienteIdFromVenta(venta)
+    const metodoPagoId =
+      venta?.metodoPagoId ??
+      venta?.metodo_pago_id ??
+      venta?.metodoId ??
+      null
+
+    const detalles =
+      venta?.detallesVenta ??
+      venta?.detalles ??
+      venta?.items ??
+      venta?.detalleVenta ??
+      []
+
+    const itemsTxt = Array.isArray(detalles)
+      ? detalles
+          .map((d) => {
+            const cant = Number(d?.cantidad ?? d?.qty ?? 0) || 0
+            const pid = safeId(d?.productoId ?? d?.producto_id)
+            const nombre =
+              d?.productoNombre ??
+              d?.producto?.nombre ??
+              d?.nombreProducto ??
+              productosById.value.get(pid) ??
+              (pid ? `Producto #${pid}` : "Producto")
+
+            return cant > 0 ? `${cant}× ${nombre}` : nombre
+          })
+          .filter(Boolean)
+          .slice(0, 2)
+          .join(" · ")
+      : ""
+
+    ventaInfoCache.value = {
+      ...ventaInfoCache.value,
+      [vid]: {
+        clienteId,
+        metodoPagoId,
+        itemsTxt,
+      },
+    }
+  } catch {
+    ventaInfoCache.value = {
+      ...ventaInfoCache.value,
+      [vid]: {
+        clienteId: null,
+        metodoPagoId: null,
+        itemsTxt: "",
+      },
+    }
+  }
+}
+
+function pickVentaIdFromMovimiento(m) {
+  return safeId(m?.ventaId ?? m?.venta_id ?? m?.venta ?? 0)
+}
+
+function movimientoVentaResumen(m) {
+  const ventaId = pickVentaIdFromMovimiento(m)
+  if (!ventaId) return m.descripcion ?? "—"
+
+  const info = ventaInfoCache.value[ventaId]
+  if (!info) return `Venta #${ventaId}`
+
+  const cliente = clienteTxtById(info.clienteId)
+  const metodo = info.metodoPagoId ? metodoNombreById(info.metodoPagoId) : null
+
+  return [`Venta #${ventaId}`, cliente, metodo].filter(Boolean).join(" · ")
+}
+
+function movimientoVentaItems(m) {
+  const ventaId = pickVentaIdFromMovimiento(m)
+  if (!ventaId) return ""
+  const info = ventaInfoCache.value[ventaId]
+  return info?.itemsTxt || ""
+}
+
+async function confirmAccept() {
+  const action = confirmState.value.onConfirm
+  closeConfirm()
+  if (typeof action === "function") {
+    await action()
+  }
+}
+
 function tipoMovimientoParaForm() {
   if (movForm.value.concepto === "AJUSTE") return movForm.value.tipoManual
   return tipoPorConcepto(movForm.value.concepto)
 }
 
-// =========================
-// Derived
-// =========================
 const movimientosOrdenados = computed(() => {
   const arr = Array.isArray(movimientos.value) ? [...movimientos.value] : []
   arr.sort((a, b) => {
@@ -114,66 +367,49 @@ const movimientosOrdenados = computed(() => {
   return arr
 })
 
-const ultimosMovs = computed(() => movimientosOrdenados.value.slice(0, 12))
+const ultimosMovs = computed(() => movimientosOrdenados.value.slice(0, 8))
 
-const kpiIngresos = computed(() => {
-  return movimientosOrdenados.value
+const kpiIngresos = computed(() =>
+  movimientosOrdenados.value
     .filter((m) => String(m?.tipo || "").toUpperCase() === "INGRESO")
     .reduce((acc, m) => acc + Number(m?.monto ?? 0), 0)
-})
+)
 
-const kpiEgresos = computed(() => {
-  return movimientosOrdenados.value
+const kpiEgresos = computed(() =>
+  movimientosOrdenados.value
     .filter((m) => String(m?.tipo || "").toUpperCase() === "EGRESO")
     .reduce((acc, m) => acc + Number(m?.monto ?? 0), 0)
-})
+)
 
-const kpiVentas = computed(() => {
-  return movimientosOrdenados.value
+const kpiVentas = computed(() =>
+  movimientosOrdenados.value
     .filter((m) => String(m?.concepto || "").toUpperCase() === "VENTA")
     .reduce((acc, m) => acc + Number(m?.monto ?? 0), 0)
-})
+)
 
-const kpiPagosProveedor = computed(() => {
-  return movimientosOrdenados.value
+const kpiPagosProveedor = computed(() =>
+  movimientosOrdenados.value
     .filter((m) => String(m?.concepto || "").toUpperCase() === "PAGO_PROVEEDOR")
     .reduce((acc, m) => acc + Number(m?.monto ?? 0), 0)
-})
+)
 
 const contadoNum = computed(() => toMoneyNumber(montoContado.value))
 
 const diferencia = computed(() => {
-  const c = contadoNum.value
-  if (!Number.isFinite(c)) return null
-  return c - Number(saldoActual.value ?? 0)
+  if (contadoNum.value === null) return null
+  return contadoNum.value - Number(saldoActual.value ?? 0)
 })
 
-const canAbrir = computed(() => {
-  return canAbrirCajaPerm.value && !caja.value?.cajaId && !loading.value
-})
-
-const canCerrar = computed(() => {
-  return canCerrarCajaPerm.value && !!caja.value?.cajaId && !loading.value
-})
-
-const puedeRegistrarMovimiento = computed(() => {
-  return canCrearMovimientoPerm.value && !!caja.value?.cajaId && !loading.value
-})
-
-const esResponsableCaja = computed(() => {
-  return Number(caja.value?.userId ?? 0) === userId
-})
+const canAbrir = computed(() => canAbrirCajaPerm.value && !caja.value?.cajaId && !loading.value)
+const canCerrar = computed(() => canCerrarCajaPerm.value && !!caja.value?.cajaId && !loading.value)
+const puedeRegistrarMovimiento = computed(() => canCrearMovimientoPerm.value && !!caja.value?.cajaId && !loading.value)
 
 const cierreHint = computed(() => {
-  if (!caja.value?.cajaId) return "No hay caja abierta."
-  if (isAdmin.value) return "Como ADMIN podés cerrar cualquier caja."
-  if (esResponsableCaja.value) return "Podés cerrar esta caja porque sos el responsable."
-  return "Solo el responsable o un ADMIN pueden cerrar esta caja."
+  if (!caja.value?.cajaId) return "No hay caja abierta en este turno."
+  if (isAdmin.value) return "Como administrador, podés cerrar la caja operativa."
+  return "Podés seguir operando o cerrar la caja cuando finalice el turno."
 })
 
-// =========================
-// Data
-// =========================
 async function loadMovimientos() {
   if (!caja.value?.cajaId) {
     movimientos.value = []
@@ -196,16 +432,13 @@ async function refresh() {
   infoMsg.value = ""
 
   try {
-    const { data } = await cajaApi.abierta({
-      turno: selectedTurno.value,
-    })
-
+    const { data } = await cajaApi.abierta({ turno: selectedTurno.value })
     caja.value = data ?? null
 
     if (!caja.value?.cajaId) {
       saldoActual.value = 0
       movimientos.value = []
-      infoMsg.value = "No hay caja abierta para este turno."
+      infoMsg.value = `No hay caja abierta para el turno ${turnoLabel(selectedTurno.value)}.`
       return
     }
 
@@ -218,120 +451,102 @@ async function refresh() {
       movimientos.value = []
     }
   } catch (e) {
+    caja.value = null
+    saldoActual.value = 0
+    movimientos.value = []
+
     if (e?.response?.status === 404) {
-      caja.value = null
-      saldoActual.value = 0
-      movimientos.value = []
-      infoMsg.value = "No hay caja abierta para este turno."
+      infoMsg.value = `No hay caja abierta para el turno ${turnoLabel(selectedTurno.value)}.`
     } else if (e?.response?.status === 403) {
-      caja.value = null
-      saldoActual.value = 0
-      movimientos.value = []
       errorMsg.value = "No tenés permisos para ver Caja."
     } else {
-      caja.value = null
-      saldoActual.value = 0
-      movimientos.value = []
-      errorMsg.value =
-        e?.response?.data?.error ||
-        e?.response?.data?.message ||
-        e?.message ||
-        "Error consultando la caja."
+      errorMsg.value = pickError(e, "Error consultando la caja.")
     }
   } finally {
     loading.value = false
   }
 }
 
-// =========================
-// Actions
-// =========================
-async function abrirCaja() {
-  errorMsg.value = ""
-  okMsg.value = ""
-  infoMsg.value = ""
+async function abrirCajaConfirmed(monto) {
+  try {
+    await cajaApi.abrir({
+      turno: selectedTurno.value,
+      montoInicial: monto ?? 0,
+    })
+
+    okMsg.value = "Caja abierta correctamente."
+    abrirMontoInicial.value = ""
+    emitCajaChanged()
+    await refresh()
+  } catch (e) {
+    errorMsg.value = pickError(e, "Error abriendo caja.")
+  }
+}
+
+function abrirCaja() {
+  clearMsgs()
 
   const monto = toMoneyNumber(abrirMontoInicial.value)
+
+  if (monto === null) {
+    openConfirm({
+      title: "Abrir caja sin saldo inicial",
+      message: "Vas a crear una caja sin monto inicial. ¿Querés continuar?",
+      variant: "warning",
+      onConfirm: () => abrirCajaConfirmed(0),
+    })
+    return
+  }
+
   if (!Number.isFinite(monto) || monto < 0) {
     errorMsg.value = "Ingresá un monto inicial válido."
     return
   }
 
-  try {
-    await cajaApi.abrir({
-      turno: selectedTurno.value,
-      montoInicial: monto,
-    })
-
-    okMsg.value = "Caja abierta ✅"
-    abrirMontoInicial.value = ""
-    emitCajaChanged()
-    await refresh()
-  } catch (e) {
-    errorMsg.value =
-      e?.response?.data?.error ||
-      e?.response?.data?.message ||
-      e?.message ||
-      "Error abriendo caja."
-  }
+  openConfirm({
+    title: "Confirmar apertura de caja",
+    message: `Se abrirá la caja del turno ${turnoLabel(selectedTurno.value)} con un monto inicial de $ ${formatMoney(monto)}.`,
+    variant: "primary",
+    onConfirm: () => abrirCajaConfirmed(monto),
+  })
 }
 
-async function cerrarCaja() {
-  errorMsg.value = ""
-  okMsg.value = ""
-  infoMsg.value = ""
-
-  if (!caja.value?.cajaId) {
-    errorMsg.value = "No hay caja ABIERTA para cerrar."
-    return
-  }
-
-  const contado = toMoneyNumber(montoContado.value)
-  const hayContado = Number.isFinite(contado)
-
+async function cerrarCajaConfirmed() {
   try {
-    if (hayContado) {
-      const esperado = Number(saldoActual.value ?? 0)
-      const diff = contado - esperado
-
-      if (Math.abs(diff) >= 0.01) {
-        await movimientosCajaApi.crear({
-  cajaId: caja.value.cajaId,
-  concepto: "AJUSTE",
-  tipo: diff > 0 ? "INGRESO" : "EGRESO",
-  monto: Math.abs(diff),
-  descripcion: `Arqueo cierre (contado: ${contado} / esperado: ${esperado})`,
-})
-      }
+    const payload = {
+      observacion: "Cierre de caja",
+      montoContado: Number.isFinite(contadoNum.value) ? contadoNum.value : null,
     }
 
-    await refresh()
+    await cajaApi.cerrar(caja.value.cajaId, payload)
 
-    await cajaApi.cerrar(caja.value.cajaId, {
-      montoContado: hayContado ? contado : null,
-      observacion: hayContado ? "Cierre con arqueo" : "Cierre sin arqueo informado",
-    })
-
-    okMsg.value = hayContado
-      ? `Caja cerrada ✅ (contado: $ ${formatMoney(contado)})`
-      : "Caja cerrada ✅"
-
+    okMsg.value = "Caja cerrada correctamente."
     montoContado.value = ""
     emitCajaChanged()
     await refresh()
   } catch (e) {
-    errorMsg.value =
-      e?.response?.data?.error ||
-      e?.response?.data?.message ||
-      e?.message ||
-      "Error cerrando caja."
+    errorMsg.value = pickError(e, "Error cerrando caja.")
   }
 }
 
+function cerrarCaja() {
+  clearMsgs()
+
+  if (!caja.value?.cajaId) {
+    errorMsg.value = "No hay caja abierta para cerrar."
+    return
+  }
+
+  openConfirm({
+    title: "Cerrar caja",
+    message: "¿Seguro querés cerrar la caja? Una vez cerrada, no podrás volver a abrirla en este turno.",
+    variant: "danger",
+    onConfirm: cerrarCajaConfirmed,
+  })
+}
+
 async function crearMovimientoManual() {
-  errorMsg.value = ""
-  okMsg.value = ""
-  infoMsg.value = ""
+  clearMsgs()
 
   if (!caja.value?.cajaId) {
     errorMsg.value = "Abrí una caja primero."
@@ -345,15 +560,15 @@ async function crearMovimientoManual() {
   }
 
   try {
-   await movimientosCajaApi.crear({
-  cajaId: caja.value.cajaId,
-  tipo: tipoMovimientoParaForm(),
-  concepto: movForm.value.concepto,
-  descripcion: movForm.value.descripcion?.trim() || null,
-  monto,
-})
+    await movimientosCajaApi.crear({
+      cajaId: caja.value.cajaId,
+      tipo: tipoMovimientoParaForm(),
+      concepto: movForm.value.concepto,
+      descripcion: movForm.value.descripcion?.trim() || null,
+      monto,
+    })
 
-    okMsg.value = "Movimiento registrado ✅"
+    okMsg.value = "Movimiento registrado correctamente."
     movForm.value = {
       concepto: "GASTO",
       tipoManual: "EGRESO",
@@ -365,17 +580,10 @@ async function crearMovimientoManual() {
     emitCajaChanged()
     await refresh()
   } catch (e) {
-    errorMsg.value =
-      e?.response?.data?.error ||
-      e?.response?.data?.message ||
-      e?.message ||
-      "Error registrando movimiento."
+    errorMsg.value = pickError(e, "Error registrando movimiento.")
   }
 }
 
-// =========================
-// Lifecycle
-// =========================
 watch(selectedTurno, async (v) => {
   setTurnoOperativo(v)
   await refresh()
@@ -394,98 +602,115 @@ onMounted(async () => {
 
 <template>
   <div class="caja-page">
-    <div class="d-flex align-items-start justify-content-between gap-3 mb-3 flex-wrap">
+    <section class="page-hero">
       <div>
-        <h1 class="h4 mb-1">Caja (POS)</h1>
-
-        <div class="text-secondary small">
-          Usuario: <b>{{ userId }}</b> · Hoy: <b>{{ todayISO() }}</b>
-        </div>
-
-      <div class="d-flex gap-2 mt-2 flex-wrap align-items-end">
-  <div>
-    <label class="form-label text-secondary mb-1">Turno</label>
-
-    <select
-      v-model="selectedTurno"
-      class="form-control bg-dark text-white border-secondary"
-      :disabled="Boolean(caja?.cajaId) || loading"
-    >
-      <option value="MANIANA">MAÑANA</option>
-      <option value="TARDE">TARDE</option>
-    </select>
-
-    <div class="text-secondary small mt-1" v-if="caja?.cajaId">
-      Turno bloqueado mientras la caja está abierta.
-    </div>
-  </div>
-</div>
+        <p class="eyebrow mb-1">Operación</p>
+        <h1 class="page-title mb-1">Caja</h1>
+        <p class="page-subtitle mb-0">
+          Gestión operativa del turno, apertura, arqueo y últimos movimientos.
+        </p>
       </div>
 
-      <div class="d-flex gap-2 flex-wrap align-items-center">
-        <button class="btn btn-sm btn-outline-light" @click="refresh" :disabled="loading || !canViewCaja">
+      <div class="hero-actions">
+        <button class="btn btn-outline-light" @click="refresh" :disabled="loading || !canViewCaja">
           {{ loading ? "Actualizando..." : "Actualizar" }}
         </button>
-
-        <RouterLink class="btn btn-sm btn-outline-light" to="/movimientos-caja">
-          Movimientos
-        </RouterLink>
-
-        <RouterLink class="btn btn-sm btn-outline-light" to="/compras">
-          Compras
-        </RouterLink>
-
-        <RouterLink class="btn btn-sm btn-primary btn-accent" to="/ventas">
-          Ventas
-        </RouterLink>
+        <RouterLink class="btn btn-outline-light" to="/movimientos-caja">Movimientos</RouterLink>
+        <RouterLink class="btn btn-outline-light" to="/compras">Compras</RouterLink>
+        <RouterLink class="btn btn-primary btn-accent" to="/ventas">Ventas</RouterLink>
       </div>
-    </div>
-
-    <div v-if="errorMsg" class="alert alert-danger py-2">{{ errorMsg }}</div>
-    <div v-if="okMsg" class="alert alert-success py-2">{{ okMsg }}</div>
-    <div v-if="infoMsg" class="alert alert-secondary py-2">{{ infoMsg }}</div>
+    </section>
 
     <div class="row g-3 mb-3">
+      <div class="col-12">
+        <div class="card bg-panel border-0 shadow-sm">
+          <div class="card-body">
+            <div class="row g-3 align-items-end">
+              <div class="col-12 col-md-4 col-lg-3">
+                <label class="form-label field-label">Turno operativo</label>
+                <select
+                  v-model="selectedTurno"
+                  class="form-select app-input"
+                  :disabled="Boolean(caja?.cajaId) || loading"
+                >
+                  <option value="MANIANA">MAÑANA</option>
+                  <option value="TARDE">TARDE</option>
+                </select>
+
+                <div v-if="caja?.cajaId" class="helper-text mt-2">
+                  El turno queda bloqueado mientras la caja esté abierta.
+                </div>
+              </div>
+
+              <div class="col-12 col-md">
+                <div class="status-summary-card">
+                  <div class="status-summary-icon">
+                    <span class="status-dot" :class="{ active: !!caja?.cajaId }"></span>
+                  </div>
+
+                  <div class="status-summary-content">
+                    <div class="field-label mb-1">Estado actual</div>
+                    <div class="status-summary-title">
+                      {{ caja?.cajaId ? "Caja abierta" : "Sin caja abierta" }}
+                    </div>
+                    <div class="status-summary-subtitle">
+                      {{ caja?.cajaId ? `Turno ${turnoLabel(caja.turno)}` : `Turno ${turnoLabel(selectedTurno)}` }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-12 col-lg-auto">
+                <div v-if="errorMsg" class="alert alert-danger py-2 mb-0">{{ errorMsg }}</div>
+                <div v-else-if="okMsg" class="alert alert-success py-2 mb-0">{{ okMsg }}</div>
+                <div v-else-if="infoMsg" class="alert alert-secondary py-2 mb-0">{{ infoMsg }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="col-12 col-lg-4">
         <div class="card bg-panel border-0 shadow-sm h-100">
           <div class="card-body">
-            <div class="text-secondary small">Estado</div>
+            <div class="section-header mb-3">
+              <h2 class="section-title mb-0">Estado de caja</h2>
+            </div>
 
-            <div v-if="caja?.cajaId" class="mt-2">
-              <div class="d-flex align-items-center gap-2 flex-wrap">
-                <span class="badge text-bg-success">ABIERTA</span>
-                <span class="badge text-bg-dark border">Turno {{ caja.turno }}</span>
+            <template v-if="caja?.cajaId">
+              <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+                <span class="badge badge-soft-success">ABIERTA</span>
+                <span class="badge badge-soft-neutral">Turno {{ turnoLabel(caja.turno) }}</span>
               </div>
 
-              <div class="text-secondary small mt-2">Caja ID: <b>{{ caja.cajaId }}</b></div>
-              <div class="text-secondary small">Responsable: <b>{{ caja.userId }}</b></div>
-              <div class="text-secondary small">
-                Apertura: <b>{{ safeDateLabel(caja.apertura || caja.fecha) }}</b>
+              <div class="info-list">
+                <div class="info-row">
+                  <span>Apertura</span>
+                  <strong>{{ formatDateTime(caja.apertura || caja.fecha) }}</strong>
+                </div>
+                <div class="info-row">
+                  <span>Monto inicial</span>
+                  <strong>$ {{ formatMoney(caja.montoInicial) }}</strong>
+                </div>
+                <div class="info-row">
+                  <span>Saldo actual</span>
+                  <strong>$ {{ formatMoney(saldoActual) }}</strong>
+                </div>
               </div>
 
-              <div class="text-secondary small mt-2">
+              <div class="helper-text mt-3">
                 {{ cierreHint }}
               </div>
+            </template>
 
-              <hr class="border-secondary my-3" />
-
-              <div class="d-flex justify-content-between">
-                <div class="text-secondary small">Monto inicial</div>
-                <div class="fw-bold">$ {{ formatMoney(caja.montoInicial) }}</div>
+            <template v-else>
+              <div class="empty-block">
+                <div class="empty-title">No hay caja abierta</div>
+                <div class="helper-text">
+                  Abrí la caja del turno {{ turnoLabel(selectedTurno) }} para comenzar a operar.
+                </div>
               </div>
-
-              <div class="d-flex justify-content-between mt-2">
-                <div class="text-secondary small">Saldo actual</div>
-                <div class="fw-bold">$ {{ formatMoney(saldoActual) }}</div>
-              </div>
-            </div>
-
-            <div v-else class="mt-2 text-secondary">
-              No hay caja abierta para <b>{{ selectedTurno === "MANIANA" ? "MAÑANA" : "TARDE" }}</b>.
-              <div class="text-secondary small mt-1">
-                Abrí caja para comenzar a operar el turno.
-              </div>
-            </div>
+            </template>
           </div>
         </div>
       </div>
@@ -493,125 +718,112 @@ onMounted(async () => {
       <div class="col-12 col-lg-8">
         <div class="card bg-panel border-0 shadow-sm h-100">
           <div class="card-body">
-            <div class="d-flex justify-content-between flex-wrap gap-2 align-items-center mb-2">
-              <h2 class="h6 mb-0">Resumen del turno</h2>
-              <div class="text-secondary small">Basado en movimientos de caja</div>
+            <div class="section-header mb-3">
+              <h2 class="section-title mb-0">Resumen del turno</h2>
+              <div class="helper-text">Totales calculados a partir de los movimientos registrados</div>
             </div>
 
             <div class="row g-2">
               <div class="col-6 col-md-3">
-                <div class="kpi">
+                <div class="kpi-card">
                   <div class="kpi-label">Ingresos</div>
                   <div class="kpi-value text-success">$ {{ formatMoney(kpiIngresos) }}</div>
                 </div>
               </div>
-
               <div class="col-6 col-md-3">
-                <div class="kpi">
+                <div class="kpi-card">
                   <div class="kpi-label">Egresos</div>
                   <div class="kpi-value text-danger">$ {{ formatMoney(kpiEgresos) }}</div>
                 </div>
               </div>
-
               <div class="col-6 col-md-3">
-                <div class="kpi">
+                <div class="kpi-card">
                   <div class="kpi-label">Ventas</div>
                   <div class="kpi-value">$ {{ formatMoney(kpiVentas) }}</div>
                 </div>
               </div>
-
               <div class="col-6 col-md-3">
-                <div class="kpi">
-                  <div class="kpi-label">Pagos prov.</div>
+                <div class="kpi-card">
+                  <div class="kpi-label">Pagos a proveedor</div>
                   <div class="kpi-value">$ {{ formatMoney(kpiPagosProveedor) }}</div>
                 </div>
               </div>
             </div>
 
-            <hr class="border-secondary my-3" />
-
-            <h2 class="h6 mb-3">Operación del turno</h2>
+            <hr class="border-secondary my-4" />
 
             <div class="row g-3">
               <div class="col-12 col-md-6">
-  <template v-if="!caja?.cajaId">
-    <label class="form-label text-secondary">Monto inicial</label>
-    <input
-      v-model="abrirMontoInicial"
-      class="form-control bg-dark text-white border-secondary"
-      placeholder="Ej: 20000"
-      inputmode="numeric"
-      :disabled="loading || !canAbrirCajaPerm"
-    />
+                <template v-if="!caja?.cajaId">
+                  <label class="form-label field-label">Monto inicial</label>
+                  <input
+                    v-model="abrirMontoInicial"
+                    class="form-control app-input"
+                    placeholder="Ej: 20000"
+                    inputmode="numeric"
+                    :disabled="loading || !canAbrirCajaPerm"
+                  />
 
-    <button
-      class="btn btn-primary btn-accent w-100 mt-2"
-      @click="abrirCaja"
-      :disabled="!canAbrir"
-    >
-      Abrir caja
-    </button>
+                  <button class="btn btn-primary btn-accent w-100 mt-3" @click="abrirCaja" :disabled="!canAbrir">
+                    Abrir caja
+                  </button>
 
-    <div class="text-secondary small mt-2">
-      Se abrirá una única caja para el turno seleccionado.
-    </div>
-  </template>
+                  <div class="helper-text mt-2">
+                    Se abrirá una única caja para el turno seleccionado.
+                  </div>
+                </template>
 
-  <template v-else>
-    <label class="form-label text-secondary">Caja operativa</label>
-    <div class="form-control bg-dark text-white border-secondary d-flex align-items-center">
-      Caja abierta en turno {{ caja.turno === "MANIANA" ? "MAÑANA" : "TARDE" }}
-    </div>
+                <template v-else>
+                  <label class="form-label field-label">Caja operativa</label>
+                  <div class="static-field">
+                    Caja abierta en turno {{ turnoLabel(caja.turno) }}
+                  </div>
+                  <div class="helper-text mt-2">
+                    La apertura ya fue realizada. Podés seguir operando normalmente.
+                  </div>
+                </template>
+              </div>
 
-    <div class="text-secondary small mt-2">
-      La apertura ya fue realizada. Podés seguir operando o cerrar la caja.
-    </div>
-  </template>
-</div>
               <div class="col-12 col-md-6">
-                <label class="form-label text-secondary">Cierre / Arqueo</label>
+                <label class="form-label field-label">Cierre y arqueo</label>
 
-                <div class="d-flex justify-content-between small text-secondary">
-                  <span>Esperado</span>
-                  <b>$ {{ formatMoney(saldoActual) }}</b>
+                <div class="info-row mb-2">
+                  <span class="helper-text">Esperado</span>
+                  <strong>$ {{ formatMoney(saldoActual) }}</strong>
                 </div>
 
                 <input
                   v-model="montoContado"
-                  class="form-control bg-dark text-white border-secondary mt-2"
-                  placeholder="Contado (opcional)"
+                  class="form-control app-input"
+                  placeholder="Contado final (opcional)"
                   inputmode="numeric"
                   :disabled="loading || !caja?.cajaId || !canCerrarCajaPerm"
                 />
 
-                <div class="d-flex justify-content-between small mt-2">
-                  <span class="text-secondary">Diferencia</span>
+                <div class="info-row mt-2">
+                  <span class="helper-text">Diferencia</span>
 
-                  <b
+                  <strong
                     v-if="diferencia !== null"
-                    :class="diferencia === 0 ? 'text-success' : (diferencia > 0 ? 'text-success' : 'text-danger')"
+                    :class="diferencia === 0 ? 'text-success' : diferencia > 0 ? 'text-success' : 'text-danger'"
                   >
                     {{ diferencia > 0 ? "+" : "" }}$ {{ formatMoney(diferencia) }}
-                  </b>
+                  </strong>
 
-                  <span v-else class="text-secondary">—</span>
+                  <span v-else class="helper-text">—</span>
                 </div>
 
-                <button
-                  class="btn btn-outline-light w-100 mt-2"
-                  @click="cerrarCaja"
-                  :disabled="!canCerrar"
-                >
+                <button class="btn btn-outline-light w-100 mt-3" @click="cerrarCaja" :disabled="!canCerrar">
                   Cerrar caja
                 </button>
 
-                <div class="text-secondary small mt-2">
-                  Si cargás el contado y hay diferencia, se registra un <b>AJUSTE</b> automático antes del cierre.
+                <div class="helper-text mt-2">
+                  Si tu backend soporta arqueo, el contado final puede usarse para registrar el cierre con diferencia.
                 </div>
               </div>
             </div>
 
-            <div class="d-flex gap-2 mt-3 flex-wrap">
+            <div class="d-flex gap-2 mt-4 flex-wrap">
               <button
                 class="btn btn-sm btn-primary btn-accent"
                 :disabled="!puedeRegistrarMovimiento"
@@ -623,7 +835,7 @@ onMounted(async () => {
               <RouterLink
                 class="btn btn-sm btn-outline-light"
                 :class="{ disabled: !caja?.cajaId }"
-                to="/movimientos-caja"
+                to="/caja/movimientos"
               >
                 Ver historial completo
               </RouterLink>
@@ -633,103 +845,89 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div class="card bg-panel border-0 shadow-sm" v-if="caja?.cajaId">
-      <div class="card-body">
-        <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-3">
-          <h2 class="h6 mb-0">Últimos movimientos</h2>
-          <div class="text-secondary small">
-            {{ ultimosMovs.length }} registro(s) recientes
-          </div>
-        </div>
-
-        <div v-if="ultimosMovs.length === 0" class="text-secondary">
-          No hay movimientos todavía.
-        </div>
-
-        <div v-else class="table-responsive">
-          <table class="table table-dark table-hover align-middle mb-0">
-            <thead>
-              <tr>
-                <th style="width: 180px">Fecha</th>
-                <th style="width: 110px">Tipo</th>
-                <th style="width: 150px">Concepto</th>
-                <th>Descripción</th>
-                <th style="width: 140px" class="text-end">Monto</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="m in ultimosMovs" :key="m.movimientoCajaId ?? m.id">
-                <td class="text-secondary">{{ safeDateLabel(m.fecha) }}</td>
-                <td>
-                  <span class="badge" :class="badgeTipoClass(m.tipo)">
-                    {{ m.tipo }}
-                  </span>
-                </td>
-                <td class="text-secondary">{{ m.concepto ?? "—" }}</td>
-                <td class="text-secondary">{{ m.descripcion ?? "—" }}</td>
-                <td class="text-end fw-bold">$ {{ formatMoney(m.monto) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="text-secondary small mt-2">
-          Las ventas y pagos a proveedor deberían impactar caja automáticamente desde sus módulos.
-        </div>
-      </div>
-    </div>
+    
 
     <div v-if="showMovModal" class="modal-backdrop" @click.self="showMovModal = false">
       <div class="modal-card">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-          <div class="fw-bold">Nuevo movimiento manual</div>
-          <button class="btn btn-sm btn-outline-light" @click="showMovModal = false">X</button>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <div class="section-title">Nuevo movimiento manual</div>
+            <div class="helper-text">Registrá un ajuste operativo de caja</div>
+          </div>
+          <button class="btn btn-sm btn-outline-light" @click="showMovModal = false">Cerrar</button>
         </div>
 
-        <div class="row g-2">
+        <div class="row g-3">
           <div class="col-12">
-            <label class="form-label text-secondary">Concepto</label>
-            <select v-model="movForm.concepto" class="form-control bg-dark text-white border-secondary">
-              <option value="GASTO">GASTO (egreso)</option>
-              <option value="RETIRO">RETIRO (egreso)</option>
-              <option value="APORTE">APORTE (ingreso)</option>
+            <label class="form-label field-label">Concepto</label>
+            <select v-model="movForm.concepto" class="form-select app-input">
+              <option value="GASTO">GASTO</option>
+              <option value="RETIRO">RETIRO</option>
+              <option value="APORTE">APORTE</option>
               <option value="AJUSTE">AJUSTE</option>
             </select>
-            <div class="text-secondary small mt-1">
-              VENTA y PAGO_PROVEEDOR deben generarse automáticamente desde sus módulos.
+            <div class="helper-text mt-2">
+              VENTA y PAGO_PROVEEDOR deberían generarse automáticamente desde sus módulos.
             </div>
           </div>
 
           <div class="col-12" v-if="movForm.concepto === 'AJUSTE'">
-            <label class="form-label text-secondary">Tipo de ajuste</label>
-            <select v-model="movForm.tipoManual" class="form-control bg-dark text-white border-secondary">
-              <option value="INGRESO">INGRESO (suma)</option>
-              <option value="EGRESO">EGRESO (resta)</option>
+            <label class="form-label field-label">Tipo de ajuste</label>
+            <select v-model="movForm.tipoManual" class="form-select app-input">
+              <option value="INGRESO">INGRESO</option>
+              <option value="EGRESO">EGRESO</option>
             </select>
           </div>
 
           <div class="col-12">
-            <label class="form-label text-secondary">Monto</label>
-            <input
-              v-model="movForm.monto"
-              class="form-control bg-dark text-white border-secondary"
-              inputmode="numeric"
-            />
+            <label class="form-label field-label">Monto</label>
+            <input v-model="movForm.monto" class="form-control app-input" inputmode="numeric" />
           </div>
 
           <div class="col-12">
-            <label class="form-label text-secondary">Descripción</label>
+            <label class="form-label field-label">Descripción</label>
             <input
               v-model="movForm.descripcion"
-              class="form-control bg-dark text-white border-secondary"
-              placeholder="Opcional"
+              class="form-control app-input"
+              placeholder="Detalle opcional"
             />
           </div>
         </div>
 
-        <button class="btn btn-primary btn-accent w-100 mt-3" @click="crearMovimientoManual">
+        <button class="btn btn-primary btn-accent w-100 mt-4" @click="crearMovimientoManual">
           Guardar movimiento
         </button>
+      </div>
+    </div>
+
+    <div v-if="confirmState.open" class="modal-backdrop" @click.self="closeConfirm">
+      <div class="confirm-card">
+        <div class="confirm-icon" :class="`confirm-icon--${confirmState.variant}`">
+          <span v-if="confirmState.variant === 'danger'">!</span>
+          <span v-else-if="confirmState.variant === 'warning'">!</span>
+          <span v-else>✓</span>
+        </div>
+
+        <div class="confirm-title">{{ confirmState.title }}</div>
+        <div class="confirm-text">{{ confirmState.message }}</div>
+
+        <div class="confirm-actions">
+          <button class="btn btn-outline-light" @click="closeConfirm">
+            Cancelar
+          </button>
+
+          <button
+            class="btn"
+            :class="{
+              'btn-confirm-primary': confirmState.variant === 'primary',
+              'btn-confirm-danger': confirmState.variant === 'danger',
+              'btn-confirm-warning': confirmState.variant === 'warning',
+            }"
+            @click="confirmAccept"
+          >
+            Confirmar
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -740,54 +938,54 @@ onMounted(async () => {
   min-height: 100%;
 }
 
-.bg-panel {
-  background: rgba(18, 22, 32, 0.92);
+.status-summary-card {
+  min-height: 76px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.08);
 }
 
-.btn-accent {
-  background: #6f5cff;
-  border: none;
-}
-
-.btn-accent:hover {
-  background: #5f4de6;
-}
-
-.kpi {
-  border: 1px solid rgba(255,255,255,.10);
-  border-radius: 12px;
-  padding: 10px 12px;
-  background: rgba(0,0,0,.15);
-}
-
-.kpi-label {
-  color: rgba(255,255,255,.65);
-  font-size: 12px;
-}
-
-.kpi-value {
-  font-weight: 800;
-  font-size: 16px;
-}
-
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,.55);
+.status-summary-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 18px;
-  z-index: 999;
+  flex-shrink: 0;
 }
 
-.modal-card {
-  width: 100%;
-  max-width: 520px;
-  background: rgba(18, 22, 32, .98);
-  border: 1px solid rgba(255,255,255,.10);
-  border-radius: 14px;
-  padding: 16px;
-  box-shadow: 0 18px 60px rgba(0,0,0,.45);
+.status-summary-content {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+.status-summary-title {
+  color: #fff;
+  font-weight: 800;
+  font-size: 1.05rem;
+  line-height: 1.1;
+}
+
+.status-summary-subtitle {
+  color: rgba(255,255,255,.68);
+  font-size: .92rem;
+  margin-top: 2px;
+}
+
+.status-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.25);
+  box-shadow: 0 0 0 6px rgba(255,255,255,.04);
+}
+
+.status-dot.active {
+  background: #27d17f;
+  box-shadow: 0 0 0 6px rgba(39, 209, 127, .10);
 }
 </style>

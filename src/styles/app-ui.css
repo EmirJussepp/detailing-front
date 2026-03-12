@@ -1,0 +1,538 @@
+/* =========================================================
+   APP UI · GestionaTuNegocio
+   Estilos globales compartidos
+   ========================================================= */
+
+:root {
+  --app-bg-panel-top: rgba(21, 26, 38, 0.98);
+  --app-bg-panel-bottom: rgba(15, 19, 29, 0.96);
+
+  --app-border-soft: rgba(255, 255, 255, 0.06);
+  --app-border-mid: rgba(255, 255, 255, 0.08);
+  --app-border-strong: rgba(255, 255, 255, 0.12);
+
+  --app-text-main: #ffffff;
+  --app-text-soft: rgba(255, 255, 255, 0.72);
+  --app-text-muted: rgba(255, 255, 255, 0.58);
+  --app-text-subtle: rgba(255, 255, 255, 0.68);
+
+  --app-accent: #7b68ff;
+  --app-accent-2: #6557ff;
+  --app-accent-hover-1: #6d5af2;
+  --app-accent-hover-2: #5d4ef0;
+
+  --app-success: #7ee2ab;
+  --app-danger: #ff8d98;
+  --app-warning: #fcd34d;
+  --app-primary-soft: #93c5fd;
+  --app-secondary-soft: #d1d5db;
+
+  --app-radius-panel: 18px;
+  --app-radius-card: 16px;
+  --app-radius-input: 12px;
+}
+
+/* =========================================================
+   Layout general de páginas
+   ========================================================= */
+
+.page-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.eyebrow {
+  color: #9f8cff;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.page-title {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--app-text-main);
+}
+
+.page-subtitle {
+  color: var(--app-text-subtle);
+}
+
+.hero-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* =========================================================
+   Paneles / cards
+   ========================================================= */
+
+.bg-panel {
+  background: linear-gradient(
+    180deg,
+    var(--app-bg-panel-top) 0%,
+    var(--app-bg-panel-bottom) 100%
+  );
+  border: 1px solid var(--app-border-soft);
+  border-radius: var(--app-radius-panel);
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.section-title {
+  color: var(--app-text-main);
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.field-label {
+  color: var(--app-text-soft);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.helper-text {
+  color: var(--app-text-muted);
+  font-size: 0.85rem;
+}
+
+/* =========================================================
+   Inputs / selects
+   ========================================================= */
+
+.app-input,
+.app-input.form-control,
+.app-input.form-select {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--app-text-main);
+  border: 1px solid var(--app-border-strong);
+  min-height: 44px;
+  border-radius: var(--app-radius-input);
+}
+
+.app-input:focus,
+.app-input.form-control:focus,
+.app-input.form-select:focus {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--app-text-main);
+  border-color: rgba(123, 104, 255, 0.55);
+  box-shadow: 0 0 0 0.18rem rgba(123, 104, 255, 0.16);
+}
+
+.app-input::placeholder {
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.app-input:disabled,
+.app-input.form-control:disabled,
+.app-input.form-select:disabled {
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(255, 255, 255, 0.52);
+  border-color: rgba(255, 255, 255, 0.08);
+  opacity: 1;
+}
+
+/* Opciones del select */
+.app-input option,
+.app-input.form-select option {
+  background: #111827;
+  color: #fff;
+}
+
+/* =========================================================
+   Botones
+   ========================================================= */
+
+.btn-accent {
+  background: linear-gradient(135deg, var(--app-accent) 0%, var(--app-accent-2) 100%);
+  border: none;
+  color: #fff;
+  box-shadow: 0 10px 26px rgba(111, 92, 255, 0.28);
+}
+
+.btn-accent:hover,
+.btn-accent:focus {
+  background: linear-gradient(
+    135deg,
+    var(--app-accent-hover-1) 0%,
+    var(--app-accent-hover-2) 100%
+  );
+  color: #fff;
+}
+
+.btn-accent:disabled {
+  opacity: 0.7;
+  box-shadow: none;
+}
+
+.btn-expand {
+  min-width: 88px;
+}
+
+/* =========================================================
+   KPIs
+   ========================================================= */
+
+.kpi-card {
+  border: 1px solid var(--app-border-mid);
+  border-radius: var(--app-radius-card);
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  height: 100%;
+}
+
+.kpi-label {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.82rem;
+  margin-bottom: 6px;
+}
+
+.kpi-value {
+  color: #fff;
+  font-weight: 800;
+  font-size: 1.05rem;
+}
+
+/* =========================================================
+   Estados vacíos
+   ========================================================= */
+
+.empty-block {
+  padding: 14px 0;
+}
+
+.empty-title {
+  color: #fff;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+/* =========================================================
+   Campos estáticos / estados
+   ========================================================= */
+
+.static-field {
+  min-height: 44px;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--app-border-strong);
+  display: flex;
+  align-items: center;
+  color: #fff;
+}
+
+.info-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+}
+
+.info-row span {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.info-row strong {
+  color: #fff;
+  font-weight: 700;
+  text-align: right;
+}
+
+/* =========================================================
+   Tablas
+   ========================================================= */
+
+.app-table thead th {
+  color: rgba(255, 255, 255, 0.72);
+  font-weight: 600;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.app-table tbody td {
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+.table-dark.table-hover tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.table td,
+.table th {
+  vertical-align: middle;
+}
+
+/* =========================================================
+   Badges soft
+   ========================================================= */
+
+.badge-soft-success {
+  background: rgba(25, 135, 84, 0.18);
+  color: var(--app-success);
+  border: 1px solid rgba(25, 135, 84, 0.32);
+}
+
+.badge-soft-danger {
+  background: rgba(220, 53, 69, 0.16);
+  color: var(--app-danger);
+  border: 1px solid rgba(220, 53, 69, 0.28);
+}
+
+.badge-soft-warning {
+  background: rgba(245, 158, 11, 0.18);
+  color: var(--app-warning);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.badge-soft-primary {
+  background: rgba(59, 130, 246, 0.18);
+  color: var(--app-primary-soft);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.badge-soft-secondary {
+  background: rgba(107, 114, 128, 0.18);
+  color: var(--app-secondary-soft);
+  border: 1px solid rgba(107, 114, 128, 0.35);
+}
+
+.badge-soft-neutral {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+/* =========================================================
+   Modales reutilizables
+   ========================================================= */
+
+.modal-backdrop,
+.modal-backdrop-custom {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 2000;
+}
+
+.modal-card {
+  width: 100%;
+  max-width: 720px;
+  border-radius: 18px;
+  padding: 18px;
+  background: rgba(18, 22, 32, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.55);
+}
+
+.confirm-card {
+  width: 100%;
+  max-width: 460px;
+  border-radius: 20px;
+  padding: 22px;
+  background: linear-gradient(
+    180deg,
+    rgba(21, 26, 38, 0.98) 0%,
+    rgba(15, 19, 29, 0.98) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+  text-align: center;
+}
+
+.confirm-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 14px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  font-weight: 900;
+  color: #fff;
+}
+
+.confirm-icon--primary {
+  background: rgba(123, 104, 255, 0.18);
+  border: 1px solid rgba(123, 104, 255, 0.35);
+  box-shadow: 0 0 0 8px rgba(123, 104, 255, 0.08);
+}
+
+.confirm-icon--danger {
+  background: rgba(220, 53, 69, 0.18);
+  border: 1px solid rgba(220, 53, 69, 0.35);
+  box-shadow: 0 0 0 8px rgba(220, 53, 69, 0.08);
+}
+
+.confirm-icon--warning {
+  background: rgba(255, 193, 7, 0.16);
+  border: 1px solid rgba(255, 193, 7, 0.32);
+  box-shadow: 0 0 0 8px rgba(255, 193, 7, 0.08);
+  color: #ffd666;
+}
+
+.confirm-title {
+  color: #fff;
+  font-size: 1.2rem;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.confirm-text {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.96rem;
+  line-height: 1.5;
+}
+
+.confirm-actions {
+  margin-top: 20px;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.btn-confirm-primary,
+.btn-confirm-danger,
+.btn-confirm-warning {
+  border: none;
+  color: #fff;
+  padding-inline: 18px;
+}
+
+.btn-confirm-primary {
+  background: linear-gradient(135deg, #7b68ff 0%, #6557ff 100%);
+}
+
+.btn-confirm-danger {
+  background: linear-gradient(135deg, #dc3545 0%, #b82b3a 100%);
+}
+
+.btn-confirm-warning {
+  background: linear-gradient(135deg, #d9a300 0%, #b68600 100%);
+}
+
+/* =========================================================
+   Buscador / sugerencias
+   ========================================================= */
+
+.suggest-box {
+  position: absolute;
+  z-index: 50;
+  width: 100%;
+  max-height: 260px;
+  overflow: auto;
+  background: #111827;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.suggestion-item {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  padding: 10px 12px;
+}
+
+.suggestion-item:hover {
+  background: rgba(124, 58, 237, 0.16);
+}
+
+/* =========================================================
+   Pager minimalista
+   ========================================================= */
+
+.app-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.app-pager__info {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.92rem;
+}
+
+.app-pager .btn {
+  min-width: 96px;
+}
+
+/* =========================================================
+   Responsive
+   ========================================================= */
+
+@media (max-width: 768px) {
+  .page-title {
+    font-size: 1.6rem;
+  }
+
+  .info-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .info-row strong {
+    text-align: left;
+  }
+
+  .hero-actions {
+    width: 100%;
+  }
+
+  /* fila bajo stock */
+.row-low-stock {
+  background: rgba(255, 193, 7, 0.12);
+}
+
+/* fila sin stock */
+.row-out-stock {
+  background: rgba(220, 53, 69, 0.12);
+}
+
+/* badge warning */
+.badge-soft-warning {
+  background: rgba(255, 193, 7, 0.18);
+  color: #ffd66b;
+  border: 1px solid rgba(255, 193, 7, 0.3);
+}
+
+/* badge danger */
+.badge-soft-danger {
+  background: rgba(220, 53, 69, 0.18);
+  color: #ff8d98;
+  border: 1px solid rgba(220, 53, 69, 0.3);
+}
+
+/* número stock 0 */
+.stock-zero {
+  color: #ff8d98;
+  font-weight: 800;
+}
+}

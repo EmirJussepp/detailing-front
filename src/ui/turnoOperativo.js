@@ -1,20 +1,21 @@
-const LS_TURNO = "turno_operativo_v1"
+const KEY = "turno_operativo"
 
 export function getTurnoOperativo() {
-  try {
-    const t = String(localStorage.getItem(LS_TURNO) || "").toUpperCase()
-
-    if (t === "MANIANA" || t === "MAÑANA") return "MANIANA"
-    if (t === "TARDE") return "TARDE"
-
-    return "MANIANA"
-  } catch {
-    return "MANIANA"
-  }
+  const raw = localStorage.getItem(KEY)
+  if (raw === "MANIANA" || raw === "TARDE") return raw
+  return "MANIANA"
 }
 
 export function setTurnoOperativo(turno) {
-  try {
-    localStorage.setItem(LS_TURNO, turno)
-  } catch {}
+  const value = turno === "TARDE" ? "TARDE" : "MANIANA"
+  localStorage.setItem(KEY, value)
+  window.dispatchEvent(
+    new CustomEvent("turno:changed", {
+      detail: { turno: value },
+    })
+  )
+}
+
+export function turnoLabel(turno) {
+  return turno === "TARDE" ? "TARDE" : "MAÑANA"
 }
