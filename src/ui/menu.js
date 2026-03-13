@@ -34,36 +34,40 @@ export function canPerm(item, perms = getPermissions()) {
 // =========================
 export function buildMenuFromPermissions(perms = getPermissions()) {
   const items = [
-  { label: "Dashboard", to: { name: "dashboard" }, icon: "🏠" },
+    { label: "Dashboard", to: { name: "dashboard" }, icon: "LayoutDashboard" },
 
-  { section: "Operación" },
-    { label: "Caja", to: { name: "caja.dashboard" }, icon: "💰", perm: "caja:ver" },
-    { label: "Ventas", to: { name: "caja.ventas" }, icon: "🛒", perm: "ventas:ver" },
-    { label: "Movimientos", to: { name: "caja.movimientos" }, icon: "🔄", perm: "movimientos_caja:ver" },
-    { label: "Cuenta Corriente", to: { name: "caja.cuenta" }, icon: "📘", perm: "pagos:ver" },
+    { section: "Operación" },
+    { label: "Caja", to: { name: "caja.dashboard" }, icon: "Wallet", perm: "caja:ver" },
+    { label: "Ventas", to: { name: "caja.ventas" }, icon: "ShoppingCart", perm: "ventas:ver" },
+    { label: "Movimientos", to: { name: "caja.movimientos" }, icon: "ArrowLeftRight", perm: "movimientos_caja:ver" },
+    { label: "Cuenta Corriente", to: { name: "caja.cuenta" }, icon: "BookOpen", perm: "pagos:ver" },
 
     { section: "Clientes" },
-    { label: "Clientes", to: { name: "clientes" }, icon: "👥", perm: "clientes:ver" },
+    { label: "Clientes", to: { name: "clientes" }, icon: "Users", perm: "clientes:ver" },
 
     { section: "Inventario" },
-    { label: "Productos", to: { name: "productos" }, icon: "📦", perm: "productos:ver" },
+    { label: "Productos", to: { name: "productos" }, icon: "Package", perm: "productos:ver" },
 
     { section: "Compras" },
-    { label: "Compras", to: { name: "compras" }, icon: "🛍️", perm: "compras:ver" },
-    { label: "Proveedores", to: { name: "compras.proveedores" }, icon: "🚚", perm: "proveedores:ver" },
+    { label: "Compras", to: { name: "compras" }, icon: "ShoppingBag", perm: "compras:ver" },
+    { label: "Proveedores", to: { name: "compras.proveedores" }, icon: "Truck", perm: "proveedores:ver" },
 
     { section: "Reportes" },
-    { label: "Reportes", to: { name: "reportes" }, icon: "📈", perm: "usuarios:ver" },
+    { label: "Reportes", to: { name: "reportes" }, icon: "BarChart3", perm: "usuarios:ver" },
     {
       label: "Histórico Caja",
       to: { name: "caja.movimientos-historico" },
-      icon: "🧾",
+      icon: "Receipt",
       permAny: ["admin:all", "usuarios:gestionar"],
     },
 
     { section: "Configuración" },
-    { label: "Panel Config", to: { name: "configuracion" }, icon: "⚙️", permAny: ["usuarios:ver", "usuarios:gestionar"] },
-    
+    {
+      label: "Panel Config",
+      to: { name: "configuracion" },
+      icon: "Settings",
+      permAny: ["usuarios:ver", "usuarios:gestionar"],
+    },
   ]
 
   const visible = items.filter((it) => canPerm(it, perms))
@@ -97,31 +101,31 @@ export function canAccess(item, role = getRole()) {
 
 export function buildMenu(role = getRole()) {
   const items = [
-    { label: "Dashboard", to: { name: "dashboard" }, icon: "🏠", roles: ["ADMIN", "CASHIER"] },
+    { label: "Dashboard", to: { name: "dashboard" }, icon: "LayoutDashboard", roles: ["ADMIN", "CASHIER"] },
 
     { section: "Operación", roles: ["ADMIN", "CASHIER"] },
-    { label: "Caja", to: { name: "caja.dashboard" }, icon: "💰", roles: ["ADMIN", "CASHIER"] },
-    { label: "Ventas", to: { name: "caja.ventas" }, icon: "🧾", roles: ["ADMIN", "CASHIER"] },
-    { label: "Movimientos", to: { name: "caja.movimientos" }, icon: "📊", roles: ["ADMIN", "CASHIER"] },
+    { label: "Caja", to: { name: "caja.dashboard" }, icon: "Wallet", roles: ["ADMIN", "CASHIER"] },
+    { label: "Ventas", to: { name: "caja.ventas" }, icon: "ShoppingCart", roles: ["ADMIN", "CASHIER"] },
+    { label: "Movimientos", to: { name: "caja.movimientos" }, icon: "ArrowLeftRight", roles: ["ADMIN", "CASHIER"] },
 
     { section: "Clientes", roles: ["ADMIN", "CASHIER"] },
-    { label: "Clientes", to: { name: "clientes" }, icon: "👤", roles: ["ADMIN", "CASHIER"] },
-    { label: "Cuenta Corriente", to: { name: "caja.cuenta" }, icon: "📒", roles: ["ADMIN", "CASHIER"] },
+    { label: "Clientes", to: { name: "clientes" }, icon: "Users", roles: ["ADMIN", "CASHIER"] },
+    { label: "Cuenta Corriente", to: { name: "caja.cuenta" }, icon: "BookOpen", roles: ["ADMIN", "CASHIER"] },
 
     { section: "Inventario", roles: ["ADMIN", "CASHIER"] },
-    { label: "Productos", to: { name: "productos" }, icon: "📦", roles: ["ADMIN", "CASHIER"] },
+    { label: "Productos", to: { name: "productos" }, icon: "Package", roles: ["ADMIN", "CASHIER"] },
 
     { section: "Compras", roles: ["ADMIN"] },
-    { label: "Compras", to: { name: "compras" }, icon: "🧾", roles: ["ADMIN"] },
-    { label: "Proveedores", to: { name: "compras.proveedores" }, icon: "🏭", roles: ["ADMIN"] },
+    { label: "Compras", to: { name: "compras" }, icon: "ShoppingBag", roles: ["ADMIN"] },
+    { label: "Proveedores", to: { name: "compras.proveedores" }, icon: "Truck", roles: ["ADMIN"] },
 
     { section: "Reportes", roles: ["ADMIN"] },
-    { label: "Histórico Caja", to: { name: "caja.movimientos-historico" }, icon: "🧾", roles: ["ADMIN"] },
+    { label: "Histórico Caja", to: { name: "caja.movimientos-historico" }, icon: "Receipt", roles: ["ADMIN"] },
 
     { section: "Configuración", roles: ["ADMIN"] },
-    { label: "Panel Config", to: { name: "configuracion" }, icon: "⚙️", roles: ["ADMIN"] },
-    { label: "Localidades", to: { name: "config-localidades" }, icon: "📍", roles: ["ADMIN"] },
-    { label: "Métodos de pago (Config)", to: { name: "config-metodos-pago" }, icon: "💳", roles: ["ADMIN"] },
+    { label: "Panel Config", to: { name: "configuracion" }, icon: "Settings", roles: ["ADMIN"] },
+    { label: "Localidades", to: { name: "config-localidades" }, icon: "MapPinned", roles: ["ADMIN"] },
+    { label: "Métodos de pago (Config)", to: { name: "config-metodos-pago" }, icon: "CreditCard", roles: ["ADMIN"] },
   ]
 
   return items.filter((it) => canAccess(it, role))

@@ -8,6 +8,7 @@ export const productosApi = {
 
     const qp = { page, size }
     if (search) qp.search = search
+
     return http.get("/productos", { params: qp })
   },
 
@@ -22,11 +23,25 @@ export const productosApi = {
   actualizarPreciosPorcentaje(command) {
     return http.put("/productos/actualizar-precios", command)
   },
+
   actualizarPreciosPorMarca(command) {
     return http.put("/productos/actualizar-precios/marca", command)
   },
+
   actualizarPreciosPorCategoria(command) {
     return http.put("/productos/actualizar-precios/categoria", command)
+  },
+
+  // 🆕 IMPORTAR PRODUCTOS DESDE EXCEL
+  importarExcel(file) {
+    const form = new FormData()
+    form.append("file", file)
+
+    return http.post("/productos/importar-excel", form, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    })
   },
 }
 
@@ -36,6 +51,6 @@ export const marcasApi = {
 }
 
 export const categoriasApi = {
-  list: () => http.get("/categoria"),     // ✅ singular
+  list: () => http.get("/categoria"),     // ✅ singular (como lo tenés en tu back)
   create: (payload) => http.post("/categoria", payload),
 }

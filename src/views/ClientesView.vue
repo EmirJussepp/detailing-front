@@ -5,7 +5,7 @@ import { useRouter } from "vue-router"
 import Pager from "../components/Pager.vue"
 import { clientesApi } from "../services/clientesApi"
 import { tipoClientesApi } from "../services/tipoClienteService"
-import { localidadesApi } from "../services/localidadService"
+import { localidadApi } from "../services/localidadService"
 
 const router = useRouter()
 
@@ -125,7 +125,7 @@ async function fetchMaestros() {
   }
 
   try {
-    const { data } = await localidadesApi.list()
+    const { data } = await localidadApi.list()
     const p = unwrapPage(data)
     localidades.value = p.content.map(mapLoc)
   } catch {

@@ -53,10 +53,30 @@ function mapProducto(row) {
     categoriaId: row?.categoriaId ?? row?.categoria_id ?? null,
     marcaId: row?.marcaId ?? row?.marca_id ?? null,
     stockActual: Number(row?.stockActual ?? row?.stock_actual ?? 0),
-    stockMinimo: row?.stockMinimo ?? row?.stock_minimo ?? null,
-    stockMaximo: row?.stockMaximo ?? row?.stock_maximo ?? null,
+
+    stockMinimo:
+      row?.stockMinimo != null
+        ? Number(row.stockMinimo)
+        : row?.stock_minimo != null
+          ? Number(row.stock_minimo)
+          : null,
+
+    stockMaximo:
+      row?.stockMaximo != null
+        ? Number(row.stockMaximo)
+        : row?.stock_maximo != null
+          ? Number(row.stock_maximo)
+          : null,
+
     precioVenta: Number(row?.precioVenta ?? row?.precio_venta ?? 0),
-    precioMayorista: row?.precioMayorista ?? row?.precio_mayorista ?? null,
+
+    precioMayorista:
+      row?.precioMayorista != null
+        ? Number(row.precioMayorista)
+        : row?.precio_mayorista != null
+          ? Number(row.precio_mayorista)
+          : null,
+
     precioCosto: Number(row?.precioCosto ?? row?.precio_costo ?? 0),
   }
 }
@@ -79,8 +99,20 @@ const rows = ref([])
 const marcas = ref([])
 const categorias = ref([])
 
-const marcaById = computed(() => new Map((marcas.value || []).map((m) => [Number(m.marcaId ?? m.id), m])))
-const catById = computed(() => new Map((categorias.value || []).map((c) => [Number(c.categoriaId ?? c.id), c])))
+const excelFile = ref(null)
+const importingExcel = ref(false)
+const excelInputRef = ref(null)
+
+const showCostoAlta = ref(false)
+const showCostoEdicion = ref(false)
+
+const marcaById = computed(() =>
+  new Map((marcas.value || []).map((m) => [Number(m.marcaId ?? m.id), m]))
+)
+
+const catById = computed(() =>
+  new Map((categorias.value || []).map((c) => [Number(c.categoriaId ?? c.id), c]))
+)
 
 function marcaName(id) {
   const m = marcaById.value.get(Number(id))
@@ -116,6 +148,7 @@ function resetForm() {
   precioCosto.value = ""
   precioVenta.value = ""
   precioMayorista.value = ""
+  showCostoAlta.value = false
 }
 
 const editing = ref(null)
@@ -135,6 +168,8 @@ const editForm = ref({
 
 function openEdit(p) {
   editing.value = p
+  showCostoEdicion.value = false
+
   editForm.value = {
     nombre: p.nombre ?? "",
     codigoProducto: p.codigoProducto ?? "",
@@ -152,6 +187,7 @@ function openEdit(p) {
 
 function closeEdit() {
   editing.value = null
+  showCostoEdicion.value = false
 }
 
 const stockDelta = ref(1)
@@ -183,6 +219,63 @@ function openCategoriaModal() {
 
 function closeCategoriaModal() {
   showCategoriaModal.value = false
+}
+
+function onExcelChange(e) {
+  const file = e?.target?.files?.[0] ?? null
+  excelFile.value = file
+}
+
+function clearExcelFile() {
+  excelFile.value = null
+  if (excelInputRef.value) {
+    excelInputRef.value.value = ""
+  }
+}
+
+async function importarExcel() {
+  errorMsg.value = ""
+  okMsg.value = ""
+  infoMsg.value = ""
+
+  if (!excelFile.value) {
+    errorMsg.value = "Seleccioná un archivo Excel."
+    return
+  }
+
+  const fileName = String(excelFile.value.name || "").toLowerCase()
+  if (!fileName.endsWith(".xlsx")) {
+    errorMsg.value = "El archivo debe ser .xlsx"
+    return
+  }
+
+  importingExcel.value = true
+
+  try {
+    const { data } = await productosApi.importarExcel(excelFile.value)
+
+    const creados = Number(data?.creados ?? 0)
+    const actualizados = Number(data?.actualizados ?? 0)
+
+    okMsg.value = `Importación finalizada · Creados: ${creados} · Actualizados: ${actualizados}`
+
+    if (Array.isArray(data?.errores) && data.errores.length > 0) {
+      infoMsg.value = `Errores en ${data.errores.length} filas (ver consola)`
+      console.log("Errores importación Excel:", data.errores)
+    }
+
+    clearExcelFile()
+    page.value = 0
+    await fetchAll()
+  } catch (e) {
+    errorMsg.value =
+      e?.response?.data?.error ||
+      e?.response?.data?.message ||
+      e?.message ||
+      "Error importando Excel."
+  } finally {
+    importingExcel.value = false
+  }
 }
 
 async function crearMarca() {
@@ -293,20 +386,35 @@ async function fetchAll() {
   infoMsg.value = ""
 
   try {
-    const { data } = await productosApi.list({
-      page: page.value,
-      size: size.value,
+    const params = {
+      page: onlyLowStock.value ? 0 : page.value,
+      size: onlyLowStock.value ? 9999 : size.value,
       search: q.value?.trim() || null,
-    })
+    }
+
+    const { data } = await productosApi.list(params)
 
     const p = unwrapPage(data)
-    rows.value = p.content.map(mapProducto)
-    totalElements.value = p.totalElements
-    totalPages.value = p.totalPages
-    page.value = p.page
-    size.value = p.size
+    const mappedRows = p.content.map(mapProducto)
 
-    if (!p.content.length) {
+    rows.value = mappedRows
+
+    if (onlyLowStock.value) {
+      const lowStockRows = mappedRows.filter(
+        (prod) => prod.stockMinimo != null && prod.stockActual <= prod.stockMinimo
+      )
+
+      totalElements.value = lowStockRows.length
+      totalPages.value = 1
+      page.value = 0
+    } else {
+      totalElements.value = p.totalElements
+      totalPages.value = p.totalPages
+      page.value = p.page
+      size.value = p.size
+    }
+
+    if (!mappedRows.length) {
       infoMsg.value = "No hay productos para mostrar con los filtros actuales."
     }
   } catch (e) {
@@ -341,6 +449,11 @@ watch(page, () => {
   fetchAll()
 })
 
+watch(onlyLowStock, () => {
+  page.value = 0
+  fetchAll()
+})
+
 let t = null
 watch(q, () => {
   clearTimeout(t)
@@ -366,22 +479,51 @@ async function create() {
     return
   }
 
-  const pc = toNumber(precioCosto.value)
+  const pc = precioCosto.value?.toString().trim()
+    ? toNumber(precioCosto.value)
+    : 0
+
   const pv = toNumber(precioVenta.value)
   const pm = precioMayorista.value?.trim() ? toNumber(precioMayorista.value) : null
 
-  if (!Number.isFinite(pc) || pc < 0) return (errorMsg.value = "Precio costo inválido.")
-  if (!Number.isFinite(pv) || pv < pc) return (errorMsg.value = "Precio venta no puede ser menor al costo.")
-  if (pm !== null && (!Number.isFinite(pm) || pm < pc)) return (errorMsg.value = "Mayorista no puede ser menor al costo.")
+  if (!Number.isFinite(pc) || pc < 0) {
+    errorMsg.value = "Precio costo inválido."
+    return
+  }
+
+  if (!Number.isFinite(pv) || pv < pc) {
+    errorMsg.value = "Precio venta no puede ser menor al costo."
+    return
+  }
+
+  if (pm !== null && (!Number.isFinite(pm) || pm < pc)) {
+    errorMsg.value = "Mayorista no puede ser menor al costo."
+    return
+  }
 
   const sMin = stockMinimo.value == null || stockMinimo.value === "" ? null : Number(stockMinimo.value)
   const sMax = stockMaximo.value == null || stockMaximo.value === "" ? null : Number(stockMaximo.value)
   const sIni = Number(stockInicial.value ?? 0)
 
-  if (sMin !== null && sMin < 0) return (errorMsg.value = "Stock mínimo no puede ser negativo.")
-  if (sMax !== null && sMax < 0) return (errorMsg.value = "Stock máximo no puede ser negativo.")
-  if (sMin !== null && sMax !== null && sMin > sMax) return (errorMsg.value = "Stock mínimo no puede ser mayor al máximo.")
-  if (sIni < 0) return (errorMsg.value = "Stock inicial no puede ser negativo.")
+  if (sMin !== null && sMin < 0) {
+    errorMsg.value = "Stock mínimo no puede ser negativo."
+    return
+  }
+
+  if (sMax !== null && sMax < 0) {
+    errorMsg.value = "Stock máximo no puede ser negativo."
+    return
+  }
+
+  if (sMin !== null && sMax !== null && sMin > sMax) {
+    errorMsg.value = "Stock mínimo no puede ser mayor al máximo."
+    return
+  }
+
+  if (sIni < 0) {
+    errorMsg.value = "Stock inicial no puede ser negativo."
+    return
+  }
 
   saving.value = true
   try {
@@ -455,22 +597,51 @@ async function saveEdit() {
     return
   }
 
-  const pc = toNumber(editForm.value.precioCosto)
+  const pc = editForm.value.precioCosto?.toString().trim()
+    ? toNumber(editForm.value.precioCosto)
+    : 0
+
   const pv = toNumber(editForm.value.precioVenta)
   const pm = editForm.value.precioMayorista?.trim() ? toNumber(editForm.value.precioMayorista) : null
 
-  if (!Number.isFinite(pc) || pc < 0) return (errorMsg.value = "Precio costo inválido.")
-  if (!Number.isFinite(pv) || pv < pc) return (errorMsg.value = "Precio venta no puede ser menor al costo.")
-  if (pm !== null && (!Number.isFinite(pm) || pm < pc)) return (errorMsg.value = "Mayorista no puede ser menor al costo.")
+  if (!Number.isFinite(pc) || pc < 0) {
+    errorMsg.value = "Precio costo inválido."
+    return
+  }
+
+  if (!Number.isFinite(pv) || pv < pc) {
+    errorMsg.value = "Precio venta no puede ser menor al costo."
+    return
+  }
+
+  if (pm !== null && (!Number.isFinite(pm) || pm < pc)) {
+    errorMsg.value = "Mayorista no puede ser menor al costo."
+    return
+  }
 
   const sMin = editForm.value.stockMinimo == null || editForm.value.stockMinimo === "" ? null : Number(editForm.value.stockMinimo)
   const sMax = editForm.value.stockMaximo == null || editForm.value.stockMaximo === "" ? null : Number(editForm.value.stockMaximo)
   const sAct = Number(editForm.value.stockActual ?? 0)
 
-  if (sMin !== null && sMin < 0) return (errorMsg.value = "Stock mínimo no puede ser negativo.")
-  if (sMax !== null && sMax < 0) return (errorMsg.value = "Stock máximo no puede ser negativo.")
-  if (sMin !== null && sMax !== null && sMin > sMax) return (errorMsg.value = "Stock mínimo no puede ser mayor al máximo.")
-  if (sAct < 0) return (errorMsg.value = "Stock no puede ser negativo.")
+  if (sMin !== null && sMin < 0) {
+    errorMsg.value = "Stock mínimo no puede ser negativo."
+    return
+  }
+
+  if (sMax !== null && sMax < 0) {
+    errorMsg.value = "Stock máximo no puede ser negativo."
+    return
+  }
+
+  if (sMin !== null && sMax !== null && sMin > sMax) {
+    errorMsg.value = "Stock mínimo no puede ser mayor al máximo."
+    return
+  }
+
+  if (sAct < 0) {
+    errorMsg.value = "Stock no puede ser negativo."
+    return
+  }
 
   saving.value = true
   try {
@@ -649,6 +820,52 @@ onMounted(async () => {
     <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
         <div class="section-header mb-3">
+          <h2 class="section-title mb-0">Importar productos desde Excel</h2>
+          <div class="helper-text">
+            Archivo .xlsx con productos para crear o actualizar.
+          </div>
+        </div>
+
+        <div class="row g-3 align-items-end">
+          <div class="col-12 col-md-8">
+            <label class="form-label field-label">Archivo Excel</label>
+            <input
+              ref="excelInputRef"
+              type="file"
+              accept=".xlsx"
+              class="form-control app-input"
+              @change="onExcelChange"
+            />
+          </div>
+
+          <div class="col-12 col-md-4 d-flex gap-2">
+            <button
+              class="btn btn-outline-light w-100"
+              @click="clearExcelFile"
+              :disabled="importingExcel"
+            >
+              Limpiar
+            </button>
+
+            <button
+              class="btn btn-primary btn-accent w-100"
+              @click="importarExcel"
+              :disabled="importingExcel"
+            >
+              {{ importingExcel ? "Importando..." : "Importar Excel" }}
+            </button>
+          </div>
+        </div>
+
+        <div class="helper-text mt-3">
+          Ideal para cargas masivas. La carga manual sigue disponible abajo.
+        </div>
+      </div>
+    </div>
+
+    <div class="card bg-panel border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <div class="section-header mb-3">
           <h2 class="section-title mb-0">Nuevo producto</h2>
           <div class="helper-text">
             userId detectado: <b>{{ userId ?? "-" }}</b>
@@ -707,7 +924,17 @@ onMounted(async () => {
             <input v-model.number="stockInicial" type="number" class="form-control app-input" />
           </div>
 
-          <div class="col-12 col-md-3">
+          <div class="col-12">
+            <button
+              class="btn btn-sm btn-outline-light"
+              @click="showCostoAlta = !showCostoAlta"
+              type="button"
+            >
+              {{ showCostoAlta ? "Ocultar costo" : "Mostrar costo" }}
+            </button>
+          </div>
+
+          <div v-if="showCostoAlta" class="col-12 col-md-3">
             <label class="form-label field-label">Costo</label>
             <input v-model="precioCosto" class="form-control app-input" />
           </div>
@@ -733,7 +960,7 @@ onMounted(async () => {
         </div>
 
         <div class="helper-text mt-3">
-          Guarda stock inicial como stock actual y valida precios contra costo.
+          Podés crear productos manualmente o importarlos por Excel. El costo queda oculto para que no esté visible a empleados.
         </div>
       </div>
     </div>
@@ -799,12 +1026,12 @@ onMounted(async () => {
             <tbody>
               <tr
                 v-for="p in filtered"
-  :key="p.id"
-  :class="{
-    'row-low-stock': p.stockActual > 0 && p.stockMinimo != null && p.stockActual <= p.stockMinimo,
-    'row-out-stock': p.stockActual === 0
-  }"
->
+                :key="p.id"
+                :class="{
+                  'row-low-stock': p.stockActual > 0 && p.stockMinimo != null && p.stockActual <= p.stockMinimo,
+                  'row-out-stock': p.stockActual === 0
+                }"
+              >
                 <td class="fw-semibold">
                   {{ p.nombre }}
                   <div class="helper-text">
@@ -822,24 +1049,22 @@ onMounted(async () => {
                   {{ p.marcaId != null ? marcaName(p.marcaId) : "-" }}
                 </td>
 
-               <td
-  class="fw-bold"
-  :class="{ 'stock-zero': p.stockActual === 0 }"
->
-  {{ p.stockActual }}
-                  <span
-  v-if="p.stockActual === 0"
-  class="badge badge-soft-danger ms-2"
->
-  Sin stock
-</span>
+                <td class="fw-bold" :class="{ 'stock-zero': p.stockActual === 0 }">
+                  {{ p.stockActual }}
 
-<span
-  v-else-if="p.stockMinimo != null && p.stockActual <= p.stockMinimo"
-  class="badge badge-soft-warning ms-2"
->
-  Bajo stock
-</span>
+                  <span
+                    v-if="p.stockActual === 0"
+                    class="badge badge-soft-danger ms-2"
+                  >
+                    Sin stock
+                  </span>
+
+                  <span
+                    v-else-if="p.stockMinimo != null && p.stockActual <= p.stockMinimo"
+                    class="badge badge-soft-warning ms-2"
+                  >
+                    Bajo stock
+                  </span>
                 </td>
 
                 <td class="text-end text-secondary">$ {{ formatMoney(p.precioVenta) }}</td>
@@ -849,13 +1074,25 @@ onMounted(async () => {
 
                 <td class="text-end">
                   <div class="btn-group">
-                    <button class="btn btn-sm btn-outline-light" :disabled="saving" @click="applyStockDelta(p, -Math.abs(stockDelta))">
+                    <button
+                      class="btn btn-sm btn-outline-light"
+                      :disabled="saving"
+                      @click="applyStockDelta(p, -Math.abs(stockDelta))"
+                    >
                       -{{ Math.abs(stockDelta) }}
                     </button>
-                    <button class="btn btn-sm btn-outline-light" :disabled="saving" @click="applyStockDelta(p, +Math.abs(stockDelta))">
+                    <button
+                      class="btn btn-sm btn-outline-light"
+                      :disabled="saving"
+                      @click="applyStockDelta(p, +Math.abs(stockDelta))"
+                    >
                       +{{ Math.abs(stockDelta) }}
                     </button>
-                    <button class="btn btn-sm btn-outline-light" :disabled="saving" @click="openEdit(p)">
+                    <button
+                      class="btn btn-sm btn-outline-light"
+                      :disabled="saving"
+                      @click="openEdit(p)"
+                    >
                       Editar
                     </button>
                   </div>
@@ -938,6 +1175,21 @@ onMounted(async () => {
             <input v-model.number="editForm.stockMaximo" type="number" class="form-control app-input" />
           </div>
 
+          <div class="col-12">
+            <button
+              class="btn btn-sm btn-outline-light"
+              type="button"
+              @click="showCostoEdicion = !showCostoEdicion"
+            >
+              {{ showCostoEdicion ? "Ocultar costo" : "Mostrar costo" }}
+            </button>
+          </div>
+
+          <div v-if="showCostoEdicion" class="col-12 col-md-6">
+            <label class="form-label field-label">Costo</label>
+            <input v-model="editForm.precioCosto" class="form-control app-input" />
+          </div>
+
           <div class="col-12 col-md-6">
             <label class="form-label field-label">Venta</label>
             <input v-model="editForm.precioVenta" class="form-control app-input" />
@@ -959,7 +1211,7 @@ onMounted(async () => {
         </div>
 
         <div class="helper-text mt-3">
-          El ajuste rápido de stock usa actualización directa y no registra movimiento.
+          El costo queda oculto por defecto. El ajuste rápido de stock usa actualización directa y no registra movimiento.
         </div>
       </div>
     </div>

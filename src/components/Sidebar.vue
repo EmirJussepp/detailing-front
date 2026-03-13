@@ -21,7 +21,14 @@
           :class="{ active: isActive(item) }"
           :to="item.to"
         >
-          <span class="icon">{{ item.icon }}</span>
+          <component
+            v-if="item.icon && icons[item.icon]"
+            :is="icons[item.icon]"
+            class="icon"
+            :class="{ active: isActive(item) }"
+            :size="18"
+            :stroke-width="2"
+          />
           <span class="label">{{ item.label }}</span>
         </router-link>
       </template>
@@ -36,6 +43,8 @@
 <script setup>
 import { computed, ref, onMounted, onBeforeUnmount } from "vue"
 import { useRoute } from "vue-router"
+import * as icons from "lucide-vue-next"
+
 import { buildMenuFromPermissions } from "../ui/menu"
 import { getSession } from "../auth/session"
 import { getTurnoOperativo, turnoLabel } from "../ui/turnoOperativo"
@@ -159,7 +168,7 @@ onBeforeUnmount(() => {
   text-decoration: none;
   color: rgba(255, 255, 255, 0.88);
   border: 1px solid transparent;
-  transition: 0.18s ease;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
 }
 
 .link:hover {
@@ -175,10 +184,20 @@ onBeforeUnmount(() => {
 }
 
 .icon {
-  width: 22px;
-  text-align: center;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
-  opacity: 0.95;
+  color: #9ca3af;
+  transition: color 0.18s ease, transform 0.18s ease;
+}
+
+.link:hover .icon {
+  color: #d8c4ff;
+  transform: translateX(1px);
+}
+
+.icon.active {
+  color: #caa6ff;
 }
 
 .label {

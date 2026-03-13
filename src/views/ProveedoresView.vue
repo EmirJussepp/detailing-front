@@ -1,17 +1,18 @@
 <template>
-  <div class="container py-4">
-    <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+  <div class="proveedores-page">
+    <section class="page-hero">
       <div>
-        <h2 class="mb-1">Proveedores</h2>
-        <div class="text-secondary small">
-          Alta/edición · activar/desactivar · cuenta corriente (deuda y pagos).
-        </div>
+        <p class="eyebrow mb-1">Compras</p>
+        <h1 class="page-title mb-1">Proveedores</h1>
+        <p class="page-subtitle mb-0">
+          Alta, edición, estado y seguimiento de saldo para proveedores.
+        </p>
       </div>
 
-      <div class="d-flex gap-2 align-items-center">
-        <div class="form-check form-switch m-0">
+      <div class="hero-actions">
+        <div class="form-check form-switch m-0 switch-inline">
           <input class="form-check-input" type="checkbox" id="inactive" v-model="includeInactive" />
-          <label class="form-check-label small text-secondary" for="inactive">Ver inactivos</label>
+          <label class="form-check-label helper-text" for="inactive">Ver inactivos</label>
         </div>
 
         <button
@@ -20,168 +21,175 @@
           data-bs-target="#proveedorModal"
           @click="prepareCreate"
         >
-          + Nuevo proveedor
+          Nuevo proveedor
         </button>
       </div>
-    </div>
+    </section>
+
+    <div v-if="error" class="alert alert-danger py-2 mb-3">{{ error }}</div>
+    <div v-if="success" class="alert alert-success py-2 mb-3">{{ success }}</div>
 
     <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
-        <div class="row g-2 align-items-center">
-          <div class="col-12 col-md-5">
-            <input
-              v-model="q"
-              class="form-control bg-dark text-white border-secondary"
-              placeholder="Buscar por nombre/razón social, doc/CUIT, teléfono o email…"
-            />
+        <div class="section-header mb-3">
+          <h2 class="section-title mb-0">Filtros</h2>
+          <div class="helper-text">
+            Total proveedores: <b>{{ totalElements }}</b> · Mostrando: <b>{{ filtered.length }}</b>
           </div>
+        </div>
 
-          <div class="col-12 col-md-3">
-            <select v-model="sortBy" class="form-select bg-dark text-white border-secondary">
-              <option value="displayName">Orden: Nombre</option>
-              <option value="createdAt">Orden: Creación</option>
-              <option value="saldoDesc">Orden: Saldo (mayor deuda)</option>
-            </select>
-          </div>
+        <div class="filters-bar">
+          <div class="filters-grid">
+            <div>
+              <label class="form-label field-label">Buscar</label>
+              <input
+                v-model="q"
+                class="form-control app-input"
+                placeholder="Nombre, razón social, documento, teléfono o email..."
+              />
+            </div>
 
-          <div class="col-12 col-md-4 d-flex justify-content-md-end">
-            <span class="text-secondary small">
-              Total proveedores: <b>{{ totalElements }}</b> · Mostrando: <b>{{ filtered.length }}</b>
-            </span>
+            <div>
+              <label class="form-label field-label">Orden</label>
+              <select v-model="sortBy" class="form-select app-input">
+                <option value="displayName">Nombre</option>
+                <option value="createdAt">Creación</option>
+                <option value="saldoDesc">Mayor deuda</option>
+              </select>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
-    <div v-if="error" class="alert alert-danger py-2">{{ error }}</div>
-    <div v-if="success" class="alert alert-success py-2">{{ success }}</div>
-
     <div class="card bg-panel border-0 shadow-sm">
-      <div class="table-responsive">
-        <table class="table table-dark table-hover align-middle mb-0">
-          <thead>
-            <tr class="text-secondary">
-              <th>Proveedor</th>
-              <th>Contacto</th>
-              <th class="text-end">Saldo</th>
-              <th class="text-center">Activo</th>
-              <th class="text-end">Acciones</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            <tr v-if="filtered.length === 0">
-              <td colspan="5" class="text-center text-secondary py-4">
-                No hay proveedores para mostrar.
-              </td>
-            </tr>
-
-            <tr v-for="p in filtered" :key="p.id">
-              <td>
-                <div class="d-flex gap-2 align-items-start">
-                  <div class="flex-grow-1">
-                    <div class="fw-semibold d-flex gap-2 align-items-center flex-wrap">
-                      <span>{{ p.displayName || "—" }}</span>
-
-                      <span class="badge" :class="p.tipo === 'EMPRESA' ? 'text-bg-info' : 'text-bg-secondary'">
-                        {{ p.tipo === "EMPRESA" ? "EMPRESA" : "PERSONA" }}
-                      </span>
-
-                      <span class="badge" :class="docBadgeClass(p)">
-                        {{ p.documentoLabel || (p.tipo === "EMPRESA" ? "CUIT —" : "DOC —") }}
-                      </span>
-                    </div>
-
-                    <div class="text-secondary small" v-if="p.direccion">
-                      {{ p.direccion }}
-                    </div>
-
-                    <div class="text-secondary small" v-if="p.notas">
-                      <span class="opacity-75">📝</span> {{ p.notas }}
-                    </div>
-                  </div>
-                </div>
-              </td>
-
-              <td class="text-secondary">
-                <div>{{ p.telefono || "—" }}</div>
-                <div class="small opacity-75">{{ p.email || "—" }}</div>
-              </td>
-
-              <td class="text-end">
-                <div class="fw-bold" :class="saldoClass(p)">
-                  $ {{ formatMoney(getSaldo(p).saldo) }}
-                </div>
-                <div class="text-secondary small">
-                  compras: $ {{ formatMoney(getSaldo(p).deudaCompras) }}
-                  · pagos: $ {{ formatMoney(getSaldo(p).pagosTotal) }}
-                </div>
-              </td>
-
-              <td class="text-center">
-                <span class="badge" :class="p.activo ? 'text-bg-success' : 'text-bg-secondary'">
-                  {{ p.activo ? "Sí" : "No" }}
-                </span>
-              </td>
-
-              <td class="text-end">
-                <div class="btn-group">
-                  <button
-                    class="btn btn-outline-light btn-sm"
-                    data-bs-toggle="modal"
-                    data-bs-target="#proveedorModal"
-                    @click="prepareEdit(p)"
-                  >
-                    Editar
-                  </button>
-
-                  <button
-                    class="btn btn-outline-success btn-sm"
-                    data-bs-toggle="modal"
-                    data-bs-target="#pagoModal"
-                    @click="preparePago(p)"
-                  >
-                    Pago
-                  </button>
-
-                  <button class="btn btn-outline-warning btn-sm" @click="toggleActivo(p)">
-                    {{ p.activo ? "Desactivar" : "Activar" }}
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div
-        class="card-footer border-secondary d-flex flex-wrap justify-content-between align-items-center gap-2 text-secondary small"
-      >
-        <div>
-          Tip: el saldo es <b>compras</b> menos <b>pagos</b>. Si queda negativo, el proveedor te queda “a favor”.
+      <div class="card-body">
+        <div class="section-header mb-3">
+          <h2 class="section-title mb-0">Resultados</h2>
+          <div class="helper-text">
+            Consultá contacto, saldo y registrá pagos por compra.
+          </div>
         </div>
 
-        <div class="d-flex align-items-center gap-2">
-          <button class="btn btn-sm btn-outline-light" @click="prevPage" :disabled="loading || !canPrev">◀</button>
-          <span>Página <b>{{ page }}</b> / <b>{{ totalPages }}</b></span>
-          <button class="btn btn-sm btn-outline-light" @click="nextPage" :disabled="loading || !canNext">▶</button>
+        <div v-if="filtered.length === 0" class="empty-block">
+          <div class="empty-title">No hay proveedores para mostrar</div>
+          <div class="helper-text">
+            Probá ajustar la búsqueda o crear un proveedor nuevo.
+          </div>
+        </div>
 
-          <select
-            v-model.number="size"
-            class="form-select form-select-sm bg-dark text-white border-secondary"
-            style="width: 90px"
-          >
-            <option :value="10">10</option>
-            <option :value="20">20</option>
-            <option :value="50">50</option>
-          </select>
+        <div v-else class="table-responsive">
+          <table class="table table-dark table-hover align-middle app-table mb-0">
+            <thead>
+              <tr>
+                <th>Proveedor</th>
+                <th>Contacto</th>
+                <th class="text-end">Saldo</th>
+                <th class="text-center">Estado</th>
+                <th class="text-end">Acciones</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              <tr v-for="p in filtered" :key="p.id">
+                <td>
+                  <div class="table-main d-flex gap-2 align-items-center flex-wrap">
+                    <span>{{ p.displayName || "—" }}</span>
+
+                    <span class="badge" :class="p.tipo === 'EMPRESA' ? 'text-bg-info' : 'text-bg-secondary'">
+                      {{ p.tipo === "EMPRESA" ? "EMPRESA" : "PERSONA" }}
+                    </span>
+
+                    <span class="badge" :class="docBadgeClass(p)">
+                      {{ p.documentoLabel || (p.tipo === "EMPRESA" ? "CUIT —" : "DOC —") }}
+                    </span>
+                  </div>
+
+                  <div v-if="p.direccion" class="table-sub">
+                    {{ p.direccion }}
+                  </div>
+
+                  <div v-if="p.notas" class="table-sub">
+                    {{ p.notas }}
+                  </div>
+                </td>
+
+                <td class="text-secondary">
+                  <div>{{ p.telefono || "—" }}</div>
+                  <div class="table-sub">{{ p.email || "—" }}</div>
+                </td>
+
+                <td class="text-end">
+                  <div class="fw-bold" :class="saldoClass(p)">
+                    $ {{ formatMoney(getSaldo(p).saldo) }}
+                  </div>
+                  <div class="table-sub">Compras: $ {{ formatMoney(getSaldo(p).deudaCompras) }}</div>
+                  <div class="table-sub">Pagos: $ {{ formatMoney(getSaldo(p).pagosTotal) }}</div>
+                </td>
+
+                <td class="text-center">
+                  <span class="badge" :class="p.activo ? 'text-bg-success' : 'text-bg-secondary'">
+                    {{ p.activo ? "Activo" : "Inactivo" }}
+                  </span>
+                </td>
+
+                <td class="text-end">
+                  <div class="d-flex justify-content-end gap-2 flex-wrap">
+                    <button
+                      class="btn btn-sm btn-outline-light"
+                      data-bs-toggle="modal"
+                      data-bs-target="#proveedorModal"
+                      @click="prepareEdit(p)"
+                    >
+                      Editar
+                    </button>
+
+                    <button
+                      class="btn btn-sm btn-outline-success"
+                      data-bs-toggle="modal"
+                      data-bs-target="#pagoModal"
+                      @click="preparePago(p)"
+                    >
+                      Pago
+                    </button>
+
+                    <button class="btn btn-sm btn-outline-warning" @click="toggleActivo(p)">
+                      {{ p.activo ? "Desactivar" : "Activar" }}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="footer-summary">
+          <div class="helper-text">
+            El saldo refleja compras menos pagos registrados.
+          </div>
+        </div>
+
+        <div class="mt-3">
+          <div class="pager-minimal">
+            <button class="btn btn-sm btn-outline-light" @click="prevPage" :disabled="loading || !canPrev">
+              Anterior
+            </button>
+
+            <span class="helper-text">
+              Página <b>{{ Math.max(1, page) }}</b> de <b>{{ totalPages }}</b>
+            </span>
+
+            <button class="btn btn-sm btn-outline-light" @click="nextPage" :disabled="loading || !canNext">
+              Siguiente
+            </button>
+          </div>
         </div>
       </div>
     </div>
 
     <div class="modal fade" id="proveedorModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-lg modal-dialog-centered">
-        <div class="modal-content bg-dark border-secondary modal-round">
+        <div class="modal-content bg-panel border-0 modal-round">
           <div class="modal-header border-secondary">
             <h5 class="modal-title">
               {{ mode === "create" ? "Nuevo proveedor" : "Editar proveedor" }}
@@ -190,10 +198,10 @@
           </div>
 
           <div class="modal-body">
-            <div v-if="formError" class="alert alert-danger py-2">{{ formError }}</div>
+            <div v-if="formError" class="alert alert-danger py-2 mb-3">{{ formError }}</div>
 
             <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
-              <span class="text-secondary small">Tipo:</span>
+              <span class="helper-text">Tipo</span>
 
               <div class="btn-group">
                 <button
@@ -218,18 +226,18 @@
             <div class="row g-3">
               <template v-if="form.tipo !== 'EMPRESA'">
                 <div class="col-12 col-md-6">
-                  <label class="form-label text-secondary">Nombre *</label>
-                  <input v-model="form.nombre" class="form-control" placeholder="Ej: Juan" />
+                  <label class="form-label field-label">Nombre *</label>
+                  <input v-model="form.nombre" class="form-control app-input" placeholder="Ej: Juan" />
                 </div>
 
                 <div class="col-12 col-md-6">
-                  <label class="form-label text-secondary">Apellido</label>
-                  <input v-model="form.apellido" class="form-control" placeholder="Ej: Pérez" />
+                  <label class="form-label field-label">Apellido</label>
+                  <input v-model="form.apellido" class="form-control app-input" placeholder="Ej: Pérez" />
                 </div>
 
                 <div class="col-12 col-md-4">
-                  <label class="form-label text-secondary">Tipo doc.</label>
-                  <select v-model="form.documentoTipo" class="form-select">
+                  <label class="form-label field-label">Tipo de documento</label>
+                  <select v-model="form.documentoTipo" class="form-select app-input">
                     <option value="DNI">DNI</option>
                     <option value="CUIL">CUIL</option>
                     <option value="PASAPORTE">PASAPORTE</option>
@@ -238,10 +246,10 @@
                 </div>
 
                 <div class="col-12 col-md-8">
-                  <label class="form-label text-secondary">Nro doc.</label>
+                  <label class="form-label field-label">Número de documento</label>
                   <input
                     v-model="form.documentoNro"
-                    class="form-control"
+                    class="form-control app-input"
                     inputmode="numeric"
                     placeholder="Ej: 40111222"
                   />
@@ -250,51 +258,64 @@
 
               <template v-else>
                 <div class="col-12">
-                  <label class="form-label text-secondary">Razón social *</label>
-                  <input v-model="form.razonSocial" class="form-control" placeholder="Ej: Distribuidora X S.A." />
+                  <label class="form-label field-label">Razón social *</label>
+                  <input
+                    v-model="form.razonSocial"
+                    class="form-control app-input"
+                    placeholder="Ej: Distribuidora X S.A."
+                  />
                 </div>
 
                 <div class="col-12 col-md-6">
-                  <label class="form-label text-secondary">CUIT *</label>
-                  <input v-model="form.cuit" class="form-control" inputmode="numeric" placeholder="Ej: 30712345678" />
+                  <label class="form-label field-label">CUIT *</label>
+                  <input
+                    v-model="form.cuit"
+                    class="form-control app-input"
+                    inputmode="numeric"
+                    placeholder="Ej: 30712345678"
+                  />
                 </div>
 
                 <div class="col-12 col-md-6">
-                  <label class="form-label text-secondary">Contacto (opcional)</label>
-                  <input v-model="form.contacto" class="form-control" placeholder="Ej: Mariana / Compras" />
+                  <label class="form-label field-label">Contacto</label>
+                  <input
+                    v-model="form.contacto"
+                    class="form-control app-input"
+                    placeholder="Ej: Mariana / Compras"
+                  />
                 </div>
               </template>
 
               <div class="col-12 col-md-6">
-                <label class="form-label text-secondary">Teléfono</label>
-                <input v-model="form.telefono" class="form-control" placeholder="Ej: 3564..." />
+                <label class="form-label field-label">Teléfono</label>
+                <input v-model="form.telefono" class="form-control app-input" />
               </div>
 
               <div class="col-12 col-md-6">
-                <label class="form-label text-secondary">Email</label>
-                <input v-model="form.email" class="form-control" placeholder="proveedor@email.com" />
+                <label class="form-label field-label">Email</label>
+                <input v-model="form.email" class="form-control app-input" />
               </div>
 
               <div class="col-12">
-                <label class="form-label text-secondary">Dirección</label>
-                <input v-model="form.direccion" class="form-control" placeholder="Calle, nro, ciudad" />
+                <label class="form-label field-label">Dirección</label>
+                <input v-model="form.direccion" class="form-control app-input" />
               </div>
 
               <div class="col-12">
-                <label class="form-label text-secondary">Notas</label>
-                <textarea v-model="form.notas" class="form-control" rows="3" placeholder="Observaciones..."></textarea>
+                <label class="form-label field-label">Notas</label>
+                <textarea v-model="form.notas" class="form-control app-input" rows="3"></textarea>
               </div>
 
               <div class="col-12">
                 <div class="form-check form-switch">
                   <input class="form-check-input" type="checkbox" id="activo" v-model="form.activo" />
-                  <label class="form-check-label text-secondary" for="activo">Activo</label>
+                  <label class="form-check-label helper-text" for="activo">Activo</label>
                 </div>
               </div>
             </div>
 
-            <div class="text-secondary small mt-3">
-              Se valida unicidad por DNI/CUIT y por razón social.
+            <div class="helper-text mt-3">
+              Se valida unicidad por documento, CUIT y razón social.
             </div>
           </div>
 
@@ -310,11 +331,11 @@
 
     <div class="modal fade" id="pagoModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-lg modal-dialog-centered">
-        <div class="modal-content bg-dark border-secondary modal-round">
+        <div class="modal-content bg-panel border-0 modal-round">
           <div class="modal-header border-secondary">
             <div>
               <h5 class="modal-title mb-0">Registrar pago</h5>
-              <div class="text-secondary small" v-if="pagoProveedor">
+              <div class="helper-text" v-if="pagoProveedor">
                 Proveedor: <b>{{ pagoProveedor.displayName }}</b>
                 · Saldo actual:
                 <b :class="saldoClass(pagoProveedor)">
@@ -326,31 +347,57 @@
           </div>
 
           <div class="modal-body">
-            <div v-if="pagoError" class="alert alert-danger py-2">{{ pagoError }}</div>
-            <div v-if="pagoOk" class="alert alert-success py-2">{{ pagoOk }}</div>
+            <div v-if="pagoError" class="alert alert-danger py-2 mb-3">{{ pagoError }}</div>
+            <div v-if="pagoOk" class="alert alert-success py-2 mb-3">{{ pagoOk }}</div>
 
             <div class="row g-3">
               <div class="col-12 col-md-6">
-                <label class="form-label text-secondary">Compra a pagar *</label>
-                <select v-model.number="pagoCompraId" class="form-select">
+                <label class="form-label field-label">Compra a pagar *</label>
+                <select v-model.number="pagoCompraId" class="form-select app-input">
                   <option :value="null">Seleccionar compra pendiente...</option>
                   <option v-for="c in comprasPendientes" :key="c.compraId" :value="c.compraId">
-                    #{{ c.compraId }} · {{ formatDate(c.fecha) }} · {{ formatMoney(c.total) }} · {{ c.estado }}
+                    Compra #{{ c.compraId }} · {{ formatDate(c.fecha) }} · Total ${{ formatMoney(c.total) }}
                   </option>
                 </select>
-                <div class="text-secondary small mt-1" v-if="!comprasPendientes.length">
+                <div v-if="!comprasPendientes.length" class="helper-text mt-1">
                   No hay compras pendientes para este proveedor.
                 </div>
               </div>
 
-              <div class="col-12 col-md-3">
-                <label class="form-label text-secondary">Monto *</label>
-                <input v-model="pagoMonto" class="form-control" inputmode="numeric" placeholder="Ej: 50000" />
+              <div class="col-12" v-if="compraSeleccionada">
+                <div class="card bg-dark border-secondary">
+                  <div class="card-body py-3">
+                    <div class="helper-text mb-1">
+                      Fecha: <b>{{ formatDate(compraSeleccionada.fecha) }}</b>
+                    </div>
+                    <div class="helper-text mb-1">
+                      Total compra: <b>$ {{ formatMoney(compraSeleccionada.total) }}</b>
+                    </div>
+                    <div class="helper-text mb-1">
+                      Pagado: <b>$ {{ formatMoney(pagadoCompraSeleccionada) }}</b>
+                    </div>
+                    <div class="helper-text">
+                      Saldo pendiente:
+                      <b class="text-warning">$ {{ formatMoney(saldoCompraSeleccionada) }}</b>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div class="col-12 col-md-3">
-                <label class="form-label text-secondary">Método *</label>
-                <select v-model.number="pagoMetodoPagoId" class="form-select">
+                <label class="form-label field-label">Monto *</label>
+                <input
+                  v-model.number="pagoMonto"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  class="form-control app-input"
+                />
+              </div>
+
+              <div class="col-12 col-md-3">
+                <label class="form-label field-label">Método *</label>
+                <select v-model.number="pagoMetodoPagoId" class="form-select app-input">
                   <option :value="null">Seleccionar...</option>
                   <option v-for="m in metodosPago" :key="m.metodoPagoId" :value="m.metodoPagoId">
                     {{ m.nombre }}
@@ -359,8 +406,8 @@
               </div>
 
               <div class="col-12">
-                <label class="form-label text-secondary">Referencia</label>
-                <input v-model="pagoNotas" class="form-control" placeholder="Ej: Factura 0001..." />
+                <label class="form-label field-label">Referencia</label>
+                <input v-model="pagoNotas" class="form-control app-input" placeholder="Ej: Factura 0001..." />
               </div>
 
               <div class="col-12 d-flex justify-content-end">
@@ -374,22 +421,22 @@
               </div>
             </div>
 
-            <hr class="border-secondary my-3" />
+            <hr class="border-secondary my-4" />
 
-            <div class="d-flex align-items-center justify-content-between mb-2">
-              <div class="fw-semibold">Pagos de la compra seleccionada</div>
-              <div class="text-secondary small">{{ pagosCompra.length }} pago(s)</div>
+            <div class="section-header mb-3">
+              <h2 class="section-title mb-0">Pagos de la compra seleccionada</h2>
+              <div class="helper-text">{{ pagosCompra.length }} pago(s)</div>
             </div>
 
-            <div v-if="pagosCompra.length === 0" class="text-secondary">
+            <div v-if="pagosCompra.length === 0" class="helper-text">
               No hay pagos registrados para esta compra.
             </div>
 
             <div v-else class="table-responsive">
-              <table class="table table-dark table-hover align-middle mb-0">
+              <table class="table table-dark table-hover align-middle app-table mb-0">
                 <thead>
-                  <tr class="text-secondary">
-                    <th style="width:90px">ID</th>
+                  <tr>
+                    <th style="width:90px">Pago</th>
                     <th style="width:140px">Fecha</th>
                     <th class="text-end">Monto</th>
                     <th>Referencia</th>
@@ -399,15 +446,15 @@
                   <tr v-for="pg in pagosCompra" :key="pg.pagoProveedorId || pg.id">
                     <td class="text-secondary">#{{ pg.pagoProveedorId || pg.id }}</td>
                     <td class="text-secondary">{{ formatDate(pg.fecha) }}</td>
-                    <td class="text-end fw-bold">$ {{ formatMoney(pg.monto) }}</td>
+                    <td class="text-end fw-semibold">$ {{ formatMoney(pg.monto) }}</td>
                     <td class="text-secondary">{{ pg.referencia || "—" }}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
 
-            <div class="text-secondary small mt-3">
-              Nota: el pago se registra contra una compra.
+            <div class="helper-text mt-3">
+              El pago siempre se registra contra una compra específica.
             </div>
           </div>
 
@@ -497,6 +544,9 @@ export default {
       pagoOk: "",
       comprasPendientes: [],
       pagosCompra: [],
+      compraSeleccionada: null,
+      pagadoCompraSeleccionada: 0,
+      saldoCompraSeleccionada: 0,
 
       metodosPago: [],
       deudasMap: new Map(),
@@ -556,29 +606,8 @@ export default {
       }, 300)
     },
 
-    page() {
-      this.refresh()
-    },
-
-    size() {
-      if (this.page !== 1) {
-        this.page = 1
-      } else {
-        this.refresh()
-      }
-    },
-
     async pagoCompraId(newId) {
-      this.pagosCompra = []
-      if (!newId) return
-
-      try {
-        const res = await pagosProveedorApi.porCompra(newId)
-        const p = unwrapPage(res?.data)
-        this.pagosCompra = p.content ?? []
-      } catch {
-        this.pagosCompra = []
-      }
+      await this.cargarDetalleCompraPago(newId)
     },
   },
 
@@ -644,22 +673,18 @@ export default {
         tipo,
         displayName,
         documentoLabel,
-
         nombre,
         apellido,
         documentoTipo: "DNI",
         documentoNro: dni,
-
         razonSocial,
         cuit,
         contacto: "",
-
         telefono: raw?.telefono ?? "",
         email: raw?.email ?? "",
         direccion: raw?.direccion ?? "",
         notas: raw?.notas ?? "",
         activo: raw?.activo !== false,
-
         createdAt: raw?.createdAt ?? "",
       }
     },
@@ -699,7 +724,6 @@ export default {
         this.totalElements = provPage.totalElements
         this.totalPages = Math.max(1, provPage.totalPages || 1)
         this.page = Math.max(1, provPage.page || 1)
-        this.size = provPage.size || this.size
 
         const deudas = deudasRes?.data ?? []
         this.deudasMap = new Map(
@@ -911,6 +935,38 @@ export default {
       }
     },
 
+    async cargarDetalleCompraPago(compraId) {
+      this.compraSeleccionada =
+        this.comprasPendientes.find((c) => Number(c.compraId) === Number(compraId)) || null
+
+      this.pagosCompra = []
+      this.pagadoCompraSeleccionada = 0
+      this.saldoCompraSeleccionada = Number(this.compraSeleccionada?.total || 0)
+
+      if (!compraId) return
+
+      try {
+        const res = await pagosProveedorApi.porCompra(compraId)
+        const p = unwrapPage(res?.data)
+        this.pagosCompra = p.content ?? []
+
+        const pagado = this.pagosCompra.reduce((acc, x) => acc + Number(x.monto || 0), 0)
+        const total = Number(this.compraSeleccionada?.total || 0)
+        const saldo = Math.max(total - pagado, 0)
+
+        this.pagadoCompraSeleccionada = pagado
+        this.saldoCompraSeleccionada = saldo
+
+        if (!this.pagoMonto || Number(this.pagoMonto) <= 0) {
+          this.pagoMonto = saldo
+        }
+      } catch {
+        this.pagosCompra = []
+        this.pagadoCompraSeleccionada = 0
+        this.saldoCompraSeleccionada = Number(this.compraSeleccionada?.total || 0)
+      }
+    },
+
     async preparePago(p) {
       this.pagoProveedor = p
       this.pagoCompraId = null
@@ -921,6 +977,9 @@ export default {
       this.pagoOk = ""
       this.comprasPendientes = []
       this.pagosCompra = []
+      this.compraSeleccionada = null
+      this.pagadoCompraSeleccionada = 0
+      this.saldoCompraSeleccionada = 0
 
       this.loading = true
       try {
@@ -978,9 +1037,14 @@ export default {
         return
       }
 
-      const monto = Number(String(this.pagoMonto || "").replace(/[^\d.]/g, "") || 0)
+      const monto = Number(this.pagoMonto || 0)
       if (monto <= 0) {
         this.pagoError = "Monto inválido"
+        return
+      }
+
+      if (this.saldoCompraSeleccionada > 0 && monto > this.saldoCompraSeleccionada) {
+        this.pagoError = "El monto supera el saldo pendiente de la compra."
         return
       }
 
@@ -996,13 +1060,10 @@ export default {
         await pagosProveedorApi.create(payload)
 
         this.pagoOk = "Pago registrado ✅"
-        this.pagoMonto = ""
         this.pagoNotas = ""
+        this.pagoMonto = ""
 
-        const pagosRes = await pagosProveedorApi.porCompra(compraId)
-        const pagosPage = unwrapPage(pagosRes?.data)
-        this.pagosCompra = pagosPage.content ?? []
-
+        await this.cargarDetalleCompraPago(compraId)
         await this.refresh()
       } catch (e) {
         this.pagoError = e?.response?.data?.error || e?.message || "No se pudo registrar el pago"
@@ -1015,25 +1076,66 @@ export default {
 </script>
 
 <style scoped>
-.bg-panel {
-  background: rgba(18, 22, 32, .92);
+.proveedores-page {
+  min-height: 100%;
 }
 
 .modal-round {
-  border-radius: 14px;
+  border-radius: 18px;
 }
 
-.btn-accent {
-  background: #7c3aed;
-  border-color: #7c3aed;
+.switch-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.btn-accent:hover {
-  filter: brightness(1.05);
+.filters-bar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
-.table td,
-.table th {
-  vertical-align: middle;
+.filters-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.table-main {
+  color: #fff;
+  font-weight: 600;
+}
+
+.table-sub {
+  color: rgba(255,255,255,.58);
+  font-size: .82rem;
+  margin-top: 2px;
+}
+
+.footer-summary {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.pager-minimal {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 992px) {
+  .filters-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

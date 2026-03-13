@@ -1,62 +1,139 @@
 <script setup>
 import { computed } from "vue"
+import { RouterLink } from "vue-router"
 import { getSession, isAdmin } from "../auth/session"
 
-const session = getSession() ?? null
-const admin = computed(() => Boolean(session && isAdmin()))
+const admin = computed(() => Boolean(getSession() && isAdmin()))
 </script>
 
 <template>
-  <div class="container py-4">
-    <div class="mb-3">
-      <h1 class="h4 mb-1">Configuración</h1>
-      <div class="text-secondary">Parámetros del sistema (catálogos + usuarios).</div>
+  <div class="config-page">
+
+    <!-- HEADER -->
+    <section class="page-hero">
+      <div>
+        <p class="eyebrow mb-1">Sistema</p>
+        <h1 class="page-title mb-1">Configuración</h1>
+        <p class="page-subtitle mb-0">
+          Parámetros del sistema, catálogos y administración de usuarios.
+        </p>
+      </div>
+    </section>
+
+    <!-- ERROR PERMISO -->
+    <div v-if="!admin" class="alert alert-warning py-2 mb-3">
+      Solo los usuarios <b>ADMIN</b> pueden acceder a esta sección.
     </div>
 
-    <div v-if="!admin" class="alert alert-warning py-2">
-      Solo ADMIN puede entrar a configuración.
+    <!-- TARJETAS -->
+    <div v-if="admin" class="config-grid">
+
+      <!-- METODOS PAGO -->
+      <RouterLink
+        to="/config/metodos-pago"
+        class="config-card"
+      >
+        <div class="config-icon">💳</div>
+
+        <div>
+          <div class="config-title">Métodos de pago</div>
+          <div class="config-desc">
+            Administrar efectivo, transferencias y otros medios.
+          </div>
+        </div>
+      </RouterLink>
+
+      <!-- LOCALIDADES -->
+      <RouterLink
+        to="/config/localidades"
+        class="config-card"
+      >
+        <div class="config-icon">📍</div>
+
+        <div>
+          <div class="config-title">Localidades</div>
+          <div class="config-desc">
+            Crear y administrar localidades del sistema.
+          </div>
+        </div>
+      </RouterLink>
+
+      <!-- USUARIOS -->
+      <RouterLink
+        to="/config/usuarios"
+        class="config-card"
+      >
+        <div class="config-icon">👤</div>
+
+        <div>
+          <div class="config-title">Usuarios</div>
+          <div class="config-desc">
+            Crear, editar y gestionar accesos.
+          </div>
+        </div>
+      </RouterLink>
+
     </div>
 
-    <div v-else class="row g-3">
-      <div class="col-12 col-md-4">
-        <RouterLink class="card bg-panel border-0 shadow-sm text-decoration-none" to="/config/localidades">
-          <div class="card-body">
-            <div class="fw-semibold text-white">Localidades</div>
-            <div class="text-secondary small">ABM de localidades.</div>
-          </div>
-        </RouterLink>
-      </div>
-
-      <div class="col-12 col-md-4">
-        <RouterLink class="card bg-panel border-0 shadow-sm text-decoration-none" to="/config/tipos-cliente">
-          <div class="card-body">
-            <div class="fw-semibold text-white">Tipos de cliente</div>
-            <div class="text-secondary small">Minorista / Mayorista.</div>
-          </div>
-        </RouterLink>
-      </div>
-
-      <div class="col-12 col-md-4">
-        <RouterLink class="card bg-panel border-0 shadow-sm text-decoration-none" to="/config/metodos-pago">
-          <div class="card-body">
-            <div class="fw-semibold text-white">Métodos de pago</div>
-            <div class="text-secondary small">Efectivo / Transferencia, etc.</div>
-          </div>
-        </RouterLink>
-      </div>
-
-      <div class="col-12 col-md-4">
-        <RouterLink class="card bg-panel border-0 shadow-sm text-decoration-none" to="/config/usuarios">
-          <div class="card-body">
-            <div class="fw-semibold text-white">Usuarios</div>
-            <div class="text-secondary small">Crear / listar / eliminar.</div>
-          </div>
-        </RouterLink>
-      </div>
-    </div>
   </div>
 </template>
 
 <style scoped>
-.bg-panel { background: rgba(18, 22, 32, .92); }
+
+.config-page{
+  min-height:100%;
+}
+
+/* GRID */
+
+.config-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:16px;
+  margin-top:18px;
+}
+
+/* CARD */
+
+.config-card{
+  display:flex;
+  gap:14px;
+  align-items:center;
+
+  background:rgba(18,22,32,.92);
+  border-radius:14px;
+
+  padding:18px;
+
+  text-decoration:none;
+  color:white;
+
+  transition:.15s;
+}
+
+.config-card:hover{
+  transform:translateY(-4px);
+  box-shadow:0 10px 28px rgba(0,0,0,.45);
+}
+
+/* ICON */
+
+.config-icon{
+  font-size:26px;
+  width:40px;
+  text-align:center;
+}
+
+/* TEXT */
+
+.config-title{
+  font-weight:700;
+  margin-bottom:2px;
+}
+
+.config-desc{
+  font-size:.85rem;
+  color:rgba(255,255,255,.65);
+}
+
 </style>

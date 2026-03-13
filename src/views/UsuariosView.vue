@@ -15,13 +15,15 @@ const success = ref("")
 const usuarios = ref([])
 
 const modalOpen = ref(false)
+const isEditing = ref(false)
+const editingId = ref(null)
 
 const form = reactive({
   name: "",
   email: "",
   password: "",
-  role: "EMPLEADO", // ADMIN | EMPLEADO
-  shift: "MANIANA", // opcional (si todavía no lo guardás, lo ignoramos)
+  role: "EMPLEADO",
+  shift: "MANIANA",
 })
 
 function normalizeEmail(v) {
@@ -41,19 +43,45 @@ function resetForm() {
   form.shift = "MANIANA"
 }
 
+function roleBadgeClass(role) {
+  const r = String(role || "").toUpperCase()
+  if (r === "ADMIN") return "text-bg-warning"
+  if (r === "EMPLEADO") return "text-bg-secondary"
+  return "text-bg-dark border border-secondary"
+}
+
+function normalizeUsuarios(data) {
+  const arr = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.content)
+      ? data.content
+      : Array.isArray(data?.items)
+        ? data.items
+        : []
+
+  return arr.map((u) => ({
+    userId: Number(u?.userId ?? u?.id ?? 0),
+    name: String(u?.name ?? u?.nombre ?? ""),
+    email: String(u?.email ?? ""),
+    roles: Array.isArray(u?.roles) ? u.roles : [],
+  }))
+}
+
 async function fetchUsuarios() {
   if (!canView.value) return
+
   loading.value = true
   resetAlerts()
+
   try {
     const { data } = await usuariosApi.list()
-    usuarios.value = Array.isArray(data) ? data : (Array.isArray(data?.content) ? data.content : [])
+    usuarios.value = normalizeUsuarios(data)
   } catch (e) {
     error.value =
       e?.response?.data?.error ||
       e?.response?.data?.message ||
       e?.message ||
-      "No se pudieron cargar los usuarios"
+      "No se pudieron cargar los usuarios."
   } finally {
     loading.value = false
   }
@@ -62,46 +90,102 @@ async function fetchUsuarios() {
 function openCreate() {
   resetAlerts()
   resetForm()
+  isEditing.value = false
+  editingId.value = null
+  modalOpen.value = true
+}
+
+function openEdit(u) {
+  resetAlerts()
+  resetForm()
+
+  isEditing.value = true
+  editingId.value = u.userId ?? u.id
+  form.name = u.name ?? ""
+  form.email = u.email ?? ""
+  form.password = ""
+  form.role = Array.isArray(u.roles) && u.roles.includes("ADMIN") ? "ADMIN" : "EMPLEADO"
+
   modalOpen.value = true
 }
 
 function closeModal() {
   modalOpen.value = false
+  isEditing.value = false
+  editingId.value = null
+  resetForm()
 }
 
 function validateForm() {
   resetAlerts()
-  if (!String(form.name || "").trim()) return (error.value = "Ingresá nombre"), false
+
+  if (!String(form.name || "").trim()) {
+    error.value = "Ingresá nombre."
+    return false
+  }
+
   const email = normalizeEmail(form.email)
-  if (!email) return (error.value = "Ingresá email"), false
-  if (!email.includes("@")) return (error.value = "Email inválido"), false
-  if (!String(form.password || "").trim()) return (error.value = "Ingresá contraseña"), false
-  if (!["ADMIN", "EMPLEADO"].includes(String(form.role))) return (error.value = "Rol inválido"), false
+
+  if (!email) {
+    error.value = "Ingresá email."
+    return false
+  }
+
+  if (!email.includes("@")) {
+    error.value = "Email inválido."
+    return false
+  }
+
+  if (!isEditing.value && !String(form.password || "").trim()) {
+    error.value = "Ingresá contraseña."
+    return false
+  }
+
+  if (!["ADMIN", "EMPLEADO"].includes(String(form.role))) {
+    error.value = "Rol inválido."
+    return false
+  }
+
   return true
 }
 
-async function createUsuario() {
+async function submitUsuario() {
   if (!canManage.value) {
-    error.value = "Sin permiso para gestionar usuarios"
+    error.value = "Sin permiso para gestionar usuarios."
     return
   }
+
   if (!validateForm()) return
 
   loading.value = true
   resetAlerts()
 
   try {
-    const payload = {
-      name: String(form.name).trim(),
-      email: normalizeEmail(form.email),
-      password: String(form.password),
-      roles: [String(form.role)], // ✅ back: roles: ["ADMIN"] o ["EMPLEADO"]
-      // shift: form.shift, // solo si tu back lo soporta
+    if (isEditing.value) {
+      const rawPassword = String(form.password || "").trim()
+
+      const payload = {
+        userId: editingId.value,
+        name: String(form.name).trim(),
+        email: normalizeEmail(form.email),
+        password: rawPassword || null,
+        roles: [String(form.role)],
+      }
+
+      await usuariosApi.update(editingId.value, payload)
+      success.value = "Usuario actualizado correctamente."
+    } else {
+      const payload = {
+        name: String(form.name).trim(),
+        email: normalizeEmail(form.email),
+        password: String(form.password),
+        roles: [String(form.role)],
+      }
+
+      await usuariosApi.create(payload)
+      success.value = "Usuario creado correctamente."
     }
 
-    await usuariosApi.create(payload)
-
-    success.value = "Usuario creado correctamente"
     closeModal()
     await fetchUsuarios()
   } catch (e) {
@@ -109,7 +193,36 @@ async function createUsuario() {
       e?.response?.data?.error ||
       e?.response?.data?.message ||
       e?.message ||
-      "No se pudo crear el usuario"
+      "No se pudo guardar el usuario."
+  } finally {
+    loading.value = false
+  }
+}
+
+async function removeUsuario(u) {
+  if (!canManage.value) {
+    error.value = "Sin permiso para gestionar usuarios."
+    return
+  }
+
+  const id = u.userId ?? u.id
+  const nombre = u.name ?? "usuario"
+
+  if (!confirm(`Eliminar "${nombre}"?`)) return
+
+  loading.value = true
+  resetAlerts()
+
+  try {
+    await usuariosApi.delete(id)
+    success.value = "Usuario eliminado correctamente."
+    await fetchUsuarios()
+  } catch (e) {
+    error.value =
+      e?.response?.data?.error ||
+      e?.response?.data?.message ||
+      e?.message ||
+      "No se pudo eliminar el usuario."
   } finally {
     loading.value = false
   }
@@ -119,114 +232,199 @@ onMounted(fetchUsuarios)
 </script>
 
 <template>
-  <div class="container py-4">
-    <div class="d-flex flex-wrap gap-2 align-items-end justify-content-between mb-3">
+  <div class="usuarios-page">
+    <section class="page-hero">
       <div>
-        <h1 class="h4 mb-1">Usuarios</h1>
-        <div class="text-secondary">Crear y administrar usuarios del sistema.</div>
+        <p class="eyebrow mb-1">Configuración</p>
+        <h1 class="page-title mb-1">Usuarios</h1>
+        <p class="page-subtitle mb-0">
+          Crear, editar y administrar usuarios del sistema.
+        </p>
       </div>
 
-      <div class="d-flex gap-2">
+      <div class="hero-actions">
         <button class="btn btn-outline-light" @click="fetchUsuarios" :disabled="loading || !canView">
-          {{ loading ? "Actualizando..." : "Refresh" }}
+          {{ loading ? "Actualizando..." : "Actualizar" }}
         </button>
-        <button class="btn btn-accent" @click="openCreate" :disabled="loading || !canManage">
-          + Nuevo usuario
+
+        <button class="btn btn-primary btn-accent" @click="openCreate" :disabled="loading || !canManage">
+          Nuevo usuario
         </button>
       </div>
-    </div>
+    </section>
 
-    <div v-if="!canView" class="alert alert-warning py-2">
+    <div v-if="!canView" class="alert alert-warning py-2 mb-3">
       No tenés permisos para ver usuarios.
     </div>
 
-    <div v-else>
-      <div v-if="error" class="alert alert-danger py-2">{{ error }}</div>
-      <div v-if="success" class="alert alert-success py-2">{{ success }}</div>
+    <template v-else>
+      <div v-if="error" class="alert alert-danger py-2 mb-3">{{ error }}</div>
+      <div v-if="success" class="alert alert-success py-2 mb-3">{{ success }}</div>
 
       <div class="card bg-panel border-0 shadow-sm">
         <div class="card-body">
-          <div class="table-responsive">
-            <table class="table table-dark table-hover align-middle mb-0">
+          <div class="section-header mb-3">
+            <h2 class="section-title mb-0">Resultados</h2>
+            <div class="helper-text">
+              Total: <b>{{ usuarios.length }}</b> usuario(s)
+            </div>
+          </div>
+
+          <div v-if="loading" class="helper-text">Cargando...</div>
+
+          <div v-else-if="usuarios.length === 0" class="empty-block">
+            <div class="empty-title">No hay usuarios para mostrar</div>
+            <div class="helper-text">
+              Creá un usuario nuevo para comenzar.
+            </div>
+          </div>
+
+          <div v-else class="table-responsive">
+            <table class="table table-dark table-hover align-middle app-table mb-0">
               <thead>
                 <tr>
-                  <th style="width: 80px">ID</th>
+                  <th style="width: 90px">Usuario</th>
                   <th>Nombre</th>
                   <th>Email</th>
-                  <th style="width: 160px">Roles</th>
+                  <th style="width: 180px">Roles</th>
+                  <th class="text-end" style="width: 220px">Acciones</th>
                 </tr>
               </thead>
-              <tbody>
-                <tr v-for="u in usuarios" :key="u.userId ?? u.id">
-                  <td class="text-secondary">{{ u.userId ?? u.id }}</td>
-                  <td>{{ u.name ?? u.nombre ?? "-" }}</td>
-                  <td class="text-secondary">{{ u.email }}</td>
-                  <td>
-                    <span
-                      v-for="r in (u.roles || [])"
-                      :key="r"
-                      class="badge rounded-pill bg-secondary me-1"
-                    >
-                      {{ r }}
-                    </span>
-                    <span v-if="!u.roles || !u.roles.length" class="text-secondary">-</span>
-                  </td>
-                </tr>
 
-                <tr v-if="usuarios.length === 0">
-                  <td colspan="4" class="text-secondary">No hay usuarios para mostrar.</td>
+              <tbody>
+                <tr v-for="u in usuarios" :key="u.userId">
+                  <td class="text-secondary">#{{ u.userId }}</td>
+
+                  <td>
+                    <div class="table-main">{{ u.name || "—" }}</div>
+                  </td>
+
+                  <td class="text-secondary">{{ u.email || "—" }}</td>
+
+                  <td>
+                    <template v-if="u.roles && u.roles.length">
+                      <span
+                        v-for="r in u.roles"
+                        :key="r"
+                        class="badge rounded-pill me-1"
+                        :class="roleBadgeClass(r)"
+                      >
+                        {{ r }}
+                      </span>
+                    </template>
+
+                    <span v-else class="text-secondary">—</span>
+                  </td>
+
+                  <td class="text-end">
+                    <div class="d-flex justify-content-end gap-2 flex-wrap">
+                      <button
+                        class="btn btn-sm btn-outline-light"
+                        @click="openEdit(u)"
+                        :disabled="loading || !canManage"
+                      >
+                        Editar
+                      </button>
+
+                      <button
+                        class="btn btn-sm btn-outline-danger"
+                        @click="removeUsuario(u)"
+                        :disabled="loading || !canManage"
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <div class="text-secondary small mt-2">
-            Para crear/editar usuarios necesitás <b>usuarios:gestionar</b>.
+          <div class="helper-text mt-3">
+            Para crear, editar o eliminar usuarios necesitás el permiso <b>usuarios:gestionar</b>.
           </div>
         </div>
       </div>
-    </div>
+    </template>
 
-    <!-- Modal simple (sin Bootstrap JS) -->
-    <div v-if="modalOpen" class="modal-backdrop">
-      <div class="modal-card">
-        <div class="d-flex align-items-center justify-content-between mb-2">
-          <div class="fw-bold">Nuevo usuario</div>
-          <button class="btn btn-sm btn-outline-light" @click="closeModal" :disabled="loading">X</button>
+    <div v-if="modalOpen" class="modal-backdrop-custom" @click.self="closeModal">
+      <div class="modal-custom">
+        <div class="section-header mb-3">
+          <div>
+            <div class="section-title">
+              {{ isEditing ? "Editar usuario" : "Nuevo usuario" }}
+            </div>
+            <div class="helper-text">
+              Completá los datos básicos del usuario.
+            </div>
+          </div>
+
+          <button class="btn btn-sm btn-outline-light" @click="closeModal" :disabled="loading">
+            Cerrar
+          </button>
         </div>
 
-        <div v-if="error" class="alert alert-danger py-2">{{ error }}</div>
+        <div v-if="error" class="alert alert-danger py-2 mb-3">{{ error }}</div>
 
-        <div class="mb-2">
-          <label class="form-label text-secondary small">Nombre</label>
-          <input class="form-control bg-dark text-white border-0" v-model="form.name" :disabled="loading" />
-        </div>
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label field-label">Nombre</label>
+            <input
+              class="form-control app-input"
+              v-model="form.name"
+              :disabled="loading"
+            />
+          </div>
 
-        <div class="mb-2">
-          <label class="form-label text-secondary small">Email</label>
-          <input class="form-control bg-dark text-white border-0" v-model="form.email" :disabled="loading" />
-        </div>
+          <div class="col-12">
+            <label class="form-label field-label">Email</label>
+            <input
+              class="form-control app-input"
+              v-model="form.email"
+              :disabled="loading"
+            />
+          </div>
 
-        <div class="mb-2">
-          <label class="form-label text-secondary small">Contraseña</label>
-          <input class="form-control bg-dark text-white border-0" type="password" v-model="form.password" :disabled="loading" />
-        </div>
+          <div class="col-12">
+            <label class="form-label field-label">
+              {{ isEditing ? "Nueva contraseña (opcional)" : "Contraseña" }}
+            </label>
+            <input
+              class="form-control app-input"
+              type="password"
+              v-model="form.password"
+              :disabled="loading"
+            />
+          </div>
 
-        <div class="mb-3">
-          <label class="form-label text-secondary small">Rol</label>
-          <select class="form-select bg-dark text-white border-0" v-model="form.role" :disabled="loading">
-            <option value="EMPLEADO">EMPLEADO</option>
-            <option value="ADMIN">ADMIN</option>
-          </select>
-          <div class="text-secondary small mt-1">
-            EMPLEADO: sin compras/proveedores · ADMIN: todo
+          <div class="col-12">
+            <label class="form-label field-label">Rol</label>
+            <select
+              class="form-select app-input"
+              v-model="form.role"
+              :disabled="loading"
+            >
+              <option value="EMPLEADO">EMPLEADO</option>
+              <option value="ADMIN">ADMIN</option>
+            </select>
+
+            <div class="helper-text mt-2">
+              EMPLEADO: operación general · ADMIN: acceso completo.
+            </div>
           </div>
         </div>
 
-        <div class="d-flex gap-2 justify-content-end">
-          <button class="btn btn-outline-light" @click="closeModal" :disabled="loading">Cancelar</button>
-          <button class="btn btn-accent" @click="createUsuario" :disabled="loading || !canManage">
-            {{ loading ? "Guardando..." : "Crear" }}
+        <div class="d-flex gap-2 justify-content-end mt-4">
+          <button class="btn btn-outline-light" @click="closeModal" :disabled="loading">
+            Cancelar
+          </button>
+
+          <button
+            class="btn btn-primary btn-accent"
+            @click="submitUsuario"
+            :disabled="loading || !canManage"
+          >
+            {{ loading ? "Guardando..." : isEditing ? "Guardar cambios" : "Crear" }}
           </button>
         </div>
       </div>
@@ -235,15 +433,26 @@ onMounted(fetchUsuarios)
 </template>
 
 <style scoped>
-.bg-panel { background: rgba(18, 22, 32, .92); }
-.btn-accent {
-  border: 1px solid rgba(170, 150, 255, 0.35);
-  background: rgba(170, 150, 255, 0.14);
-  color: rgba(255, 255, 255, 0.92);
-  font-weight: 800;
+.usuarios-page {
+  min-height: 100%;
 }
-.btn-accent:hover { background: rgba(170, 150, 255, 0.20); }
-.modal-backdrop {
+
+.table-main {
+  color: #fff;
+  font-weight: 600;
+}
+
+.empty-block {
+  padding: 14px 0;
+}
+
+.empty-title {
+  color: #fff;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.modal-backdrop-custom {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,.55);
@@ -252,13 +461,15 @@ onMounted(fetchUsuarios)
   z-index: 2000;
   padding: 16px;
 }
-.modal-card{
+
+.modal-custom {
   width: 100%;
   max-width: 520px;
-  border-radius: 16px;
+  border-radius: 18px;
   background: rgba(18, 22, 32, .98);
-  border: 1px solid rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.10);
   box-shadow: 0 18px 55px rgba(0,0,0,.45);
-  padding: 16px;
+  padding: 18px;
+  color: #fff;
 }
 </style>

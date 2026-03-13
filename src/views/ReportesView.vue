@@ -27,7 +27,13 @@ function formatPct(n) {
 }
 
 function pickErr(e, fallback = "Error") {
-  return e?.response?.data?.error || e?.response?.data?.message || e?.response?.data || e?.message || fallback
+  return (
+    e?.response?.data?.error ||
+    e?.response?.data?.message ||
+    e?.response?.data ||
+    e?.message ||
+    fallback
+  )
 }
 
 const loading = ref(false)
@@ -64,9 +70,10 @@ const cards = computed(() => [
   { label: "Margen porcentual", value: formatPct(dashboard.value.margenPorcentual) },
   {
     label: "Crecimiento mensual",
-    value: dashboard.value.crecimientoMensual == null
-      ? "-"
-      : formatPct(dashboard.value.crecimientoMensual),
+    value:
+      dashboard.value.crecimientoMensual == null
+        ? "—"
+        : formatPct(dashboard.value.crecimientoMensual),
   },
 ])
 
@@ -116,44 +123,56 @@ onMounted(refreshAll)
 </script>
 
 <template>
-  <div class="container-fluid py-3">
-    <div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-3">
+  <div class="reportes-page">
+    <section class="page-hero">
       <div>
-        <h1 class="h4 mb-1">Reportes</h1>
-        <div class="text-secondary">
+        <p class="eyebrow mb-1">Reportes</p>
+        <h1 class="page-title mb-1">Reportes</h1>
+        <p class="page-subtitle mb-0">
           Panel de métricas, facturación, productos, métodos de pago y ganancias.
-        </div>
+        </p>
       </div>
 
-      <button class="btn btn-outline-light" @click="refreshAll" :disabled="loading">
-        {{ loading ? "Actualizando..." : "Refresh" }}
-      </button>
-    </div>
+      <div class="hero-actions">
+        <button class="btn btn-outline-light" @click="refreshAll" :disabled="loading">
+          {{ loading ? "Actualizando..." : "Actualizar" }}
+        </button>
+      </div>
+    </section>
 
-    <div v-if="errorMsg" class="alert alert-danger py-2">{{ errorMsg }}</div>
+    <div v-if="errorMsg" class="alert alert-danger py-2 mb-3">
+      {{ errorMsg }}
+    </div>
 
     <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
-        <div class="row g-3 align-items-end">
-          <div class="col-12 col-md-3">
-            <label class="form-label text-secondary">Desde</label>
+        <div class="section-header mb-3">
+          <h2 class="section-title mb-0">Filtros</h2>
+          <div class="helper-text">
+            Ajustá el rango para recalcular los indicadores.
+          </div>
+        </div>
+
+        <div class="filters-grid">
+          <div>
+            <label class="form-label field-label">Desde</label>
             <input
               v-model="filtros.desde"
               type="date"
-              class="form-control bg-dark text-white border-secondary"
+              class="form-control app-input"
             />
           </div>
 
-          <div class="col-12 col-md-3">
-            <label class="form-label text-secondary">Hasta</label>
+          <div>
+            <label class="form-label field-label">Hasta</label>
             <input
               v-model="filtros.hasta"
               type="date"
-              class="form-control bg-dark text-white border-secondary"
+              class="form-control app-input"
             />
           </div>
 
-          <div class="col-12 col-md-3">
+          <div class="filter-action">
             <button class="btn btn-primary btn-accent w-100" @click="refreshAll" :disabled="loading">
               Aplicar filtros
             </button>
@@ -166,8 +185,8 @@ onMounted(refreshAll)
       <div class="col-12 col-md-6 col-xl-3" v-for="c in cards" :key="c.label">
         <div class="card bg-panel border-0 shadow-sm h-100">
           <div class="card-body">
-            <div class="text-secondary small mb-2">{{ c.label }}</div>
-            <div class="fs-4 fw-bold">{{ c.value }}</div>
+            <div class="kpi-label">{{ c.label }}</div>
+            <div class="kpi-value">{{ c.value }}</div>
           </div>
         </div>
       </div>
@@ -175,14 +194,20 @@ onMounted(refreshAll)
 
     <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
-        <h2 class="h6 mb-3">Facturación mensual</h2>
+        <div class="section-header mb-3">
+          <h2 class="section-title mb-0">Facturación mensual</h2>
+          <div class="helper-text">Resumen agrupado por mes</div>
+        </div>
 
-        <div v-if="dashboard.facturacionMensual.length === 0" class="text-secondary">
-          No hay datos para el período seleccionado.
+        <div v-if="dashboard.facturacionMensual.length === 0" class="empty-block">
+          <div class="empty-title">No hay datos para mostrar</div>
+          <div class="helper-text">
+            No hubo facturación mensual en el rango seleccionado.
+          </div>
         </div>
 
         <div v-else class="table-responsive">
-          <table class="table table-dark table-hover align-middle mb-0">
+          <table class="table table-dark table-hover align-middle app-table mb-0">
             <thead>
               <tr>
                 <th>Mes</th>
@@ -202,14 +227,20 @@ onMounted(refreshAll)
 
     <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
-        <h2 class="h6 mb-3">Facturación por método de pago</h2>
+        <div class="section-header mb-3">
+          <h2 class="section-title mb-0">Facturación por método de pago</h2>
+          <div class="helper-text">Totales cobrados por cada método</div>
+        </div>
 
-        <div v-if="dashboard.facturacionPorMetodo.length === 0" class="text-secondary">
-          No hay pagos registrados en el período seleccionado.
+        <div v-if="dashboard.facturacionPorMetodo.length === 0" class="empty-block">
+          <div class="empty-title">No hay pagos registrados</div>
+          <div class="helper-text">
+            No hubo pagos para el período seleccionado.
+          </div>
         </div>
 
         <div v-else class="table-responsive">
-          <table class="table table-dark table-hover align-middle mb-0">
+          <table class="table table-dark table-hover align-middle app-table mb-0">
             <thead>
               <tr>
                 <th>Método</th>
@@ -229,26 +260,33 @@ onMounted(refreshAll)
 
     <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
-        <h2 class="h6 mb-3">Productos más vendidos</h2>
+        <div class="section-header mb-3">
+          <h2 class="section-title mb-0">Productos más vendidos</h2>
+          <div class="helper-text">Ranking por cantidad y facturación</div>
+        </div>
 
-        <div v-if="dashboard.productosMasVendidos.length === 0" class="text-secondary">
-          No hay productos vendidos para mostrar.
+        <div v-if="dashboard.productosMasVendidos.length === 0" class="empty-block">
+          <div class="empty-title">No hay productos vendidos</div>
+          <div class="helper-text">
+            No se encontraron ventas de productos en este período.
+          </div>
         </div>
 
         <div v-else class="table-responsive">
-          <table class="table table-dark table-hover align-middle mb-0">
+          <table class="table table-dark table-hover align-middle app-table mb-0">
             <thead>
               <tr>
-                <th>ID</th>
                 <th>Producto</th>
-                <th class="text-end">Cantidad</th>
-                <th class="text-end">Facturado</th>
+                <th class="text-end" style="width: 140px">Cantidad</th>
+                <th class="text-end" style="width: 180px">Facturado</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="p in dashboard.productosMasVendidos" :key="p.productoId">
-                <td class="text-secondary">{{ p.productoId }}</td>
-                <td class="fw-semibold">{{ p.nombre }}</td>
+                <td>
+                  <div class="table-main">{{ p.nombre }}</div>
+                  <div class="table-sub">Producto #{{ p.productoId }}</div>
+                </td>
                 <td class="text-end">{{ p.totalCantidad }}</td>
                 <td class="text-end fw-bold">$ {{ formatMoney(p.totalFacturado) }}</td>
               </tr>
@@ -260,72 +298,71 @@ onMounted(refreshAll)
 
     <div class="card bg-panel border-0 shadow-sm">
       <div class="card-body">
-        <h2 class="h6 mb-3">Chequeo rápido de ganancia total</h2>
-
-        <div class="text-secondary small mb-2">
-          Valor obtenido desde el endpoint de ganancia total.
+        <div class="section-header mb-3">
+          <h2 class="section-title mb-0">Chequeo rápido de ganancia total</h2>
+          <div class="helper-text">Valor obtenido desde el endpoint específico de ganancia</div>
         </div>
 
-        <div class="fs-5 fw-bold">
+        <div class="kpi-value">
           $ {{ formatMoney(gananciaTotalSolo) }}
         </div>
       </div>
     </div>
   </div>
 </template>
+
 <style scoped>
-.bg-panel {
-  background: rgba(18, 22, 32, 0.92);
+.reportes-page {
+  min-height: 100%;
 }
 
-.btn-accent {
-  background: #6f5cff;
-  border: none;
+.filters-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.filter-action {
+  min-width: 0;
+}
+
+.kpi-label {
+  color: rgba(255,255,255,.62);
+  font-size: .82rem;
+  margin-bottom: 6px;
+}
+
+.kpi-value {
   color: #fff;
+  font-weight: 800;
+  font-size: 1.15rem;
 }
 
-.btn-accent:hover {
-  background: #5f4de6;
-}
-
-.card {
-  border-radius: 16px;
-}
-
-.table > :not(caption) > * > * {
-  background-color: transparent !important;
-}
-
-.table-dark {
-  --bs-table-bg: transparent;
-  --bs-table-striped-bg: rgba(255, 255, 255, 0.02);
-  --bs-table-hover-bg: rgba(255, 255, 255, 0.04);
-  --bs-table-border-color: rgba(255, 255, 255, 0.08);
+.table-main {
   color: #fff;
+  font-weight: 600;
 }
 
-.form-control,
-.form-select {
-  border-radius: 12px;
+.table-sub {
+  color: rgba(255,255,255,.58);
+  font-size: .82rem;
+  margin-top: 2px;
 }
 
-.text-secondary {
-  color: rgba(255, 255, 255, 0.68) !important;
+.empty-block {
+  padding: 14px 0;
 }
 
-code {
-  color: #caa6ff;
-  background: rgba(202, 166, 255, 0.08);
-  padding: 2px 6px;
-  border-radius: 8px;
-}
-
-.alert {
-  border-radius: 14px;
-}
-
-.fs-4.fw-bold,
-.fs-5.fw-bold {
+.empty-title {
   color: #fff;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+@media (max-width: 992px) {
+  .filters-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

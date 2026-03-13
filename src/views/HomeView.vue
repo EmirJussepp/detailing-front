@@ -1,90 +1,12 @@
-<template>
-  <div>
-    <!-- Header -->
-    <div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-3">
-      <div>
-        <h1 class="h4 mb-1">Principal</h1>
-        <div class="text-secondary">
-          Accesos rápidos · Gestióna tu negocio
-        </div>
-      </div>
-
-      <div class="text-secondary small">
-        Tip: empezá por <b>Caja</b> para abrir turno.
-      </div>
-    </div>
-
-    <!-- Quick actions -->
-    <div class="row g-3">
-      <div class="col-12 col-md-6 col-lg-3" v-for="a in actions" :key="a.to">
-        <RouterLink :to="a.to" class="card card-link bg-panel border-0 shadow-sm h-100 text-decoration-none">
-          <div class="card-body">
-            <div class="d-flex justify-content-between align-items-start gap-2">
-              <div class="fw-semibold text-white">{{ a.title }}</div>
-              <span class="badge" :class="a.badgeClass">{{ a.badge }}</span>
-            </div>
-
-            <div class="text-secondary small mt-2">
-              {{ a.desc }}
-            </div>
-
-            <div class="mt-3 d-flex justify-content-between align-items-center">
-              <span class="text-secondary small">{{ a.hint }}</span>
-              <span class="btn btn-sm btn-outline-light">Abrir</span>
-            </div>
-          </div>
-        </RouterLink>
-      </div>
-    </div>
-
-    <!-- Secondary shortcuts -->
-    <div class="card bg-panel border-0 shadow-sm mt-4">
-      <div class="card-body">
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
-          <div class="fw-semibold">Más atajos</div>
-          <div class="text-secondary small">Acciones frecuentes</div>
-        </div>
-
-       <div class="d-flex flex-wrap gap-2 mt-3">
-
-  <RouterLink class="btn btn-sm btn-outline-light" to="/ventas">
-    <i class="bi bi-cart-check me-1"></i> Nueva venta
-  </RouterLink>
-
-  <RouterLink class="btn btn-sm btn-outline-light" to="/clientes">
-    <i class="bi bi-person-plus me-1"></i> Alta cliente
-  </RouterLink>
-
-  <RouterLink class="btn btn-sm btn-outline-light" to="/productos">
-    <i class="bi bi-box-seam me-1"></i> Alta producto
-  </RouterLink>
-
-  <RouterLink class="btn btn-sm btn-outline-light" to="/proveedores">
-    <i class="bi bi-truck me-1"></i> Proveedores
-  </RouterLink>
-
-  <RouterLink class="btn btn-sm btn-outline-light" to="/compras">
-    <i class="bi bi-bag-check me-1"></i> Compras
-  </RouterLink>
-
-  <RouterLink class="btn btn-sm btn-outline-light" to="/configuracion">
-    <i class="bi bi-gear me-1"></i> Configuración
-  </RouterLink>
-
-</div>
-      </div>
-    </div>
-  </div>
-</template>
-
 <script setup>
 import { ref } from "vue"
+import { RouterLink } from "vue-router"
 
 const actions = ref([
   {
     to: "/caja",
     title: "Caja",
-    desc: "Abrir / cerrar turno, ver saldo y movimientos.",
+    desc: "Abrir o cerrar turno, revisar saldo y controlar movimientos.",
     hint: "Operación del día",
     badge: "PRIORIDAD",
     badgeClass: "text-bg-warning",
@@ -92,15 +14,15 @@ const actions = ref([
   {
     to: "/ventas",
     title: "Ventas",
-    desc: "Crear ventas, cobrar y descontar stock.",
+    desc: "Registrar ventas, cobrar y descontar stock.",
     hint: "Tickets y cobros",
-    badge: "NUEVAS",
+    badge: "ACTIVO",
     badgeClass: "text-bg-success",
   },
   {
     to: "/productos",
     title: "Productos",
-    desc: "Alta, precios, stock mínimo y control.",
+    desc: "Administrar inventario, precios y stock mínimo.",
     hint: "Inventario",
     badge: "STOCK",
     badgeClass: "text-bg-info",
@@ -108,30 +30,129 @@ const actions = ref([
   {
     to: "/clientes",
     title: "Clientes",
-    desc: "Alta + cuenta corriente + historial.",
-    hint: "CRM",
+    desc: "Alta de clientes, cuenta corriente e historial.",
+    hint: "Relación comercial",
     badge: "CC",
     badgeClass: "text-bg-secondary",
   },
 ])
+
+const shortcuts = ref([
+  { to: "/ventas", label: "Nueva venta" },
+  { to: "/clientes", label: "Alta cliente" },
+  { to: "/productos", label: "Alta producto" },
+  { to: "/proveedores", label: "Proveedores" },
+  { to: "/compras", label: "Compras" },
+  { to: "/configuracion", label: "Configuración" },
+])
 </script>
 
+<template>
+  <div class="principal-page">
+    <section class="page-hero">
+      <div>
+        <p class="eyebrow mb-1">Inicio</p>
+        <h1 class="page-title mb-1">Principal</h1>
+        <p class="page-subtitle mb-0">
+          Accesos rápidos y entradas principales del sistema.
+        </p>
+      </div>
+
+      <div class="hero-tip">
+        <span class="helper-text">
+          Empezá por <b>Caja</b> para abrir el turno operativo.
+        </span>
+      </div>
+    </section>
+
+    <div class="row g-3">
+      <div class="col-12 col-md-6 col-lg-3" v-for="a in actions" :key="a.to">
+        <RouterLink :to="a.to" class="home-card">
+          <div class="d-flex justify-content-between align-items-start gap-2">
+            <div class="home-card-title">{{ a.title }}</div>
+            <span class="badge" :class="a.badgeClass">{{ a.badge }}</span>
+          </div>
+
+          <div class="home-card-desc">
+            {{ a.desc }}
+          </div>
+
+          <div class="home-card-footer">
+            <span class="helper-text">{{ a.hint }}</span>
+            <span class="btn btn-sm btn-outline-light">Abrir</span>
+          </div>
+        </RouterLink>
+      </div>
+    </div>
+
+    <div class="card bg-panel border-0 shadow-sm mt-4">
+      <div class="card-body">
+        <div class="section-header mb-3">
+          <h2 class="section-title mb-0">Más atajos</h2>
+          <div class="helper-text">Acciones frecuentes</div>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2">
+          <RouterLink
+            v-for="s in shortcuts"
+            :key="s.to"
+            class="btn btn-sm btn-outline-light"
+            :to="s.to"
+          >
+            {{ s.label }}
+          </RouterLink>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
 <style scoped>
-.bg-panel {
-  background: rgba(18, 22, 32, 0.92);
-  border-radius: 16px;
+.principal-page {
+  min-height: 100%;
 }
 
-.card-link {
-  transition: transform 120ms ease, filter 120ms ease;
+.hero-tip {
+  display: flex;
+  align-items: center;
+}
+
+.home-card {
+  display: block;
+  height: 100%;
+  background: rgba(18, 22, 32, 0.92);
+  border-radius: 18px;
+  padding: 18px;
+  text-decoration: none;
   color: inherit;
+  transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease;
+  box-shadow: 0 8px 24px rgba(0,0,0,.18);
 }
-.card-link:hover {
-  transform: translateY(-2px);
-  filter: brightness(1.06);
+
+.home-card:hover {
+  transform: translateY(-3px);
+  filter: brightness(1.04);
+  box-shadow: 0 14px 30px rgba(0,0,0,.28);
 }
-.card-link:active {
-  transform: translateY(0px);
-  filter: brightness(1.02);
+
+.home-card-title {
+  color: #fff;
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.home-card-desc {
+  color: rgba(255,255,255,.68);
+  font-size: .9rem;
+  margin-top: 10px;
+  min-height: 46px;
+}
+
+.home-card-footer {
+  margin-top: 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
 }
 </style>
