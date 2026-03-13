@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import Pager from "../components/Pager.vue"
 
-import { clientesApi } from "../services/clientesService"
+import { clientesApi } from "../services/clientesApi"
 import { cuentaCorrienteApi } from "../services/cuentaCorrienteService"
 
 const route = useRoute()

@@ -139,12 +139,7 @@ const routes = [
                 component: () => import("../views/LocalidadView.vue"),
                 meta: { requiresAuth: true, perm: "usuarios:gestionar" },
             },
-            {
-                path: "config/tipos-cliente",
-                name: "config-tipos-cliente",
-                component: () => import("../views/TipoClienteView.vue"),
-                meta: { requiresAuth: true, perm: "usuarios:gestionar" },
-            },
+           
             {
                 path: "config/usuarios",
                 name: "config-usuarios",
