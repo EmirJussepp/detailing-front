@@ -275,7 +275,6 @@ async function abrirCaja() {
       "Error abriendo caja."
   }
 }
-
 async function cerrarCaja() {
   errorMsg.value = ""
   okMsg.value = ""
@@ -286,39 +285,17 @@ async function cerrarCaja() {
     return
   }
 
-  const contado = toMoneyNumber(montoContado.value)
-  const hayContado = Number.isFinite(contado)
-
   try {
-    if (hayContado) {
-      const esperado = Number(saldoActual.value ?? 0)
-      const diff = contado - esperado
-
-      if (Math.abs(diff) >= 0.01) {
-        await movimientosCajaApi.crear({
-  cajaId: caja.value.cajaId,
-  concepto: "AJUSTE",
-  tipo: diff > 0 ? "INGRESO" : "EGRESO",
-  monto: Math.abs(diff),
-  descripcion: `Arqueo cierre (contado: ${contado} / esperado: ${esperado})`,
-})
-      }
-    }
-
-    await refresh()
 
     await cajaApi.cerrar(caja.value.cajaId, {
-      montoContado: hayContado ? contado : null,
-      observacion: hayContado ? "Cierre con arqueo" : "Cierre sin arqueo informado",
+      observacion: "Cierre de caja"
     })
 
-    okMsg.value = hayContado
-      ? `Caja cerrada ✅ (contado: $ ${formatMoney(contado)})`
-      : "Caja cerrada ✅"
+    okMsg.value = "Caja cerrada ✅"
 
-    montoContado.value = ""
     emitCajaChanged()
     await refresh()
+
   } catch (e) {
     errorMsg.value =
       e?.response?.data?.error ||
@@ -327,7 +304,6 @@ async function cerrarCaja() {
       "Error cerrando caja."
   }
 }
-
 async function crearMovimientoManual() {
   errorMsg.value = ""
   okMsg.value = ""

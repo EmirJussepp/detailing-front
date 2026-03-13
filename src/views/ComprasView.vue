@@ -14,14 +14,13 @@
           {{ loading ? "Actualizando..." : "Refresh" }}
         </button>
 
-        <button
-          class="btn btn-primary btn-accent"
-          data-bs-toggle="modal"
-          data-bs-target="#compraModal"
-          @click="prepareCreate"
-        >
+        <button class="btn btn-primary btn-accent" data-bs-toggle="modal" data-bs-target="#compraModal"
+          @click="prepareCreate">
           + Nueva compra
         </button>
+  <button class="btn btn-primary btn-accent" @click="prepareNewProducto">
+    + Nuevo Producto
+  </button>
       </div>
     </div>
 
@@ -30,11 +29,8 @@
       <div class="card-body">
         <div class="row g-2 align-items-center">
           <div class="col-12 col-md-5">
-            <input
-              v-model="q"
-              class="form-control bg-dark text-white border-secondary"
-              placeholder="Buscar por proveedor o ID de compra…"
-            />
+            <input v-model="q" class="form-control bg-dark text-white border-secondary"
+              placeholder="Buscar por proveedor o ID de compra…" />
           </div>
 
           <div class="col-12 col-md-3">
@@ -106,21 +102,13 @@
 
               <td class="text-end">
                 <div class="btn-group">
-                  <button
-                    class="btn btn-outline-light btn-sm"
-                    data-bs-toggle="modal"
-                    data-bs-target="#detalleModal"
-                    @click="openDetalle(c.compraId)"
-                  >
+                  <button class="btn btn-outline-light btn-sm" data-bs-toggle="modal" data-bs-target="#detalleModal"
+                    @click="openDetalle(c.compraId)">
                     Ver
                   </button>
 
-                  <button
-                    class="btn btn-outline-success btn-sm"
-                    data-bs-toggle="modal"
-                    data-bs-target="#pagoModal"
-                    @click="preparePago(c.compraId)"
-                  >
+                  <button class="btn btn-outline-success btn-sm" data-bs-toggle="modal" data-bs-target="#pagoModal"
+                    @click="preparePago(c.compraId)">
                     Pagar
                   </button>
                 </div>
@@ -130,7 +118,8 @@
         </table>
       </div>
 
-      <div class="card-footer border-secondary d-flex flex-wrap justify-content-between align-items-center gap-2 text-secondary small">
+      <div
+        class="card-footer border-secondary d-flex flex-wrap justify-content-between align-items-center gap-2 text-secondary small">
         <div>
           Tip: desde acá podés <b>crear compras</b>, consultar el <b>detalle</b> y registrar <b>pagos</b>.
         </div>
@@ -140,11 +129,8 @@
           <span>Página <b>{{ page + 1 }}</b> / <b>{{ totalPages }}</b></span>
           <button class="btn btn-sm btn-outline-light" @click="nextPage" :disabled="loading || !canNext">▶</button>
 
-          <select
-            v-model.number="size"
-            class="form-select form-select-sm bg-dark text-white border-secondary"
-            style="width: 90px"
-          >
+          <select v-model.number="size" class="form-select form-select-sm bg-dark text-white border-secondary"
+            style="width: 90px">
             <option :value="10">10</option>
             <option :value="20">20</option>
             <option :value="50">50</option>
@@ -178,8 +164,18 @@
                 <label class="form-label text-secondary">Fecha</label>
                 <input v-model="form.fecha" type="date" class="form-control" />
               </div>
-            </div>
 
+              <!-- ✅ Checkbox Impactar stock -->
+              <div class="col-12">
+                <div class="form-check mt-3">
+                  <input class="form-check-input" type="checkbox" id="impactarStockCheck"
+                    v-model="form.impactarStock" />
+                  <label class="form-check-label text-secondary" for="impactarStockCheck">
+                    Impactar stock
+                  </label>
+                </div>
+              </div>
+            </div>
             <hr class="border-secondary my-3" />
 
             <div class="d-flex align-items-center justify-content-between mb-2">
@@ -192,7 +188,7 @@
             <div class="row g-2 align-items-end">
               <div class="col-md-6">
                 <label class="form-label text-secondary">Producto</label>
-                <select v-model.number="itemDraft.productoId" class="form-select">
+                <select v-model.number="itemDraft.productoId" @change="onProductoChange" class="form-select">
                   <option :value="null">Seleccionar...</option>
                   <option v-for="p in productos" :key="p.productoId" :value="p.productoId">
                     {{ p.nombre }}
@@ -207,13 +203,8 @@
 
               <div class="col-md-2">
                 <label class="form-label text-secondary">PU</label>
-                <input
-                  v-model.number="itemDraft.precioUnitario"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  class="form-control"
-                />
+                <input v-model.number="itemDraft.precioUnitario" type="number" min="0" step="0.01"
+                  class="form-control" />
               </div>
 
               <div class="col-md-2 d-grid">
@@ -309,6 +300,37 @@
                 </table>
               </div>
 
+
+              <!-- MODAL: Nuevo Producto -->
+<!-- MODAL: Nuevo Producto -->
+<div class="modal fade" id="nuevoProductoModal" tabindex="-1" ref="nuevoProductoModalRef">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content bg-dark border-secondary modal-round">
+      <div class="modal-header border-secondary">
+        <h5 class="modal-title">Nuevo Producto</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input v-model="nuevoProducto.nombre" placeholder="Nombre" class="form-control mb-2" />
+        <input v-model.number="nuevoProducto.precioCosto" placeholder="Precio Costo" type="number" class="form-control mb-2" />
+        <input v-model.number="nuevoProducto.precioVenta" placeholder="Precio Venta" type="number" class="form-control" />
+      </div>
+      <div class="modal-footer border-secondary">
+        <button class="btn btn-outline-light" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary btn-accent" @click="crearProducto">Guardar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+
+
+
+
+
+
+
               <hr class="border-secondary" />
 
               <h6 class="mb-2">Pagos</h6>
@@ -380,7 +402,8 @@
 
           <div class="modal-footer border-secondary">
             <button class="btn btn-outline-light" data-bs-dismiss="modal">Cancelar</button>
-            <button class="btn btn-primary btn-accent" :disabled="loading || !cajaAbierta?.cajaId" @click="registrarPago">
+            <button class="btn btn-primary btn-accent" :disabled="loading || !cajaAbierta?.cajaId"
+              @click="registrarPago">
               {{ loading ? "Procesando..." : "Registrar pago" }}
             </button>
           </div>
@@ -398,6 +421,7 @@ import { productosApi } from "../services/productosApi"
 import { cajaApi } from "../services/cajaApi"
 import { metodosPagoApi } from "../services/metodopagoService"
 import { getSession } from "../auth/session"
+import 'bootstrap/dist/js/bootstrap.bundle.min.js'
 
 function unwrapPage(data) {
   if (Array.isArray(data)) {
@@ -440,8 +464,13 @@ export default {
         proveedorId: null,
         fecha: new Date().toISOString().slice(0, 10),
         detalles: [],
+        impactarStock: false, // por defecto desmarcado
       },
       itemDraft: { productoId: null, cantidad: 1, precioUnitario: 0 },
+     nuevoProducto: { nombre: "", precioCosto: 0, precioVenta: 0 },
+      productos: [],
+      error: "",
+      loading: false,
 
       detalle: null,
       pagosDetalle: [],
@@ -459,6 +488,17 @@ export default {
         0
       )
     },
+        //AGREGO METODO NUEVO PARA CALCULO DE PRODUCTOS
+    // Abre el modal y resetea campos
+    prepareNewProducto() {
+      this.error = ""
+      this.nuevoProducto = { nombre: "", precioCosto: 0, precioVenta: 0 }
+
+      const modalEl = this.$refs.nuevoProductoModalRef
+      const modal = new bootstrap.Modal(modalEl)
+      modal.show()
+    },
+    
 
     comprasFiltradas() {
       let arr = [...this.compras]
@@ -620,6 +660,11 @@ export default {
       }
     },
 
+
+onProductoChange() {
+  const prod = this.productos.find(p => Number(p.productoId) === Number(this.itemDraft.productoId))
+  this.itemDraft.precioUnitario = prod ? Number(prod.precioCosto ?? 0) : 0
+},
     async refreshCompras() {
       this.loading = true
       this.error = ""
@@ -662,6 +707,7 @@ export default {
         proveedorId: null,
         fecha: new Date().toISOString().slice(0, 10),
         detalles: [],
+        impactarStock: false, // ✅ inicializamos
       }
       this.itemDraft = { productoId: null, cantidad: 1, precioUnitario: 0 }
     },
@@ -682,9 +728,7 @@ export default {
 
     removeItem(idx) {
       this.form.detalles.splice(idx, 1)
-    },
-
-    async crearCompra() {
+    }, async crearCompra() {
       this.loading = true
       this.error = ""
       try {
@@ -694,15 +738,24 @@ export default {
         if (!this.form.proveedorId) throw new Error("Seleccioná proveedor")
         if (!this.form.detalles.length) throw new Error("Agregá al menos 1 ítem")
 
+        // 🔹 Obtenemos precioUnitario real desde tabla productos
+        const detallesConPrecio = this.form.detalles.map((d) => {
+          const prod = this.productos.find((p) => Number(p.productoId) === Number(d.productoId))
+          if (!prod) throw new Error(`Producto ${d.productoId} no existe`)
+          const precioUnitario = Number(prod.precioCosto ?? 0)
+          return {
+            productoId: d.productoId,
+            cantidad: d.cantidad,
+            precioUnitario, // ✅ precio real desde backend
+          }
+        })
+
         const payload = {
           userId,
           proveedorId: Number(this.form.proveedorId),
           fecha: this.form.fecha,
-          detalles: this.form.detalles.map((d) => ({
-            productoId: d.productoId,
-            cantidad: d.cantidad,
-            precioUnitario: d.precioUnitario,
-          })),
+          detalles: detallesConPrecio, // 🔹 usamos los precios correctos
+          impactaStock: Boolean(this.form.impactarStock)
         }
 
         await comprasApi.create(payload)
@@ -715,7 +768,45 @@ export default {
       } finally {
         this.loading = false
       }
+
     },
+      
+    async crearProducto() {
+      if (!this.nuevoProducto.nombre.trim()) {
+        this.error = "Nombre del producto obligatorio"
+        return
+      }
+
+      try {
+        this.loading = true
+        this.error = ""
+
+        // 🔹 Ejemplo: llamar a tu API productosApi.create
+        // const res = await productosApi.create(this.nuevoProducto)
+
+        // Por simplicidad, lo agregamos directamente al array de productos:
+        const nuevo = {
+          productoId: this.productos.length + 1, // simulamos ID
+          nombre: this.nuevoProducto.nombre,
+          precioCosto: this.nuevoProducto.precioCosto,
+          precioVenta: this.nuevoProducto.precioVenta,
+        }
+        this.productos.push(nuevo)
+
+        // Cerramos modal
+        const modalEl = this.$refs.nuevoProductoModalRef
+        const modal = bootstrap.Modal.getInstance(modalEl)
+        modal.hide()
+
+        // Reseteamos formulario
+        this.nuevoProducto = { nombre: "", precioCosto: 0, precioVenta: 0 }
+      } catch (e) {
+        this.error = e?.message || "Error creando producto"
+      } finally {
+        this.loading = false
+      }
+    }
+  },
 
     async openDetalle(compraId) {
       this.detalle = null
@@ -781,16 +872,29 @@ export default {
         this.loading = false
       }
     },
-  },
-}
+  }
 </script>
 
 <style scoped>
-.bg-panel { background: rgba(18, 22, 32, .92); }
-.modal-round { border-radius: 14px; }
+.bg-panel {
+  background: rgba(18, 22, 32, .92);
+}
 
-.btn-accent { background: #7c3aed; border-color: #7c3aed; }
-.btn-accent:hover { filter: brightness(1.05); }
+.modal-round {
+  border-radius: 14px;
+}
 
-.table td, .table th { vertical-align: middle; }
+.btn-accent {
+  background: #7c3aed;
+  border-color: #7c3aed;
+}
+
+.btn-accent:hover {
+  filter: brightness(1.05);
+}
+
+.table td,
+.table th {
+  vertical-align: middle;
+}
 </style>

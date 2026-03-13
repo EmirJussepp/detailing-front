@@ -2,6 +2,9 @@
 import { ref, computed, watch, onMounted } from "vue"
 import { cajaApi } from "../services/cajaApi"
 import Pager from "../components/Pager.vue"
+import { movimientosCajaApi } from "../services/movimientosCajaApi"
+
+
 
 // --- Estado ---
 const admin = ref(true) // Cambiar según sesión real
@@ -64,13 +67,25 @@ async function refreshCaja() {
   try {
     let response
 
-    // 🔹 Intentamos obtener la caja abierta primero
     try {
+      // 1️⃣ Obtener caja abierta
       response = await cajaApi.abierta({ turno: turnoSel.value })
+
       caja.value = response.data
       cajaCerrada.value = false
-      movimientos.value = response.data.movimientos ?? []
 
+      // 2️⃣ Obtener movimientos de esa caja
+      const movResp = await movimientosCajaApi.porCajaId(response.data.cajaId, {
+        page: page.value,
+        size: size.value
+      })
+
+      movimientos.value = movResp.data?.content ?? []
+
+      totalElements.value = movResp.data?.totalElements ?? 0
+      totalPages.value = movResp.data?.totalPages ?? 1
+
+      // 3️⃣ Calcular resumen
       const ingresos = movimientos.value
         .filter((m: any) => m.tipo === "INGRESO")
         .reduce((acc, m) => acc + (m.monto ?? 0), 0)
@@ -86,8 +101,10 @@ async function refreshCaja() {
       }
 
     } catch (err: any) {
-      // 🔹 No hay caja abierta → intentamos la última caja cerrada
+
+      // 🔴 si no hay caja abierta
       if (err.response?.status === 404) {
+
         try {
           response = await cajaApi.reporteCierre(turnoSel.value)
           const reporte = response.data
@@ -102,28 +119,24 @@ async function refreshCaja() {
             saldo: reporte.saldoFinal ?? 0
           }
 
-        } catch (err2: any) {
-          // 🔹 No hay caja abierta ni cerrada
+        } catch (err2) {
+
           errorMsg.value = `No hay caja registrada para el turno "${turnoSel.value}".`
-          caja.value = null
-          movimientos.value = []
-          resumen.value = { ingresos: 0, egresos: 0, saldo: 0 }
         }
+
       } else {
         throw err
       }
     }
 
   } catch (e: any) {
-    // 🔹 Cualquier otro error inesperado
+
     errorMsg.value =
       e?.response?.data?.error ||
       e?.response?.data?.message ||
       e?.message ||
       "Error cargando caja"
-    caja.value = null
-    movimientos.value = []
-    resumen.value = { ingresos: 0, egresos: 0, saldo: 0 }
+
   } finally {
     loading.value = false
   }
