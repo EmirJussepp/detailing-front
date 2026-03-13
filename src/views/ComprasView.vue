@@ -460,106 +460,167 @@
     </div>
 
     <div class="modal fade" id="nuevoProductoModal" tabindex="-1" ref="nuevoProductoModalRef">
-      <div class="modal-dialog modal-lg modal-dialog-centered">
-        <div class="modal-content bg-panel border-0 modal-round">
-          <div class="modal-header border-secondary">
-            <h5 class="modal-title">Nuevo producto</h5>
-            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content bg-panel border-0 modal-round">
+      <div class="modal-header border-secondary">
+        <div>
+          <h5 class="modal-title mb-0">Nuevo producto</h5>
+          <div class="helper-text mt-1">
+            Creá un producto nuevo para usarlo en compras y controlar stock.
+          </div>
+        </div>
+
+        <button
+          type="button"
+          class="btn-close btn-close-white"
+          data-bs-dismiss="modal"
+        ></button>
+      </div>
+
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-12 col-md-8">
+            <label class="form-label field-label">Nombre</label>
+            <input
+              v-model="nuevoProducto.nombre"
+              class="form-control app-input"
+              placeholder="Ej: Shampoo siliconado"
+            />
           </div>
 
-          <div class="modal-body">
-            <div class="row g-3">
-              <div class="col-12 col-md-6">
-                <label class="form-label field-label">Nombre</label>
-                <input
-                  v-model="nuevoProducto.nombre"
-                  class="form-control app-input"
-                  placeholder="Ej: Shampoo siliconado"
-                />
-              </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label field-label">Código</label>
+            <input
+              v-model="nuevoProducto.codigoProducto"
+              class="form-control app-input"
+              placeholder="Ej: SHAMP001"
+            />
+          </div>
 
-              <div class="col-12 col-md-6">
-                <label class="form-label field-label">Código</label>
-                <input
-                  v-model="nuevoProducto.codigoProducto"
-                  class="form-control app-input"
-                  placeholder="Ej: SHAMP001"
-                />
-              </div>
+          <div class="col-12">
+            <hr class="border-secondary my-1" />
+          </div>
 
-              <div class="col-12 col-md-6">
-                <label class="form-label field-label">Categoría</label>
-                <select v-model="nuevoProducto.categoriaId" class="form-select app-input">
-                  <option :value="null">(sin)</option>
-                  <option
-                    v-for="c in categorias"
-                    :key="c.categoriaId ?? c.id"
-                    :value="Number(c.categoriaId ?? c.id)"
-                  >
-                    {{ c.nombre ?? c.name }}
-                  </option>
-                </select>
-              </div>
-
-              <div class="col-12 col-md-6">
-                <label class="form-label field-label">Marca</label>
-                <select v-model="nuevoProducto.marcaId" class="form-select app-input">
-                  <option :value="null">(sin)</option>
-                  <option
-                    v-for="m in marcas"
-                    :key="m.marcaId ?? m.id"
-                    :value="Number(m.marcaId ?? m.id)"
-                  >
-                    {{ m.nombre ?? m.name }}
-                  </option>
-                </select>
-              </div>
-
-              <div class="col-12 col-md-4">
-                <label class="form-label field-label">Precio costo</label>
-                <input
-                  v-model.number="nuevoProducto.precioCosto"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  class="form-control app-input"
-                />
-              </div>
-
-              <div class="col-12 col-md-4">
-                <label class="form-label field-label">Precio venta</label>
-                <input
-                  v-model.number="nuevoProducto.precioVenta"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  class="form-control app-input"
-                />
-              </div>
-
-              <div class="col-12 col-md-4">
-                <label class="form-label field-label">Precio mayorista</label>
-                <input
-                  v-model.number="nuevoProducto.precioMayorista"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  class="form-control app-input"
-                />
+          <div class="col-12">
+            <div class="section-header mb-1">
+              <h2 class="section-title mb-0">Clasificación</h2>
+              <div class="helper-text">
+                Organizá el producto para encontrarlo más fácil.
               </div>
             </div>
           </div>
 
-          <div class="modal-footer border-secondary">
-            <button class="btn btn-outline-light" data-bs-dismiss="modal">Cancelar</button>
-            <button class="btn btn-primary btn-accent" :disabled="loading" @click="crearProducto">
-              {{ loading ? "Guardando..." : "Guardar" }}
-            </button>
+          <div class="col-12 col-md-6">
+            <label class="form-label field-label">Categoría</label>
+            <select v-model="nuevoProducto.categoriaId" class="form-select app-input">
+              <option :value="null">(sin)</option>
+              <option
+                v-for="c in categorias"
+                :key="c.categoriaId ?? c.id"
+                :value="Number(c.categoriaId ?? c.id)"
+              >
+                {{ c.nombre ?? c.name }}
+              </option>
+            </select>
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label field-label">Marca</label>
+            <select v-model="nuevoProducto.marcaId" class="form-select app-input">
+              <option :value="null">(sin)</option>
+              <option
+                v-for="m in marcas"
+                :key="m.marcaId ?? m.id"
+                :value="Number(m.marcaId ?? m.id)"
+              >
+                {{ m.nombre ?? m.name }}
+              </option>
+            </select>
+          </div>
+
+          <div class="col-12">
+            <hr class="border-secondary my-1" />
+          </div>
+
+          <div class="col-12">
+            <div class="section-header mb-1">
+              <h2 class="section-title mb-0">Precios y stock</h2>
+              <div class="helper-text">
+                Definí valores iniciales y el stock mínimo recomendado.
+              </div>
+            </div>
+          </div>
+
+          <div class="col-12 col-md-4">
+            <label class="form-label field-label">Precio costo</label>
+            <input
+              v-model.number="nuevoProducto.precioCosto"
+              type="number"
+              min="0"
+              step="0.01"
+              class="form-control app-input"
+              placeholder="0"
+            />
+          </div>
+
+          <div class="col-12 col-md-4">
+            <label class="form-label field-label">Precio venta</label>
+            <input
+              v-model.number="nuevoProducto.precioVenta"
+              type="number"
+              min="0"
+              step="0.01"
+              class="form-control app-input"
+              placeholder="0"
+            />
+          </div>
+
+          <div class="col-12 col-md-4">
+            <label class="form-label field-label">Precio mayorista</label>
+            <input
+              v-model.number="nuevoProducto.precioMayorista"
+              type="number"
+              min="0"
+              step="0.01"
+              class="form-control app-input"
+              placeholder="0"
+            />
+          </div>
+
+          <div class="col-12 col-md-4">
+            <label class="form-label field-label">Stock mínimo</label>
+            <input
+              v-model.number="nuevoProducto.stockMinimo"
+              type="number"
+              min="0"
+              step="1"
+              class="form-control app-input"
+              placeholder="Ej: 5"
+            />
+            <div class="helper-text mt-1">
+              Agregalo para mostrar alertas chicas cuando el stock esté bajo.
+            </div>
           </div>
         </div>
       </div>
+
+      <div class="modal-footer border-secondary">
+        <button class="btn btn-outline-light" data-bs-dismiss="modal">
+          Cancelar
+        </button>
+
+        <button
+          class="btn btn-primary btn-accent"
+          :disabled="loading"
+          @click="crearProducto"
+        >
+          {{ loading ? "Guardando..." : "Guardar producto" }}
+        </button>
+      </div>
     </div>
   </div>
+</div>
+</div>
 </template>
 
 <script>
@@ -623,15 +684,16 @@ export default {
         precioUnitario: 0,
       },
 
-      nuevoProducto: {
-        nombre: "",
-        codigoProducto: "",
-        categoriaId: null,
-        marcaId: null,
-        precioCosto: 0,
-        precioVenta: 0,
-        precioMayorista: 0,
-      },
+     nuevoProducto: {
+  nombre: "",
+  codigoProducto: "",
+  categoriaId: null,
+  marcaId: null,
+  precioCosto: 0,
+  precioVenta: 0,
+  precioMayorista: 0,
+  stockMinimo: 0,
+},
 
       detalle: null,
       pagosDetalle: [],
@@ -881,17 +943,18 @@ export default {
     },
 
     prepareNewProducto() {
-      this.error = ""
-      this.nuevoProducto = {
-        nombre: "",
-        codigoProducto: "",
-        categoriaId: null,
-        marcaId: null,
-        precioCosto: 0,
-        precioVenta: 0,
-        precioMayorista: 0,
-      }
-    },
+  this.error = ""
+  this.nuevoProducto = {
+    nombre: "",
+    codigoProducto: "",
+    categoriaId: null,
+    marcaId: null,
+    precioCosto: 0,
+    precioVenta: 0,
+    precioMayorista: 0,
+    stockMinimo: 0,
+  }
+},
 
     async crearProducto() {
       this.loading = true
@@ -901,21 +964,22 @@ export default {
         const session = getSession() ?? null
         const userId = Number(session?.userId ?? 1)
 
-        const payload = {
-          nombre: String(this.nuevoProducto.nombre || "").trim(),
-          codigoProducto: String(this.nuevoProducto.codigoProducto || "").trim() || null,
-          categoriaId: this.nuevoProducto.categoriaId ? Number(this.nuevoProducto.categoriaId) : null,
-          marcaId: this.nuevoProducto.marcaId ? Number(this.nuevoProducto.marcaId) : null,
-          precioCosto: Number(this.nuevoProducto.precioCosto || 0),
-          precioVenta: Number(this.nuevoProducto.precioVenta || 0),
-          precioMayorista: Number(this.nuevoProducto.precioMayorista || 0),
-          userId,
-        }
-
+       const payload = {
+  nombre: String(this.nuevoProducto.nombre || "").trim(),
+  codigoProducto: String(this.nuevoProducto.codigoProducto || "").trim() || null,
+  categoriaId: this.nuevoProducto.categoriaId ? Number(this.nuevoProducto.categoriaId) : null,
+  marcaId: this.nuevoProducto.marcaId ? Number(this.nuevoProducto.marcaId) : null,
+  precioCosto: Number(this.nuevoProducto.precioCosto || 0),
+  precioVenta: Number(this.nuevoProducto.precioVenta || 0),
+  precioMayorista: Number(this.nuevoProducto.precioMayorista || 0),
+  stockMinimo: Number(this.nuevoProducto.stockMinimo || 0),
+  userId,
+}
         if (!payload.nombre) throw new Error("Ingresá el nombre del producto.")
         if (payload.precioCosto < 0) throw new Error("Precio costo inválido.")
         if (payload.precioVenta < 0) throw new Error("Precio venta inválido.")
         if (payload.precioMayorista < 0) throw new Error("Precio mayorista inválido.")
+        if (payload.stockMinimo < 0) throw new Error("Stock mínimo inválido.")
 
         await productosApi.create(payload)
 

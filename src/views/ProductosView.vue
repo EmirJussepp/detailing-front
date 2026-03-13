@@ -106,6 +106,42 @@ const excelInputRef = ref(null)
 const showCostoAlta = ref(false)
 const showCostoEdicion = ref(false)
 
+const confirmState = ref({
+  open: false,
+  title: "",
+  message: "",
+  variant: "primary",
+  onConfirm: null,
+})
+
+function openConfirm({ title, message, variant = "primary", onConfirm }) {
+  confirmState.value = {
+    open: true,
+    title,
+    message,
+    variant,
+    onConfirm,
+  }
+}
+
+function closeConfirm() {
+  confirmState.value = {
+    open: false,
+    title: "",
+    message: "",
+    variant: "primary",
+    onConfirm: null,
+  }
+}
+
+async function confirmAccept() {
+  const action = confirmState.value.onConfirm
+  closeConfirm()
+  if (typeof action === "function") {
+    await action()
+  }
+}
+
 const marcaById = computed(() =>
   new Map((marcas.value || []).map((m) => [Number(m.marcaId ?? m.id), m]))
 )
@@ -673,7 +709,7 @@ async function saveEdit() {
   }
 }
 
-async function aplicarAumento() {
+async function aplicarAumentoConfirmed() {
   errorMsg.value = ""
   okMsg.value = ""
   infoMsg.value = ""
@@ -727,6 +763,53 @@ async function aplicarAumento() {
   } finally {
     saving.value = false
   }
+}
+
+function aplicarAumento() {
+  errorMsg.value = ""
+  okMsg.value = ""
+  infoMsg.value = ""
+
+  const pct = toNumber(incPorcentaje.value)
+  if (!Number.isFinite(pct) || pct === 0) {
+    errorMsg.value = "El porcentaje no puede ser 0."
+    return
+  }
+
+  if (incScope.value === "MARCA" && !incMarcaId.value) {
+    errorMsg.value = "Elegí una marca."
+    return
+  }
+
+  if (incScope.value === "CATEGORIA" && !incCategoriaId.value) {
+    errorMsg.value = "Elegí una categoría."
+    return
+  }
+
+  let scopeText = "todos los productos"
+
+  if (incScope.value === "MARCA") {
+    scopeText = `los productos de la marca ${marcaName(incMarcaId.value)}`
+  } else if (incScope.value === "CATEGORIA") {
+    scopeText = `los productos de la categoría ${catName(incCategoriaId.value)}`
+  }
+
+  let aplicarAText = "precio de venta"
+
+  if (incAplicarA.value === "MAYORISTA") {
+    aplicarAText = "precio mayorista"
+  } else if (incAplicarA.value === "AMBOS") {
+    aplicarAText = "precio de venta y mayorista"
+  }
+
+  const accion = pct > 0 ? "aumentar" : "disminuir"
+
+  openConfirm({
+    title: "Confirmar actualización de precios",
+    message: `Se va a ${accion} ${aplicarAText} de ${scopeText} en un ${Math.abs(pct)}%. ¿Querés continuar?`,
+    variant: "warning",
+    onConfirm: aplicarAumentoConfirmed,
+  })
 }
 
 onMounted(async () => {
@@ -1267,6 +1350,37 @@ onMounted(async () => {
           </button>
           <button class="btn btn-primary btn-accent" @click="crearCategoria" :disabled="saving">
             {{ saving ? "Guardando..." : "Crear" }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="confirmState.open" class="modal-backdrop" @click.self="closeConfirm">
+      <div class="confirm-card">
+        <div class="confirm-icon" :class="`confirm-icon--${confirmState.variant}`">
+          <span v-if="confirmState.variant === 'danger'">!</span>
+          <span v-else-if="confirmState.variant === 'warning'">!</span>
+          <span v-else>✓</span>
+        </div>
+
+        <div class="confirm-title">{{ confirmState.title }}</div>
+        <div class="confirm-text">{{ confirmState.message }}</div>
+
+        <div class="confirm-actions">
+          <button class="btn btn-outline-light" @click="closeConfirm">
+            Cancelar
+          </button>
+
+          <button
+            class="btn"
+            :class="{
+              'btn-confirm-primary': confirmState.variant === 'primary',
+              'btn-confirm-danger': confirmState.variant === 'danger',
+              'btn-confirm-warning': confirmState.variant === 'warning',
+            }"
+            @click="confirmAccept"
+          >
+            Confirmar
           </button>
         </div>
       </div>
