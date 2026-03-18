@@ -22,10 +22,10 @@ const form = reactive({
   name: "",
   email: "",
   password: "",
+  confirmPassword: "", // ← nuevo
   role: "EMPLEADO",
   shift: "MANIANA",
 })
-
 function normalizeEmail(v) {
   return String(v || "").trim().toLowerCase()
 }
@@ -39,10 +39,10 @@ function resetForm() {
   form.name = ""
   form.email = ""
   form.password = ""
+  form.confirmPassword = "" // ← nuevo
   form.role = "EMPLEADO"
   form.shift = "MANIANA"
 }
-
 function roleBadgeClass(role) {
   const r = String(role || "").toUpperCase()
   if (r === "ADMIN") return "text-bg-warning"
@@ -136,9 +136,22 @@ function validateForm() {
     return false
   }
 
-  if (!isEditing.value && !String(form.password || "").trim()) {
-    error.value = "Ingresá contraseña."
-    return false
+  if (!isEditing.value) {
+    if (!String(form.password || "").trim()) {
+      error.value = "Ingresá contraseña."
+      return false
+    }
+    if (form.password !== form.confirmPassword) {
+      error.value = "Las contraseñas no coinciden."
+      return false
+    }
+  }
+
+  if (isEditing.value && form.password) {
+    if (form.password !== form.confirmPassword) {
+      error.value = "Las contraseñas no coinciden."
+      return false
+    }
   }
 
   if (!["ADMIN", "EMPLEADO"].includes(String(form.role))) {
@@ -283,6 +296,7 @@ onMounted(fetchUsuarios)
             <table class="table table-dark table-hover align-middle app-table mb-0">
               <thead>
                 <tr>
+                  <th style="width: 90px">Usuario</th>
                   <th>Nombre</th>
                   <th>Email</th>
                   <th style="width: 180px">Roles</th>
@@ -292,6 +306,8 @@ onMounted(fetchUsuarios)
 
               <tbody>
                 <tr v-for="u in usuarios" :key="u.userId">
+                  <td class="text-secondary">#{{ u.userId }}</td>
+
                   <td>
                     <div class="table-main">{{ u.name || "—" }}</div>
                   </td>
@@ -300,12 +316,7 @@ onMounted(fetchUsuarios)
 
                   <td>
                     <template v-if="u.roles && u.roles.length">
-                      <span
-                        v-for="r in u.roles"
-                        :key="r"
-                        class="badge rounded-pill me-1"
-                        :class="roleBadgeClass(r)"
-                      >
+                      <span v-for="r in u.roles" :key="r" class="badge rounded-pill me-1" :class="roleBadgeClass(r)">
                         {{ r }}
                       </span>
                     </template>
@@ -315,19 +326,13 @@ onMounted(fetchUsuarios)
 
                   <td class="text-end">
                     <div class="d-flex justify-content-end gap-2 flex-wrap">
-                      <button
-                        class="btn btn-sm btn-outline-light"
-                        @click="openEdit(u)"
-                        :disabled="loading || !canManage"
-                      >
+                      <button class="btn btn-sm btn-outline-light" @click="openEdit(u)"
+                        :disabled="loading || !canManage">
                         Editar
                       </button>
 
-                      <button
-                        class="btn btn-sm btn-outline-danger"
-                        @click="removeUsuario(u)"
-                        :disabled="loading || !canManage"
-                      >
+                      <button class="btn btn-sm btn-outline-danger" @click="removeUsuario(u)"
+                        :disabled="loading || !canManage">
                         Eliminar
                       </button>
                     </div>
@@ -338,7 +343,7 @@ onMounted(fetchUsuarios)
           </div>
 
           <div class="helper-text mt-3">
-            Solo los administradores pueden crear, editar o eliminar usuarios.
+            Para crear, editar o eliminar usuarios necesitás el permiso <b>usuarios:gestionar</b>.
           </div>
         </div>
       </div>
@@ -366,41 +371,33 @@ onMounted(fetchUsuarios)
         <div class="row g-3">
           <div class="col-12">
             <label class="form-label field-label">Nombre</label>
-            <input
-              class="form-control app-input"
-              v-model="form.name"
-              :disabled="loading"
-            />
+            <input class="form-control app-input" v-model="form.name" :disabled="loading" />
           </div>
 
           <div class="col-12">
             <label class="form-label field-label">Email</label>
-            <input
-              class="form-control app-input"
-              v-model="form.email"
-              :disabled="loading"
-            />
+            <input class="form-control app-input" v-model="form.email" :disabled="loading" />
           </div>
 
           <div class="col-12">
             <label class="form-label field-label">
               {{ isEditing ? "Nueva contraseña (opcional)" : "Contraseña" }}
             </label>
-            <input
-              class="form-control app-input"
-              type="password"
-              v-model="form.password"
-              :disabled="loading"
-            />
+            <input class="form-control app-input" type="password" v-model="form.password" :disabled="loading" />
+          </div>
+
+          <!-- ← nuevo campo -->
+          <div class="col-12">
+            <label class="form-label field-label">
+              {{ isEditing ? "Repetir nueva contraseña" : "Repetir contraseña" }}
+            </label>
+            <input class="form-control app-input" type="password" v-model="form.confirmPassword" :disabled="loading"
+              :placeholder="isEditing ? 'Solo si cambiás la contraseña' : ''" />
           </div>
 
           <div class="col-12">
             <label class="form-label field-label">Rol</label>
-            <select
-              class="form-select app-input"
-              v-model="form.role"
-              :disabled="loading"
-            >
+            <select class="form-select app-input" v-model="form.role" :disabled="loading">
               <option value="EMPLEADO">EMPLEADO</option>
               <option value="ADMIN">ADMIN</option>
             </select>
@@ -416,11 +413,7 @@ onMounted(fetchUsuarios)
             Cancelar
           </button>
 
-          <button
-            class="btn btn-primary btn-accent"
-            @click="submitUsuario"
-            :disabled="loading || !canManage"
-          >
+          <button class="btn btn-primary btn-accent" @click="submitUsuario" :disabled="loading || !canManage">
             {{ loading ? "Guardando..." : isEditing ? "Guardar cambios" : "Crear" }}
           </button>
         </div>
@@ -452,7 +445,7 @@ onMounted(fetchUsuarios)
 .modal-backdrop-custom {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,.55);
+  background: rgba(0, 0, 0, .55);
   display: grid;
   place-items: center;
   z-index: 2000;
@@ -464,8 +457,8 @@ onMounted(fetchUsuarios)
   max-width: 520px;
   border-radius: 18px;
   background: rgba(18, 22, 32, .98);
-  border: 1px solid rgba(255,255,255,.10);
-  box-shadow: 0 18px 55px rgba(0,0,0,.45);
+  border: 1px solid rgba(255, 255, 255, .10);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, .45);
   padding: 18px;
   color: #fff;
 }
