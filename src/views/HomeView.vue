@@ -43,7 +43,7 @@ const shortcuts = ref([
   { to: "/productos", label: "Alta producto" },
   { to: "/proveedores", label: "Proveedores" },
   { to: "/compras", label: "Compras" },
-  { to: "/configuracion", label: "Configuración" },
+  { to: "/configuracion", label: "Config" },
 ])
 </script>
 

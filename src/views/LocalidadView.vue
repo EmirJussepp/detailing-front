@@ -267,85 +267,77 @@ onMounted(fetchAll)
         >
           <table class="table table-dark table-hover align-middle app-table mb-0">
             <thead>
-              <tr>
-                <th style="width:110px">
-                  ID
-                </th>
+  <tr>
+    <th>
+      Localidad
+    </th>
 
-                <th>
-                  Localidad
-                </th>
+    <th
+      class="text-end"
+      style="width:220px"
+    >
+      Acciones
+    </th>
+  </tr>
+</thead>
 
-                <th
-                  class="text-end"
-                  style="width:220px"
-                >
-                  Acciones
-                </th>
-              </tr>
-            </thead>
+           <tbody>
+  <tr
+    v-for="l in items"
+    :key="l.id"
+  >
+    <td>
+      <span
+        v-if="editId !== l.id"
+        class="table-main"
+      >
+        {{ l.name }}
+      </span>
 
-            <tbody>
-              <tr
-                v-for="l in items"
-                :key="l.id"
-              >
-                <td class="text-secondary">
-                  #{{ l.id }}
-                </td>
+      <input
+        v-else
+        v-model="editName"
+        class="form-control form-control-sm app-input"
+      />
+    </td>
 
-                <td>
-                  <span
-                    v-if="editId !== l.id"
-                    class="table-main"
-                  >
-                    {{ l.name }}
-                  </span>
+    <td class="text-end">
+      <div class="d-flex justify-content-end gap-2 flex-wrap">
+        <button
+          v-if="editId !== l.id"
+          class="btn btn-sm btn-outline-light"
+          @click="openEdit(l)"
+        >
+          Editar
+        </button>
 
-                  <input
-                    v-else
-                    v-model="editName"
-                    class="form-control form-control-sm app-input"
-                  />
-                </td>
+        <button
+          v-else
+          class="btn btn-sm btn-success"
+          @click="saveEdit(l)"
+          :disabled="saving || !canSaveEdit"
+        >
+          Guardar
+        </button>
 
-                <td class="text-end">
-                  <div class="d-flex justify-content-end gap-2 flex-wrap">
-                    <button
-                      v-if="editId !== l.id"
-                      class="btn btn-sm btn-outline-light"
-                      @click="openEdit(l)"
-                    >
-                      Editar
-                    </button>
+        <button
+          v-if="editId === l.id"
+          class="btn btn-sm btn-outline-light"
+          @click="cancelEdit"
+        >
+          Cancelar
+        </button>
 
-                    <button
-                      v-else
-                      class="btn btn-sm btn-success"
-                      @click="saveEdit(l)"
-                      :disabled="saving || !canSaveEdit"
-                    >
-                      Guardar
-                    </button>
-
-                    <button
-                      v-if="editId === l.id"
-                      class="btn btn-sm btn-outline-light"
-                      @click="cancelEdit"
-                    >
-                      Cancelar
-                    </button>
-
-                    <button
-                      class="btn btn-sm btn-outline-danger"
-                      @click="removeItem(l)"
-                    >
-                      Eliminar
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
+        <button
+          class="btn btn-sm btn-outline-danger"
+          @click="removeItem(l)"
+        >
+          Eliminar
+        </button>
+      </div>
+    </td>
+  </tr>
+</tbody>
           </table>
         </div>
       </div>

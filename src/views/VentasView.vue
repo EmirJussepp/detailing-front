@@ -201,6 +201,7 @@ const loadedMetodos = ref(false)
 const productSearch = ref("")
 const clientesSearch = ref("")
 
+// ✅ FIX 1: normalizeProducto ahora incluye precioMayorista
 function normalizeProducto(p) {
   return {
     id: Number(p.productoId ?? p.id),
@@ -208,6 +209,7 @@ function normalizeProducto(p) {
     codigoProducto: p.codigoProducto ?? null,
     stockActual: p.stockActual == null ? null : Number(p.stockActual),
     precioVenta: Number(p.precioVenta ?? 0),
+    precioMayorista: p.precioMayorista != null ? Number(p.precioMayorista) : null,
     precioCosto: Number(p.precioCosto ?? 0),
   }
 }
@@ -265,6 +267,9 @@ const clienteSel = computed(() =>
   clientes.value.find((c) => String(c.id) === String(clienteSelId.value)) ?? null
 )
 
+// ✅ computed para saber si el cliente seleccionado es mayorista
+const clienteEsMayorista = computed(() => clienteSel.value?.tipoClienteId === 2)
+
 const selProductoId = ref("")
 const itemQty = ref("1")
 const codeInputRef = ref(null)
@@ -273,7 +278,11 @@ const selectedProducto = computed(() =>
   productos.value.find((p) => String(p.id) === String(selProductoId.value)) ?? null
 )
 
+// ✅ FIX 2: getPrecioSugerido usa precioMayorista si el cliente es tipo 2
 function getPrecioSugerido(p) {
+  if (clienteEsMayorista.value && p.precioMayorista != null && p.precioMayorista > 0) {
+    return Number(p.precioMayorista)
+  }
   return Number(p.precioVenta ?? 0)
 }
 
@@ -556,6 +565,28 @@ async function confirmAccept() {
   if (typeof action === "function") {
     await action()
   }
+}
+
+// ✅ FIX 3: confirmarVenta muestra resumen con alerta antes de registrar
+function confirmarVenta() {
+  if (!canRegister.value) return
+
+  const clienteTxt = clienteSel.value
+    ? `${clienteSel.value.nombre} ${clienteSel.value.apellido || ""}`.trim()
+    : "Sin cliente"
+
+  const etiquetaMayorista = clienteEsMayorista.value ? " 🏷️ MAYORISTA" : ""
+
+  const lineas = items.value
+    .map((it) => `• ${it.name} x${it.qty} — $ ${formatMoney(it.subtotal)}`)
+    .join("\n")
+
+  openConfirm({
+    title: "Confirmar venta",
+    message: `Cliente: ${clienteTxt}${etiquetaMayorista}\n\n${lineas}\n\nTotal: $ ${formatMoney(totalCalc.value)}`,
+    variant: "primary",
+    onConfirm: registrarVenta,
+  })
 }
 
 const devolviendoVenta = ref(false)
@@ -878,67 +909,67 @@ onBeforeUnmount(() => {
           <h2 class="section-title mb-0">Última venta registrada</h2>
         </div>
 
-     <div class="sale-summary">
-  <div class="sale-summary-grid">
-    <div class="sale-summary-item">
-      <div class="helper-text">Venta</div>
-      <div class="sale-summary-value">#{{ lastVenta.ventaId }}</div>
-    </div>
+        <div class="sale-summary">
+          <div class="sale-summary-grid">
+            <div class="sale-summary-item">
+              <div class="helper-text">Venta</div>
+              <div class="sale-summary-value">#{{ lastVenta.ventaId }}</div>
+            </div>
 
-    <div class="sale-summary-item">
-      <div class="helper-text">Estado</div>
-      <div
-        class="sale-summary-value"
-        :class="
-          lastVenta.estado === 'ANULADA'
-            ? 'text-danger'
-            : lastVenta.estado === 'PAGADA'
-            ? 'text-success'
-            : lastVenta.estado === 'PARCIAL'
-            ? 'text-warning'
-            : 'text-secondary'
-        "
-      >
-        {{ lastVenta.estado }}
-      </div>
-    </div>
+            <div class="sale-summary-item">
+              <div class="helper-text">Estado</div>
+              <div
+                class="sale-summary-value"
+                :class="
+                  lastVenta.estado === 'ANULADA'
+                    ? 'text-danger'
+                    : lastVenta.estado === 'PAGADA'
+                    ? 'text-success'
+                    : lastVenta.estado === 'PARCIAL'
+                    ? 'text-warning'
+                    : 'text-secondary'
+                "
+              >
+                {{ lastVenta.estado }}
+              </div>
+            </div>
 
-    <div class="sale-summary-item">
-      <div class="helper-text">Cliente</div>
-      <div class="sale-summary-value">
-        {{ lastVenta.clienteTxt || "Sin cliente" }}
-      </div>
-    </div>
+            <div class="sale-summary-item">
+              <div class="helper-text">Cliente</div>
+              <div class="sale-summary-value">
+                {{ lastVenta.clienteTxt || "Sin cliente" }}
+              </div>
+            </div>
 
-    <div class="sale-summary-item">
-      <div class="helper-text">Total</div>
-      <div class="sale-summary-value">$ {{ formatMoney(lastVenta.total) }}</div>
-    </div>
+            <div class="sale-summary-item">
+              <div class="helper-text">Total</div>
+              <div class="sale-summary-value">$ {{ formatMoney(lastVenta.total) }}</div>
+            </div>
 
-    <div class="sale-summary-item" v-if="lastVenta.metodoTxt">
-      <div class="helper-text">Último pago</div>
-      <div class="sale-summary-value">{{ lastVenta.metodoTxt }}</div>
-    </div>
-  </div>
+            <div class="sale-summary-item" v-if="lastVenta.metodoTxt">
+              <div class="helper-text">Último pago</div>
+              <div class="sale-summary-value">{{ lastVenta.metodoTxt }}</div>
+            </div>
+          </div>
 
-  <div class="d-flex flex-wrap gap-2 mt-3">
-    <button
-      class="btn btn-outline-light"
-      @click="openPagoModal(lastVenta.ventaId, lastVenta.total)"
-      :disabled="lastVenta.estado === 'ANULADA' || lastVenta.estado === 'PAGADA'"
-    >
-      Cobrar venta
-    </button>
+          <div class="d-flex flex-wrap gap-2 mt-3">
+            <button
+              class="btn btn-outline-light"
+              @click="openPagoModal(lastVenta.ventaId, lastVenta.total)"
+              :disabled="lastVenta.estado === 'ANULADA' || lastVenta.estado === 'PAGADA'"
+            >
+              Cobrar venta
+            </button>
 
-    <button
-      class="btn btn-outline-danger"
-      @click="devolverVenta(lastVenta.ventaId)"
-      :disabled="devolviendoVenta || lastVenta.estado === 'ANULADA'"
-    >
-      {{ devolviendoVenta ? "Devolviendo..." : "Devolver venta" }}
-    </button>
-  </div>
-</div>
+            <button
+              class="btn btn-outline-danger"
+              @click="devolverVenta(lastVenta.ventaId)"
+              :disabled="devolviendoVenta || lastVenta.estado === 'ANULADA'"
+            >
+              {{ devolviendoVenta ? "Devolviendo..." : "Devolver venta" }}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -965,9 +996,15 @@ onBeforeUnmount(() => {
               <option value="">Sin cliente</option>
               <option v-for="c in clientes" :key="c.id" :value="String(c.id)">
                 {{ c.nombre }} {{ c.apellido || "" }} — DNI: {{ c.dni || "-" }}
+                {{ c.tipoClienteId === 2 ? "🏷️ MAYORISTA" : "" }}
               </option>
             </select>
           </div>
+        </div>
+
+        <!-- ✅ FIX: badge mayorista visible al seleccionar cliente -->
+        <div v-if="clienteEsMayorista" class="alert alert-warning py-2 mb-3">
+          🏷️ Cliente mayorista — se aplican precios mayoristas automáticamente.
         </div>
 
         <div class="helper-text mb-3">Registrá la venta y cobrá ahora o después.</div>
@@ -995,7 +1032,9 @@ onBeforeUnmount(() => {
             <select v-model="selProductoId" class="form-select app-input" :disabled="!canSell">
               <option value="" disabled>Seleccionar…</option>
               <option v-for="p in productos" :key="p.id" :value="String(p.id)">
-                {{ p.nombre }} ({{ p.codigoProducto || "SIN CÓD" }}) — $ {{ formatMoney(getPrecioSugerido(p)) }}
+                {{ p.nombre }} ({{ p.codigoProducto || "SIN CÓD" }})
+                — $ {{ formatMoney(getPrecioSugerido(p)) }}
+                {{ clienteEsMayorista && p.precioMayorista ? "(mayorista)" : "" }}
                 · Stock: {{ p.stockActual ?? "-" }}
               </option>
             </select>
@@ -1089,7 +1128,8 @@ onBeforeUnmount(() => {
 
           <div class="d-flex gap-2">
             <button class="btn btn-outline-light" @click="clearForm" :disabled="!canSell">Limpiar</button>
-            <button class="btn btn-primary btn-accent" @click="registrarVenta" :disabled="!canRegister || saving">
+            <!-- ✅ FIX: llama a confirmarVenta en vez de registrarVenta directamente -->
+            <button class="btn btn-primary btn-accent" @click="confirmarVenta" :disabled="!canRegister || saving">
               {{ saving ? "Guardando..." : "Registrar venta" }}
             </button>
           </div>
@@ -1213,7 +1253,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="confirm-title">{{ confirmState.title }}</div>
-        <div class="confirm-text">{{ confirmState.message }}</div>
+        <div class="confirm-text" style="white-space: pre-line">{{ confirmState.message }}</div>
 
         <div class="confirm-actions">
           <button class="btn btn-outline-light" @click="closeConfirm">
@@ -1300,12 +1340,5 @@ onBeforeUnmount(() => {
 
 .status-ok-text {
   color: rgba(255,255,255,.78);
-}
-
-.sale-summary {
-  padding: 16px;
-  border-radius: 16px;
-  border: 1px solid rgba(255,255,255,.08);
-  background: rgba(255,255,255,.03);
 }
 </style>

@@ -1,7 +1,7 @@
 <template>
   <aside class="sidebar">
     <div class="brand">
-      <div class="logo">3Byte</div>
+      <div class="logo">ELITE-CarShop</div>
 
       <div class="meta">
         <div class="role">{{ roleLabel }}</div>
@@ -35,7 +35,7 @@
     </nav>
 
     <div class="footer">
-      <div class="small">v1 · GestionaTuNegocio</div>
+      <div class="small">3byte · GestionaTuNegocio</div>
     </div>
   </aside>
 </template>

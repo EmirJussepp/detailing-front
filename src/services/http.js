@@ -2,7 +2,7 @@ import axios from "axios"
 import { getSession, clearSession } from "../auth/session"
 
 export const http = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://127.0.0.1:8082",
+  baseURL: import.meta.env.VITE_API_URL || "/api",
   timeout: 15000,
   headers: { "Content-Type": "application/json" },
 })
@@ -16,7 +16,7 @@ http.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`
   }
 
-  console.log("➡️", config.method?.toUpperCase(), config.baseURL + config.url, config.data ?? "")
+  console.log("➡️", config.method?.toUpperCase(), `${config.baseURL}${config.url}`, config.data ?? "")
   return config
 })
 

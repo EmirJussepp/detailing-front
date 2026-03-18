@@ -1,4 +1,4 @@
-<script setup>
+conf<script setup>
 import { computed } from "vue"
 import { RouterLink } from "vue-router"
 import { getSession, isAdmin } from "../auth/session"

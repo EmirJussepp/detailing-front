@@ -20,6 +20,10 @@ export const productosApi = {
     return http.patch(`/productos/${id}`, payload)
   },
 
+  delete(id) {
+    return http.delete(`/productos/eliminar/${id}`)
+  },
+
   actualizarPreciosPorcentaje(command) {
     return http.put("/productos/actualizar-precios", command)
   },
@@ -32,25 +36,33 @@ export const productosApi = {
     return http.put("/productos/actualizar-precios/categoria", command)
   },
 
-  // 🆕 IMPORTAR PRODUCTOS DESDE EXCEL
   importarExcel(file) {
-    const form = new FormData()
-    form.append("file", file)
+  const form = new FormData()
+  form.append("file", file)
 
-    return http.post("/productos/importar-excel", form, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-    })
-  },
+  return http.post("/productos/importar-excel", form, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+    timeout: 60000, // 60s solo para importación
+  })
+},
 }
 
 export const marcasApi = {
-  list: () => http.get("/marcas"),
-  create: (payload) => http.post("/marcas", payload),
+  list() {
+    return http.get("/marcas")
+  },
+  create(payload) {
+    return http.post("/marcas", payload)
+  },
 }
 
 export const categoriasApi = {
-  list: () => http.get("/categoria"),     // ✅ singular (como lo tenés en tu back)
-  create: (payload) => http.post("/categoria", payload),
+  list() {
+    return http.get("/categoria")
+  },
+  create(payload) {
+    return http.post("/categoria", payload)
+  },
 }

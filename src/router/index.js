@@ -12,7 +12,7 @@ import VentasView from "../views/VentasView.vue"
 import ClientesView from "../views/ClientesView.vue"
 import ProductosView from "../views/ProductosView.vue"
 import ProveedoresView from "../views/ProveedoresView.vue"
-import MetodoPagoView from "../views/MetodoPagoView.vue"
+
 
 import { getSession } from "../auth/session"
 
@@ -54,13 +54,13 @@ const routes = [
             },
 
             {
-  path: "/reportes",
-  name: "reportes",
-  component: () => import("../views/ReportesView.vue"),
-  meta: {
-    requiresAuth: true,
-    permission: "usuarios:ver",
-  },
+    path: "reportes",
+    name: "reportes",
+    component: () => import("../views/ReportesView.vue"),
+    meta: {
+        requiresAuth: true,
+        perm: "usuarios:ver",
+    },
 },
       
       {
@@ -114,50 +114,31 @@ const routes = [
                 meta: { requiresAuth: true, perm: "productos:ver" },
             },
 
-            // =========================
-            // METODOS DE PAGO
-            // =========================
             {
-                path: "metodos-pago",
-                name: "metodos-pago",
-                component: MetodoPagoView,
-                meta: { requiresAuth: true, perm: "pagos:ver" },
-            },
-
-            // =========================
-            // CONFIGURACION (ADMIN)
-            // =========================
-            {
-                path: "configuracion",
-                name: "configuracion",
-                component: () => import("../views/ConfigView.vue"),
-                meta: { requiresAuth: true, perm: "usuarios:gestionar" },
-            },
-            {
-                path: "config/localidades",
-                name: "config-localidades",
-                component: () => import("../views/LocalidadView.vue"),
-                meta: { requiresAuth: true, perm: "usuarios:gestionar" },
-            },
-           
-            {
-                path: "config/usuarios",
-                name: "config-usuarios",
-                component: () => import("../views/UsuariosView.vue"),
-                meta: { requiresAuth: true, perm: "usuarios:ver" },
-            },
-            {
-  path: "/movimientos-caja-historico",
-  name: "caja.movimientos-historico",
-  component: () => import("../views/MovimientosCajaHistoricoView.vue"),
+  path: "config",
+  name: "configuracion",
+  component: () => import("../views/ConfigView.vue"),
+  meta: { requiresAuth: true, perm: "usuarios:gestionar" },
+},
+{
+  path: "config/localidades",
+  name: "config-localidades",
+  component: () => import("../views/LocalidadView.vue"),
+  meta: { requiresAuth: true, perm: "usuarios:gestionar" },
+},
+{
+  path: "config/usuarios",
+  name: "config-usuarios",
+  component: () => import("../views/UsuariosView.vue"),
+  meta: { requiresAuth: true, perm: "usuarios:ver" },
+},
+{
+  path: "config/metodos-pago",
+  name: "metodos-pago",
+  component: () => import("../views/MetodoPagoView.vue"),
+  meta: { requiresAuth: true, perm: "pagos:ver" },
 },
             
-            {
-                path: "config/metodos-pago",
-                name: "config-metodos-pago",
-                component: () => import("../views/MetodoPagoView.vue"),
-                meta: { requiresAuth: true, perm: "usuarios:gestionar" },
-            },
 
             // =========================
             // REDIRECTS

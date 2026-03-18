@@ -35,6 +35,14 @@ function unwrapPage(data) {
   }
 }
 
+function unwrapArray(data) {
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data?.content)) return data.content
+  if (Array.isArray(data?.items)) return data.items
+  if (Array.isArray(data?.data)) return data.data
+  return []
+}
+
 function toNumber(v) {
   const x = Number(String(v ?? "").replace(",", "."))
   return Number.isFinite(x) ? x : NaN
@@ -47,9 +55,9 @@ function normalizeName(s) {
 function mapProducto(row) {
   return {
     id: row?.productoId ?? row?.id ?? row?.producto_id ?? null,
-    nombre: row?.nombre ?? "",
+    nombre: row?.nombre ?? row?.name ?? "",
     codigoProducto: row?.codigoProducto ?? row?.codigo ?? row?.codigo_producto ?? null,
-    categoria: row?.categoria ?? null,
+    categoria: row?.categoria ?? row?.categoriaNombre ?? row?.categoria_name ?? null,
     categoriaId: row?.categoriaId ?? row?.categoria_id ?? null,
     marcaId: row?.marcaId ?? row?.marca_id ?? null,
     stockActual: Number(row?.stockActual ?? row?.stock_actual ?? 0),
@@ -152,12 +160,12 @@ const catById = computed(() =>
 
 function marcaName(id) {
   const m = marcaById.value.get(Number(id))
-  return m?.nombre ?? "-"
+  return m?.nombre ?? m?.name ?? "-"
 }
 
 function catName(id) {
   const c = catById.value.get(Number(id))
-  return c?.nombre ?? "-"
+  return c?.nombre ?? c?.name ?? "-"
 }
 
 const userId = computed(() => Number(getSession()?.userId ?? 0) || null)
@@ -269,6 +277,41 @@ function clearExcelFile() {
   }
 }
 
+async function eliminarProducto(id) {
+  if (!id) return
+
+  openConfirm({
+    title: "Eliminar producto",
+    message: "¿Seguro que querés eliminar este producto? Esta acción no se puede deshacer.",
+    variant: "danger",
+    onConfirm: async () => {
+      saving.value = true
+      errorMsg.value = ""
+      okMsg.value = ""
+      infoMsg.value = ""
+
+      try {
+        await productosApi.delete(id)
+        okMsg.value = "Producto eliminado correctamente."
+
+        if (filtered.value.length === 1 && page.value > 0) {
+          page.value = page.value - 1
+        } else {
+          await fetchAll()
+        }
+      } catch (e) {
+        errorMsg.value =
+          e?.response?.data?.error ||
+          e?.response?.data?.message ||
+          e?.message ||
+          "Error eliminando producto."
+      } finally {
+        saving.value = false
+      }
+    },
+  })
+}
+
 async function importarExcel() {
   errorMsg.value = ""
   okMsg.value = ""
@@ -302,6 +345,7 @@ async function importarExcel() {
 
     clearExcelFile()
     page.value = 0
+    await fetchCatalogos()
     await fetchAll()
   } catch (e) {
     errorMsg.value =
@@ -337,13 +381,16 @@ async function crearMarca() {
     await fetchCatalogos()
 
     const creada = (marcas.value || []).find(
-      (m) => String(m.nombre ?? "").toLowerCase() === nombreM.toLowerCase()
+      (m) => String(m.nombre ?? m.name ?? "").toLowerCase() === nombreM.toLowerCase()
     )
 
     if (creada) {
       const id = String(creada.marcaId ?? creada.id)
       marcaIdNew.value = id
       incMarcaId.value = id
+      if (editing.value) {
+        editForm.value.marcaId = id
+      }
     }
 
     okMsg.value = "Marca creada correctamente."
@@ -382,13 +429,16 @@ async function crearCategoria() {
     await fetchCatalogos()
 
     const creada = (categorias.value || []).find(
-      (c) => String(c.nombre ?? "").toLowerCase() === nombreC.toLowerCase()
+      (c) => String(c.nombre ?? c.name ?? "").toLowerCase() === nombreC.toLowerCase()
     )
 
     if (creada) {
       const id = String(creada.categoriaId ?? creada.id)
       categoriaIdNew.value = id
       incCategoriaId.value = id
+      if (editing.value) {
+        editForm.value.categoriaId = id
+      }
     }
 
     okMsg.value = "Categoría creada correctamente."
@@ -407,8 +457,8 @@ async function crearCategoria() {
 async function fetchCatalogos() {
   try {
     const [m, c] = await Promise.all([marcasApi.list(), categoriasApi.list()])
-    marcas.value = Array.isArray(m.data) ? m.data : []
-    categorias.value = Array.isArray(c.data) ? c.data : []
+    marcas.value = unwrapArray(m.data)
+    categorias.value = unwrapArray(c.data)
   } catch {
     marcas.value = []
     categorias.value = []
@@ -477,9 +527,7 @@ function onPageChange(newPage) {
   page.value = Number(newPage ?? 0)
 }
 
-function onSizeChange() {
-  // pager minimalista
-}
+function onSizeChange() {}
 
 watch(page, () => {
   fetchAll()
@@ -580,6 +628,7 @@ async function create() {
     okMsg.value = "Producto creado correctamente."
     resetForm()
     page.value = 0
+    await fetchCatalogos()
     await fetchAll()
   } catch (e) {
     errorMsg.value =
@@ -697,6 +746,7 @@ async function saveEdit() {
 
     okMsg.value = "Producto actualizado correctamente."
     closeEdit()
+    await fetchCatalogos()
     await fetchAll()
   } catch (e) {
     errorMsg.value =
@@ -1102,7 +1152,7 @@ onMounted(async () => {
                 <th style="width: 120px">Stock</th>
                 <th style="width: 160px" class="text-end">Venta</th>
                 <th style="width: 160px" class="text-end">Mayorista</th>
-                <th style="width: 220px"></th>
+                <th style="width: 280px"></th>
               </tr>
             </thead>
 
@@ -1156,27 +1206,37 @@ onMounted(async () => {
                 </td>
 
                 <td class="text-end">
-                  <div class="btn-group">
+                  <div class="btn-group flex-wrap">
                     <button
                       class="btn btn-sm btn-outline-light"
                       :disabled="saving"
-                      @click="applyStockDelta(p, -Math.abs(stockDelta))"
+                      @click="applyStockDelta(p, -Math.abs(stockDelta || 0))"
                     >
-                      -{{ Math.abs(stockDelta) }}
+                      -{{ Math.abs(stockDelta || 0) }}
                     </button>
+
                     <button
                       class="btn btn-sm btn-outline-light"
                       :disabled="saving"
-                      @click="applyStockDelta(p, +Math.abs(stockDelta))"
+                      @click="applyStockDelta(p, +Math.abs(stockDelta || 0))"
                     >
-                      +{{ Math.abs(stockDelta) }}
+                      +{{ Math.abs(stockDelta || 0) }}
                     </button>
+
                     <button
                       class="btn btn-sm btn-outline-light"
                       :disabled="saving"
                       @click="openEdit(p)"
                     >
                       Editar
+                    </button>
+
+                    <button
+                      class="btn btn-sm btn-outline-danger"
+                      :disabled="saving"
+                      @click="eliminarProducto(p.id)"
+                    >
+                      Eliminar
                     </button>
                   </div>
                 </td>
@@ -1225,22 +1285,28 @@ onMounted(async () => {
 
           <div class="col-12 col-md-3">
             <label class="form-label field-label">Categoría</label>
-            <select v-model="editForm.categoriaId" class="form-select app-input">
-              <option value="">(sin)</option>
-              <option v-for="c in categorias" :key="c.categoriaId ?? c.id" :value="String(c.categoriaId ?? c.id)">
-                {{ c.nombre ?? c.name }}
-              </option>
-            </select>
+            <div class="input-group">
+              <select v-model="editForm.categoriaId" class="form-select app-input">
+                <option value="">(sin)</option>
+                <option v-for="c in categorias" :key="c.categoriaId ?? c.id" :value="String(c.categoriaId ?? c.id)">
+                  {{ c.nombre ?? c.name }}
+                </option>
+              </select>
+              <button class="btn btn-outline-light" type="button" @click="openCategoriaModal">+ Cat</button>
+            </div>
           </div>
 
           <div class="col-12 col-md-3">
             <label class="form-label field-label">Marca</label>
-            <select v-model="editForm.marcaId" class="form-select app-input">
-              <option value="">(sin)</option>
-              <option v-for="m in marcas" :key="m.marcaId ?? m.id" :value="String(m.marcaId ?? m.id)">
-                {{ m.nombre ?? m.name }}
-              </option>
-            </select>
+            <div class="input-group">
+              <select v-model="editForm.marcaId" class="form-select app-input">
+                <option value="">(sin)</option>
+                <option v-for="m in marcas" :key="m.marcaId ?? m.id" :value="String(m.marcaId ?? m.id)">
+                  {{ m.nombre ?? m.name }}
+                </option>
+              </select>
+              <button class="btn btn-outline-light" type="button" @click="openMarcaModal">+ Marca</button>
+            </div>
           </div>
 
           <div class="col-6 col-md-2">
