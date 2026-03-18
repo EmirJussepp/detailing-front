@@ -783,42 +783,6 @@ onMounted(() => {
   min-height: 100%;
 }
 
-.row-ingreso td {
-  background: rgba(25, 135, 84, 0.08) !important;
-}
-
-.row-egreso td {
-  background: rgba(220, 53, 69, 0.08) !important;
-}
-
-.mov-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.mov-detail-main {
-  color: #fff;
-  font-weight: 600;
-}
-
-.mov-detail-sub {
-  color: rgba(255, 255, 255, 0.58);
-  font-size: 0.82rem;
-}
-
-.concept-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.82);
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-
 .totales-wrap {
   display: flex;
   flex-wrap: wrap;

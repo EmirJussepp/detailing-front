@@ -349,40 +349,4 @@ onMounted(fetchAll)
 .config-section-page {
   min-height: 100%;
 }
-
-.table-main {
-  color: #fff;
-  font-weight: 600;
-}
-
-.empty-block {
-  padding: 14px 0;
-}
-
-.empty-title {
-  color: #fff;
-  font-weight: 700;
-  margin-bottom: 4px;
-}
-
-.modal-backdrop-custom {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.62);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2000;
-  padding: 16px;
-}
-
-.modal-custom {
-  width: min(520px, 92vw);
-  background: rgba(18, 22, 32, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  border-radius: 18px;
-  padding: 18px;
-  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.55);
-  color: #fff;
-}
 </style>

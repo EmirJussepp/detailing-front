@@ -285,7 +285,6 @@ onMounted(refreshAll)
               <tr v-for="p in dashboard.productosMasVendidos" :key="p.productoId">
                 <td>
                   <div class="table-main">{{ p.nombre }}</div>
-                  <div class="table-sub">Producto #{{ p.productoId }}</div>
                 </td>
                 <td class="text-end">{{ p.totalCantidad }}</td>
                 <td class="text-end fw-bold">$ {{ formatMoney(p.totalFacturado) }}</td>
@@ -299,8 +298,8 @@ onMounted(refreshAll)
     <div class="card bg-panel border-0 shadow-sm">
       <div class="card-body">
         <div class="section-header mb-3">
-          <h2 class="section-title mb-0">Chequeo rápido de ganancia total</h2>
-          <div class="helper-text">Valor obtenido desde el endpoint específico de ganancia</div>
+          <h2 class="section-title mb-0">Ganancia total del período</h2>
+          <div class="helper-text">Calculada a partir de las ventas del rango seleccionado</div>
         </div>
 
         <div class="kpi-value">

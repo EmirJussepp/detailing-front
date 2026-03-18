@@ -818,7 +818,7 @@ onMounted(async () => {
                 </button>
 
                 <div class="helper-text mt-2">
-                  Si tu backend soporta arqueo, el contado final puede usarse para registrar el cierre con diferencia.
+                  Si el sistema registra el arqueo, el monto contado se usa para calcular la diferencia al cierre.
                 </div>
               </div>
             </div>

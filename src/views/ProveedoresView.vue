@@ -315,7 +315,7 @@
             </div>
 
             <div class="helper-text mt-3">
-              Se valida unicidad por documento, CUIT y razón social.
+              Los campos marcados con * son obligatorios.
             </div>
           </div>
 
@@ -353,12 +353,12 @@
             <div class="row g-3">
               <div class="col-12 col-md-6">
                 <label class="form-label field-label">Compra a pagar *</label>
-                <select v-model.number="pagoCompraId" class="form-select app-input">
-                  <option :value="null">Seleccionar compra pendiente...</option>
-                  <option v-for="c in comprasPendientes" :key="c.compraId" :value="c.compraId">
-                    Compra #{{ c.compraId }} · {{ formatDate(c.fecha) }} · Total ${{ formatMoney(c.total) }}
-                  </option>
-                </select>
+                <AppCombobox
+                  v-model="pagoCompraId"
+                  :items="comprasPendientesItems"
+                  placeholder="Buscar compra pendiente..."
+                  :disabled="!comprasPendientes.length"
+                />
                 <div v-if="!comprasPendientes.length" class="helper-text mt-1">
                   No hay compras pendientes para este proveedor.
                 </div>
@@ -467,7 +467,9 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue"
+import AppCombobox from "../components/AppCombobox.vue"
 import { proveedoresApi } from "../services/proveedoresApi"
 import { comprasApi } from "../services/comprasApi"
 import { pagosProveedorApi } from "../services/pagosProveedorApi"
@@ -475,667 +477,440 @@ import { metodosPagoApi } from "../services/metodopagoService"
 
 function unwrapPage(data) {
   if (Array.isArray(data)) {
-    return {
-      content: data,
-      page: 1,
-      size: data.length || 10,
-      totalElements: data.length,
-      totalPages: 1,
-    }
+    return { content: data, page: 1, size: data.length || 10, totalElements: data.length, totalPages: 1 }
   }
-
   const content = data?.content ?? data?.items ?? data?.data ?? []
   return {
     content: Array.isArray(content) ? content : [],
     page: Number(data?.page ?? data?.number ?? 1),
     size: Number(data?.size ?? data?.pageSize ?? 10),
-    totalElements: Number(
-      data?.totalElements ?? data?.total ?? (Array.isArray(content) ? content.length : 0)
-    ),
+    totalElements: Number(data?.totalElements ?? data?.total ?? (Array.isArray(content) ? content.length : 0)),
     totalPages: Number(data?.totalPages ?? data?.pages ?? 1),
   }
 }
 
-export default {
-  name: "ProveedoresView",
-
-  data() {
-    return {
-      loading: false,
-
-      proveedores: [],
-      q: "",
-      sortBy: "displayName",
-      includeInactive: false,
-
-      page: 1,
-      size: 10,
-      totalElements: 0,
-      totalPages: 1,
-
-      error: "",
-      success: "",
-
-      mode: "create",
-      editingId: null,
-      form: {
-        tipo: "PERSONA",
-        nombre: "",
-        apellido: "",
-        documentoTipo: "DNI",
-        documentoNro: "",
-        razonSocial: "",
-        cuit: "",
-        contacto: "",
-        telefono: "",
-        email: "",
-        direccion: "",
-        notas: "",
-        activo: true,
-      },
-      formError: "",
-
-      pagoProveedor: null,
-      pagoCompraId: null,
-      pagoMonto: "",
-      pagoNotas: "",
-      pagoMetodoPagoId: null,
-      pagoError: "",
-      pagoOk: "",
-      comprasPendientes: [],
-      pagosCompra: [],
-      compraSeleccionada: null,
-      pagadoCompraSeleccionada: 0,
-      saldoCompraSeleccionada: 0,
-
-      metodosPago: [],
-      deudasMap: new Map(),
-
-      _t: null,
-    }
-  },
-
-  computed: {
-    filtered() {
-      let arr = [...this.proveedores]
-
-      if (!this.includeInactive) {
-        arr = arr.filter((p) => p.activo !== false)
-      }
-
-      if (this.sortBy === "saldoDesc") {
-        arr.sort((a, b) => (this.getSaldo(b).saldo ?? 0) - (this.getSaldo(a).saldo ?? 0))
-        return arr
-      }
-
-      if (this.sortBy === "displayName") {
-        arr.sort((a, b) => (a.displayName || "").localeCompare(b.displayName || "", "es"))
-      } else if (this.sortBy === "createdAt") {
-        arr.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
-      }
-
-      return arr
-    },
-
-    canPrev() {
-      return this.page > 1
-    },
-
-    canNext() {
-      return this.page < this.totalPages
-    },
-  },
-
-  mounted() {
-    this.refresh()
-  },
-
-  beforeUnmount() {
-    if (this._t) clearTimeout(this._t)
-  },
-
-  watch: {
-    q() {
-      clearTimeout(this._t)
-      this._t = setTimeout(() => {
-        if (this.page !== 1) {
-          this.page = 1
-        } else {
-          this.refresh()
-        }
-      }, 300)
-    },
-
-    async pagoCompraId(newId) {
-      await this.cargarDetalleCompraPago(newId)
-    },
-  },
-
-  methods: {
-    formatMoney(n) {
-      const num = Number(n ?? 0)
-      return num.toLocaleString("es-AR", { minimumFractionDigits: 0 })
-    },
-
-    formatDate(v) {
-      const s = String(v || "")
-      return s ? s.slice(0, 10) : "—"
-    },
-
-    onlyDigits(v) {
-      return String(v || "").replace(/\D/g, "") || null
-    },
-
-    saldoClass(p) {
-      const s = this.getSaldo(p).saldo
-      if (s > 0) return "text-warning"
-      if (s < 0) return "text-info"
-      return "text-success"
-    },
-
-    docBadgeClass(p) {
-      if (p?.tipo === "EMPRESA") return "text-bg-dark border border-info"
-      return "text-bg-dark border border-secondary"
-    },
-
-    toastSuccess(msg) {
-      this.success = msg
-      setTimeout(() => {
-        this.success = ""
-      }, 2200)
-    },
-
-    hideModal(id) {
-      const modalEl = document.getElementById(id)
-      if (!modalEl || !window.bootstrap?.Modal) return
-      const instance = window.bootstrap.Modal.getInstance(modalEl)
-      instance?.hide()
-    },
-
-    mapProveedorApiToVM(raw) {
-      const id = Number(raw?.proveedorId ?? raw?.id ?? 0)
-      const tipo = (raw?.tipoProveedor ?? "PERSONA") === "EMPRESA" ? "EMPRESA" : "PERSONA"
-
-      const nombre = raw?.nombre ?? ""
-      const apellido = raw?.apellido ?? ""
-      const dni = raw?.dni ?? ""
-      const razonSocial = raw?.razonSocial ?? ""
-      const cuit = raw?.cuit ?? ""
-
-      const displayName =
-        tipo === "EMPRESA" ? (razonSocial || "—") : `${nombre} ${apellido}`.trim() || "—"
-
-      const documentoLabel =
-        tipo === "EMPRESA" ? (cuit ? `CUIT ${cuit}` : "CUIT —") : (dni ? `DNI ${dni}` : "DOC —")
-
-      return {
-        id,
-        tipo,
-        displayName,
-        documentoLabel,
-        nombre,
-        apellido,
-        documentoTipo: "DNI",
-        documentoNro: dni,
-        razonSocial,
-        cuit,
-        contacto: "",
-        telefono: raw?.telefono ?? "",
-        email: raw?.email ?? "",
-        direccion: raw?.direccion ?? "",
-        notas: raw?.notas ?? "",
-        activo: raw?.activo !== false,
-        createdAt: raw?.createdAt ?? "",
-      }
-    },
-
-    getSaldo(p) {
-      const id = Number(p?.id ?? 0)
-      const d = this.deudasMap.get(id)
-
-      if (!id || !d) {
-        return { deudaCompras: 0, pagosTotal: 0, saldo: 0 }
-      }
-
-      const deudaCompras = Number(d.deudaCompras ?? d.deuda ?? 0)
-      const pagosTotal = Number(d.pagosTotal ?? d.pagos ?? 0)
-      const saldo = Number(d.saldo ?? (deudaCompras - pagosTotal))
-
-      return { deudaCompras, pagosTotal, saldo }
-    },
-
-    async refresh() {
-      this.loading = true
-      this.error = ""
-
-      try {
-        const [provRes, deudasRes, mpRes] = await Promise.all([
-          proveedoresApi.list({
-            page: this.page,
-            size: this.size,
-            search: this.q.trim() || null,
-          }),
-          proveedoresApi.deudas().catch(() => ({ data: [] })),
-          metodosPagoApi.list().catch(() => ({ data: [] })),
-        ])
-
-        const provPage = unwrapPage(provRes?.data)
-        this.proveedores = provPage.content.map(this.mapProveedorApiToVM)
-        this.totalElements = provPage.totalElements
-        this.totalPages = Math.max(1, provPage.totalPages || 1)
-        this.page = Math.max(1, provPage.page || 1)
-
-        const deudas = deudasRes?.data ?? []
-        this.deudasMap = new Map(
-          deudas.map((d) => [
-            Number(d.proveedorId ?? d.id),
-            {
-              proveedorId: Number(d.proveedorId ?? d.id),
-              deudaCompras: Number(d.totalCompras ?? d.deudaCompras ?? 0),
-              pagosTotal: Number(d.totalPagado ?? d.pagosTotal ?? 0),
-              saldo: Number(d.deuda ?? d.saldo ?? 0),
-            },
-          ])
-        )
-
-        const mp = unwrapPage(mpRes?.data)
-        this.metodosPago = (mp.content ?? []).map((m) => ({
-          metodoPagoId: Number(m?.metodoPagoId ?? m?.id ?? 0),
-          nombre: m?.nombre ?? m?.descripcion ?? "—",
-        }))
-      } catch (e) {
-        this.error = e?.response?.data?.error || e?.message || "Error cargando proveedores"
-        this.proveedores = []
-        this.totalElements = 0
-        this.totalPages = 1
-      } finally {
-        this.loading = false
-      }
-    },
-
-    prevPage() {
-      if (!this.canPrev) return
-      this.page--
-    },
-
-    nextPage() {
-      if (!this.canNext) return
-      this.page++
-    },
-
-    setTipo(tipo) {
-      this.form.tipo = tipo === "EMPRESA" ? "EMPRESA" : "PERSONA"
-
-      if (this.form.tipo === "EMPRESA") {
-        this.form.nombre = ""
-        this.form.apellido = ""
-        this.form.documentoTipo = "DNI"
-        this.form.documentoNro = ""
-      } else {
-        this.form.razonSocial = ""
-        this.form.cuit = ""
-        this.form.contacto = ""
-      }
-    },
-
-    prepareCreate() {
-      this.mode = "create"
-      this.editingId = null
-      this.formError = ""
-      this.form = {
-        tipo: "PERSONA",
-        nombre: "",
-        apellido: "",
-        documentoTipo: "DNI",
-        documentoNro: "",
-        razonSocial: "",
-        cuit: "",
-        contacto: "",
-        telefono: "",
-        email: "",
-        direccion: "",
-        notas: "",
-        activo: true,
-      }
-    },
-
-    prepareEdit(p) {
-      this.mode = "edit"
-      this.editingId = p.id
-      this.formError = ""
-
-      const tipo = p.tipo === "EMPRESA" ? "EMPRESA" : "PERSONA"
-
-      this.form = {
-        tipo,
-        nombre: p.nombre ?? "",
-        apellido: p.apellido ?? "",
-        documentoTipo: "DNI",
-        documentoNro: p.documentoNro ?? "",
-        razonSocial: p.razonSocial ?? "",
-        cuit: p.cuit ?? "",
-        contacto: "",
-        telefono: p.telefono ?? "",
-        email: p.email ?? "",
-        direccion: p.direccion ?? "",
-        notas: p.notas ?? "",
-        activo: p.activo !== false,
-      }
-    },
-
-    validateForm() {
-      if (this.form.tipo === "EMPRESA") {
-        if (!String(this.form.razonSocial || "").trim()) return "La razón social es obligatoria."
-        if (!String(this.form.cuit || "").replace(/\D/g, "").trim()) return "El CUIT es obligatorio."
-      } else {
-        if (!String(this.form.nombre || "").trim()) return "El nombre es obligatorio."
-      }
-
-      const email = String(this.form.email || "").trim()
-      if (email && !email.includes("@")) return "El email no tiene un formato válido."
-
-      return ""
-    },
-
-    async saveProveedor() {
-      this.formError = ""
-      const err = this.validateForm()
-      if (err) {
-        this.formError = err
-        return
-      }
-
-      this.loading = true
-      try {
-        const tipoProveedor = this.form.tipo === "EMPRESA" ? "EMPRESA" : "PERSONA"
-
-        if (this.mode === "create") {
-          const payload = {
-            tipoProveedor,
-            nombre: tipoProveedor === "PERSONA" ? (this.form.nombre || "").trim() : null,
-            apellido: tipoProveedor === "PERSONA" ? (this.form.apellido || "").trim() : null,
-            dni: tipoProveedor === "PERSONA" ? this.onlyDigits(this.form.documentoNro) : null,
-            razonSocial: tipoProveedor === "EMPRESA" ? (this.form.razonSocial || "").trim() : null,
-            cuit: tipoProveedor === "EMPRESA" ? this.onlyDigits(this.form.cuit) : null,
-            telefono: (this.form.telefono || "").trim() || null,
-            email: (this.form.email || "").trim() || null,
-            direccion: (this.form.direccion || "").trim() || null,
-            notas: (this.form.notas || "").trim() || null,
-          }
-
-          await proveedoresApi.create(payload)
-          this.toastSuccess("Proveedor creado ✅")
-        } else {
-          const safeNombre =
-            tipoProveedor === "PERSONA"
-              ? (this.form.nombre || "").trim()
-              : ((this.form.razonSocial || "").trim() || "Empresa")
-
-          const payload = {
-            proveedorId: Number(this.editingId),
-            tipoProveedor,
-            nombre: safeNombre,
-            apellido: tipoProveedor === "PERSONA" ? (this.form.apellido || "").trim() || null : null,
-            dni: tipoProveedor === "PERSONA" ? this.onlyDigits(this.form.documentoNro) : null,
-            razonSocial: tipoProveedor === "EMPRESA" ? (this.form.razonSocial || "").trim() : null,
-            cuit: tipoProveedor === "EMPRESA" ? this.onlyDigits(this.form.cuit) : null,
-            telefono: (this.form.telefono || "").trim() || null,
-            email: (this.form.email || "").trim() || null,
-            direccion: (this.form.direccion || "").trim() || null,
-            notas: (this.form.notas || "").trim() || null,
-            activo: !!this.form.activo,
-          }
-
-          await proveedoresApi.update(this.editingId, payload)
-          this.toastSuccess("Proveedor actualizado ✅")
-        }
-
-        await this.refresh()
-        this.hideModal("proveedorModal")
-      } catch (e) {
-        this.formError = e?.response?.data?.error || e?.message || "No se pudo guardar"
-      } finally {
-        this.loading = false
-      }
-    },
-
-    async toggleActivo(p) {
-      this.error = ""
-      this.loading = true
-
-      try {
-        const tipoProveedor = p.tipo === "EMPRESA" ? "EMPRESA" : "PERSONA"
-        const safeNombre =
-          tipoProveedor === "PERSONA"
-            ? (p.nombre || "").trim()
-            : ((p.razonSocial || "").trim() || "Empresa")
-
-        const payload = {
-          proveedorId: Number(p.id),
-          tipoProveedor,
-          nombre: safeNombre,
-          apellido: tipoProveedor === "PERSONA" ? (p.apellido || "").trim() || null : null,
-          dni: tipoProveedor === "PERSONA" ? this.onlyDigits(p.documentoNro) : null,
-          razonSocial: tipoProveedor === "EMPRESA" ? (p.razonSocial || "").trim() : null,
-          cuit: tipoProveedor === "EMPRESA" ? this.onlyDigits(p.cuit) : null,
-          telefono: (p.telefono || "").trim() || null,
-          email: (p.email || "").trim() || null,
-          direccion: (p.direccion || "").trim() || null,
-          notas: (p.notas || "").trim() || null,
-          activo: !p.activo,
-        }
-
-        await proveedoresApi.update(p.id, payload)
-        await this.refresh()
-        this.toastSuccess(p.activo ? "Proveedor desactivado" : "Proveedor activado")
-      } catch (e) {
-        this.error = e?.response?.data?.error || e?.message || "No se pudo cambiar el estado"
-      } finally {
-        this.loading = false
-      }
-    },
-
-    async cargarDetalleCompraPago(compraId) {
-      this.compraSeleccionada =
-        this.comprasPendientes.find((c) => Number(c.compraId) === Number(compraId)) || null
-
-      this.pagosCompra = []
-      this.pagadoCompraSeleccionada = 0
-      this.saldoCompraSeleccionada = Number(this.compraSeleccionada?.total || 0)
-
-      if (!compraId) return
-
-      try {
-        const res = await pagosProveedorApi.porCompra(compraId)
-        const p = unwrapPage(res?.data)
-        this.pagosCompra = p.content ?? []
-
-        const pagado = this.pagosCompra.reduce((acc, x) => acc + Number(x.monto || 0), 0)
-        const total = Number(this.compraSeleccionada?.total || 0)
-        const saldo = Math.max(total - pagado, 0)
-
-        this.pagadoCompraSeleccionada = pagado
-        this.saldoCompraSeleccionada = saldo
-
-        if (!this.pagoMonto || Number(this.pagoMonto) <= 0) {
-          this.pagoMonto = saldo
-        }
-      } catch {
-        this.pagosCompra = []
-        this.pagadoCompraSeleccionada = 0
-        this.saldoCompraSeleccionada = Number(this.compraSeleccionada?.total || 0)
-      }
-    },
-
-    async preparePago(p) {
-      this.pagoProveedor = p
-      this.pagoCompraId = null
-      this.pagoMonto = ""
-      this.pagoNotas = ""
-      this.pagoMetodoPagoId = null
-      this.pagoError = ""
-      this.pagoOk = ""
-      this.comprasPendientes = []
-      this.pagosCompra = []
-      this.compraSeleccionada = null
-      this.pagadoCompraSeleccionada = 0
-      this.saldoCompraSeleccionada = 0
-
-      this.loading = true
-      try {
-        const res = await comprasApi.list({
-          page: 1,
-          size: 9999,
-          search: "",
-        })
-
-        const allPage = unwrapPage(res?.data)
-        const allRaw = allPage.content ?? []
-        const pid = Number(p.id)
-
-        const all = allRaw.map((x) => {
-          const c = x?.compra ?? x ?? {}
-          return {
-            compraId: Number(c.compraId ?? c.id ?? 0),
-            proveedorId: Number(c.proveedorId ?? 0),
-            fecha: c.fecha ?? "",
-            total: Number(c.total ?? 0),
-            estado: c.estado ?? "—",
-          }
-        })
-
-        this.comprasPendientes = all
-          .filter((c) => Number(c.proveedorId) === pid)
-          .filter((c) => !["PAGADA", "ANULADA"].includes(String(c.estado || "").toUpperCase()))
-          .sort((a, b) => Number(b.compraId) - Number(a.compraId))
-      } catch {
-        this.comprasPendientes = []
-      } finally {
-        this.loading = false
-      }
-    },
-
-    async registrarPago() {
-      this.pagoError = ""
-      this.pagoOk = ""
-
-      const proveedor = this.pagoProveedor
-      if (!proveedor?.id) {
-        this.pagoError = "Proveedor inválido"
-        return
-      }
-
-      const compraId = Number(this.pagoCompraId || 0)
-      if (!compraId) {
-        this.pagoError = "Seleccioná una compra"
-        return
-      }
-
-      const metodoPagoId = Number(this.pagoMetodoPagoId || 0)
-      if (!metodoPagoId) {
-        this.pagoError = "Seleccioná un método de pago"
-        return
-      }
-
-      const monto = Number(this.pagoMonto || 0)
-      if (monto <= 0) {
-        this.pagoError = "Monto inválido"
-        return
-      }
-
-      if (this.saldoCompraSeleccionada > 0 && monto > this.saldoCompraSeleccionada) {
-        this.pagoError = "El monto supera el saldo pendiente de la compra."
-        return
-      }
-
-      this.loading = true
-      try {
-        const payload = {
-          compraId,
-          metodoPagoId,
-          monto,
-          referencia: (this.pagoNotas || "").trim() || null,
-        }
-
-        await pagosProveedorApi.create(payload)
-
-        this.pagoOk = "Pago registrado ✅"
-        this.pagoNotas = ""
-        this.pagoMonto = ""
-
-        await this.cargarDetalleCompraPago(compraId)
-        await this.refresh()
-      } catch (e) {
-        this.pagoError = e?.response?.data?.error || e?.message || "No se pudo registrar el pago"
-      } finally {
-        this.loading = false
-      }
-    },
-  },
+const loading = ref(false)
+const proveedores = ref([])
+const q = ref("")
+const sortBy = ref("displayName")
+const includeInactive = ref(false)
+const page = ref(1)
+const size = ref(10)
+const totalElements = ref(0)
+const totalPages = ref(1)
+const error = ref("")
+const success = ref("")
+const mode = ref("create")
+const editingId = ref(null)
+const form = ref({
+  tipo: "PERSONA", nombre: "", apellido: "", documentoTipo: "DNI", documentoNro: "",
+  razonSocial: "", cuit: "", contacto: "", telefono: "", email: "", direccion: "", notas: "", activo: true,
+})
+const formError = ref("")
+const pagoProveedor = ref(null)
+const pagoCompraId = ref(null)
+const pagoMonto = ref("")
+const pagoNotas = ref("")
+const pagoMetodoPagoId = ref(null)
+const pagoError = ref("")
+const pagoOk = ref("")
+const comprasPendientes = ref([])
+const pagosCompra = ref([])
+const compraSeleccionada = ref(null)
+const pagadoCompraSeleccionada = ref(0)
+const saldoCompraSeleccionada = ref(0)
+const metodosPago = ref([])
+const deudasMap = ref(new Map())
+
+// Computeds
+
+const filtered = computed(() => {
+  let arr = [...proveedores.value]
+  if (!includeInactive.value) arr = arr.filter((p) => p.activo !== false)
+
+  if (sortBy.value === "saldoDesc") {
+    arr.sort((a, b) => (getSaldo(b).saldo ?? 0) - (getSaldo(a).saldo ?? 0))
+    return arr
+  }
+  if (sortBy.value === "displayName") arr.sort((a, b) => (a.displayName || "").localeCompare(b.displayName || "", "es"))
+  else if (sortBy.value === "createdAt") arr.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
+  return arr
+})
+
+const canPrev = computed(() => page.value > 1)
+const canNext = computed(() => page.value < totalPages.value)
+
+// Items para AppCombobox de compras pendientes
+const comprasPendientesItems = computed(() =>
+  comprasPendientes.value.map(c => ({
+    id: c.compraId,
+    label: `Compra #${c.compraId} · ${formatDate(c.fecha)}`,
+    sublabel: `Total: $${formatMoney(c.total)} · ${c.estado}`,
+  }))
+)
+
+// Helpers
+
+function formatMoney(n) {
+  return Number(n ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 0 })
 }
+
+function formatDate(v) {
+  const s = String(v || "")
+  return s ? s.slice(0, 10) : "—"
+}
+
+function onlyDigits(v) {
+  return String(v || "").replace(/\D/g, "") || null
+}
+
+function saldoClass(p) {
+  const s = getSaldo(p).saldo
+  if (s > 0) return "text-warning"
+  if (s < 0) return "text-info"
+  return "text-success"
+}
+
+function docBadgeClass(p) {
+  if (p?.tipo === "EMPRESA") return "text-bg-dark border border-info"
+  return "text-bg-dark border border-secondary"
+}
+
+function toastSuccess(msg) {
+  success.value = msg
+  setTimeout(() => { success.value = "" }, 2200)
+}
+
+function hideModal(id) {
+  const modalEl = document.getElementById(id)
+  if (!modalEl || !window.bootstrap?.Modal) return
+  window.bootstrap.Modal.getInstance(modalEl)?.hide()
+}
+
+function mapProveedorApiToVM(raw) {
+  const id = Number(raw?.proveedorId ?? raw?.id ?? 0)
+  const tipo = (raw?.tipoProveedor ?? "PERSONA") === "EMPRESA" ? "EMPRESA" : "PERSONA"
+  const nombre = raw?.nombre ?? ""
+  const apellido = raw?.apellido ?? ""
+  const dni = raw?.dni ?? ""
+  const razonSocial = raw?.razonSocial ?? ""
+  const cuit = raw?.cuit ?? ""
+  const displayName = tipo === "EMPRESA" ? (razonSocial || "—") : `${nombre} ${apellido}`.trim() || "—"
+  const documentoLabel = tipo === "EMPRESA" ? (cuit ? `CUIT ${cuit}` : "CUIT —") : (dni ? `DNI ${dni}` : "DOC —")
+  return {
+    id, tipo, displayName, documentoLabel, nombre, apellido, documentoTipo: "DNI",
+    documentoNro: dni, razonSocial, cuit, contacto: "", telefono: raw?.telefono ?? "",
+    email: raw?.email ?? "", direccion: raw?.direccion ?? "", notas: raw?.notas ?? "",
+    activo: raw?.activo !== false, createdAt: raw?.createdAt ?? "",
+  }
+}
+
+function getSaldo(p) {
+  const id = Number(p?.id ?? 0)
+  const d = deudasMap.value.get(id)
+  if (!id || !d) return { deudaCompras: 0, pagosTotal: 0, saldo: 0 }
+  const deudaCompras = Number(d.deudaCompras ?? d.deuda ?? 0)
+  const pagosTotal = Number(d.pagosTotal ?? d.pagos ?? 0)
+  const saldo = Number(d.saldo ?? (deudaCompras - pagosTotal))
+  return { deudaCompras, pagosTotal, saldo }
+}
+
+// Actions
+
+async function refresh() {
+  loading.value = true
+  error.value = ""
+
+  try {
+    const [provRes, deudasRes, mpRes] = await Promise.all([
+      proveedoresApi.list({ page: page.value, size: size.value, search: q.value.trim() || null }),
+      proveedoresApi.deudas().catch(() => ({ data: [] })),
+      metodosPagoApi.list().catch(() => ({ data: [] })),
+    ])
+
+    const provPage = unwrapPage(provRes?.data)
+    proveedores.value = provPage.content.map(mapProveedorApiToVM)
+    totalElements.value = provPage.totalElements
+    totalPages.value = Math.max(1, provPage.totalPages || 1)
+    page.value = Math.max(1, provPage.page || 1)
+
+    const deudas = deudasRes?.data ?? []
+    deudasMap.value = new Map(
+      deudas.map((d) => [
+        Number(d.proveedorId ?? d.id),
+        {
+          proveedorId: Number(d.proveedorId ?? d.id),
+          deudaCompras: Number(d.totalCompras ?? d.deudaCompras ?? 0),
+          pagosTotal: Number(d.totalPagado ?? d.pagosTotal ?? 0),
+          saldo: Number(d.deuda ?? d.saldo ?? 0),
+        },
+      ])
+    )
+
+    metodosPago.value = (unwrapPage(mpRes?.data).content ?? []).map((m) => ({
+      metodoPagoId: Number(m?.metodoPagoId ?? m?.id ?? 0),
+      nombre: m?.nombre ?? m?.descripcion ?? "—",
+    }))
+  } catch (e) {
+    error.value = e?.response?.data?.error || e?.message || "Error cargando proveedores"
+    proveedores.value = []
+    totalElements.value = 0
+    totalPages.value = 1
+  } finally {
+    loading.value = false
+  }
+}
+
+function prevPage() { if (canPrev.value) page.value-- }
+function nextPage() { if (canNext.value) page.value++ }
+
+function setTipo(tipo) {
+  form.value.tipo = tipo === "EMPRESA" ? "EMPRESA" : "PERSONA"
+  if (form.value.tipo === "EMPRESA") {
+    form.value.nombre = ""; form.value.apellido = ""
+    form.value.documentoTipo = "DNI"; form.value.documentoNro = ""
+  } else {
+    form.value.razonSocial = ""; form.value.cuit = ""; form.value.contacto = ""
+  }
+}
+
+function prepareCreate() {
+  mode.value = "create"
+  editingId.value = null
+  formError.value = ""
+  form.value = {
+    tipo: "PERSONA", nombre: "", apellido: "", documentoTipo: "DNI", documentoNro: "",
+    razonSocial: "", cuit: "", contacto: "", telefono: "", email: "", direccion: "", notas: "", activo: true,
+  }
+}
+
+function prepareEdit(p) {
+  mode.value = "edit"
+  editingId.value = p.id
+  formError.value = ""
+  form.value = {
+    tipo: p.tipo === "EMPRESA" ? "EMPRESA" : "PERSONA",
+    nombre: p.nombre ?? "", apellido: p.apellido ?? "", documentoTipo: "DNI",
+    documentoNro: p.documentoNro ?? "", razonSocial: p.razonSocial ?? "", cuit: p.cuit ?? "",
+    contacto: "", telefono: p.telefono ?? "", email: p.email ?? "",
+    direccion: p.direccion ?? "", notas: p.notas ?? "", activo: p.activo !== false,
+  }
+}
+
+function validateForm() {
+  if (form.value.tipo === "EMPRESA") {
+    if (!String(form.value.razonSocial || "").trim()) return "La razón social es obligatoria."
+    if (!String(form.value.cuit || "").replace(/\D/g, "").trim()) return "El CUIT es obligatorio."
+  } else {
+    if (!String(form.value.nombre || "").trim()) return "El nombre es obligatorio."
+  }
+  const email = String(form.value.email || "").trim()
+  if (email && !email.includes("@")) return "El email no tiene un formato válido."
+  return ""
+}
+
+async function saveProveedor() {
+  formError.value = ""
+  const err = validateForm()
+  if (err) { formError.value = err; return }
+
+  loading.value = true
+  try {
+    const tipoProveedor = form.value.tipo === "EMPRESA" ? "EMPRESA" : "PERSONA"
+
+    if (mode.value === "create") {
+      await proveedoresApi.create({
+        tipoProveedor,
+        nombre: tipoProveedor === "PERSONA" ? (form.value.nombre || "").trim() : null,
+        apellido: tipoProveedor === "PERSONA" ? (form.value.apellido || "").trim() : null,
+        dni: tipoProveedor === "PERSONA" ? onlyDigits(form.value.documentoNro) : null,
+        razonSocial: tipoProveedor === "EMPRESA" ? (form.value.razonSocial || "").trim() : null,
+        cuit: tipoProveedor === "EMPRESA" ? onlyDigits(form.value.cuit) : null,
+        telefono: (form.value.telefono || "").trim() || null,
+        email: (form.value.email || "").trim() || null,
+        direccion: (form.value.direccion || "").trim() || null,
+        notas: (form.value.notas || "").trim() || null,
+      })
+      toastSuccess("Proveedor creado correctamente.")
+    } else {
+      const safeNombre = tipoProveedor === "PERSONA"
+        ? (form.value.nombre || "").trim()
+        : ((form.value.razonSocial || "").trim() || "Empresa")
+
+      await proveedoresApi.update(editingId.value, {
+        proveedorId: Number(editingId.value), tipoProveedor, nombre: safeNombre,
+        apellido: tipoProveedor === "PERSONA" ? (form.value.apellido || "").trim() || null : null,
+        dni: tipoProveedor === "PERSONA" ? onlyDigits(form.value.documentoNro) : null,
+        razonSocial: tipoProveedor === "EMPRESA" ? (form.value.razonSocial || "").trim() : null,
+        cuit: tipoProveedor === "EMPRESA" ? onlyDigits(form.value.cuit) : null,
+        telefono: (form.value.telefono || "").trim() || null,
+        email: (form.value.email || "").trim() || null,
+        direccion: (form.value.direccion || "").trim() || null,
+        notas: (form.value.notas || "").trim() || null,
+        activo: !!form.value.activo,
+      })
+      toastSuccess("Proveedor actualizado correctamente.")
+    }
+
+    await refresh()
+    hideModal("proveedorModal")
+  } catch (e) {
+    formError.value = e?.response?.data?.error || e?.message || "No se pudo guardar"
+  } finally {
+    loading.value = false
+  }
+}
+
+async function toggleActivo(p) {
+  error.value = ""
+  loading.value = true
+  try {
+    const tipoProveedor = p.tipo === "EMPRESA" ? "EMPRESA" : "PERSONA"
+    const safeNombre = tipoProveedor === "PERSONA"
+      ? (p.nombre || "").trim()
+      : ((p.razonSocial || "").trim() || "Empresa")
+
+    await proveedoresApi.update(p.id, {
+      proveedorId: Number(p.id), tipoProveedor, nombre: safeNombre,
+      apellido: tipoProveedor === "PERSONA" ? (p.apellido || "").trim() || null : null,
+      dni: tipoProveedor === "PERSONA" ? onlyDigits(p.documentoNro) : null,
+      razonSocial: tipoProveedor === "EMPRESA" ? (p.razonSocial || "").trim() : null,
+      cuit: tipoProveedor === "EMPRESA" ? onlyDigits(p.cuit) : null,
+      telefono: (p.telefono || "").trim() || null,
+      email: (p.email || "").trim() || null,
+      direccion: (p.direccion || "").trim() || null,
+      notas: (p.notas || "").trim() || null,
+      activo: !p.activo,
+    })
+    await refresh()
+    toastSuccess(p.activo ? "Proveedor desactivado" : "Proveedor activado")
+  } catch (e) {
+    error.value = e?.response?.data?.error || e?.message || "No se pudo cambiar el estado"
+  } finally {
+    loading.value = false
+  }
+}
+
+async function cargarDetalleCompraPago(compraId) {
+  compraSeleccionada.value = comprasPendientes.value.find((c) => Number(c.compraId) === Number(compraId)) || null
+  pagosCompra.value = []
+  pagadoCompraSeleccionada.value = 0
+  saldoCompraSeleccionada.value = Number(compraSeleccionada.value?.total || 0)
+
+  if (!compraId) return
+
+  try {
+    const res = await pagosProveedorApi.porCompra(compraId)
+    pagosCompra.value = unwrapPage(res?.data).content ?? []
+    const pagado = pagosCompra.value.reduce((acc, x) => acc + Number(x.monto || 0), 0)
+    const total = Number(compraSeleccionada.value?.total || 0)
+    const saldo = Math.max(total - pagado, 0)
+    pagadoCompraSeleccionada.value = pagado
+    saldoCompraSeleccionada.value = saldo
+    if (!pagoMonto.value || Number(pagoMonto.value) <= 0) pagoMonto.value = saldo
+  } catch {
+    pagosCompra.value = []
+    pagadoCompraSeleccionada.value = 0
+    saldoCompraSeleccionada.value = Number(compraSeleccionada.value?.total || 0)
+  }
+}
+
+async function preparePago(p) {
+  pagoProveedor.value = p
+  pagoCompraId.value = null
+  pagoMonto.value = ""
+  pagoNotas.value = ""
+  pagoMetodoPagoId.value = null
+  pagoError.value = ""
+  pagoOk.value = ""
+  comprasPendientes.value = []
+  pagosCompra.value = []
+  compraSeleccionada.value = null
+  pagadoCompraSeleccionada.value = 0
+  saldoCompraSeleccionada.value = 0
+
+  loading.value = true
+  try {
+    const res = await comprasApi.list({ page: 1, size: 9999, search: "" })
+    const allRaw = unwrapPage(res?.data).content ?? []
+    const pid = Number(p.id)
+
+    comprasPendientes.value = allRaw
+      .map((x) => {
+        const c = x?.compra ?? x ?? {}
+        return {
+          compraId: Number(c.compraId ?? c.id ?? 0),
+          proveedorId: Number(c.proveedorId ?? 0),
+          fecha: c.fecha ?? "",
+          total: Number(c.total ?? 0),
+          estado: c.estado ?? "—",
+        }
+      })
+      .filter((c) => Number(c.proveedorId) === pid)
+      .filter((c) => !["PAGADA", "ANULADA"].includes(String(c.estado || "").toUpperCase()))
+      .sort((a, b) => Number(b.compraId) - Number(a.compraId))
+  } catch {
+    comprasPendientes.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+async function registrarPago() {
+  pagoError.value = ""
+  pagoOk.value = ""
+
+  if (!pagoProveedor.value?.id) { pagoError.value = "Proveedor inválido"; return }
+  const compraId = Number(pagoCompraId.value || 0)
+  if (!compraId) { pagoError.value = "Seleccioná una compra"; return }
+  const metodoPagoId = Number(pagoMetodoPagoId.value || 0)
+  if (!metodoPagoId) { pagoError.value = "Seleccioná un método de pago"; return }
+  const monto = Number(pagoMonto.value || 0)
+  if (monto <= 0) { pagoError.value = "Monto inválido"; return }
+  if (saldoCompraSeleccionada.value > 0 && monto > saldoCompraSeleccionada.value) {
+    pagoError.value = "El monto supera el saldo pendiente de la compra."
+    return
+  }
+
+  loading.value = true
+  try {
+    await pagosProveedorApi.create({
+      compraId, metodoPagoId, monto,
+      referencia: (pagoNotas.value || "").trim() || null,
+    })
+    pagoOk.value = "Pago registrado correctamente."
+    pagoNotas.value = ""
+    pagoMonto.value = ""
+    await cargarDetalleCompraPago(compraId)
+    await refresh()
+  } catch (e) {
+    pagoError.value = e?.response?.data?.error || e?.message || "No se pudo registrar el pago"
+  } finally {
+    loading.value = false
+  }
+}
+
+// Watchers
+
+let _t = null
+watch(q, () => {
+  clearTimeout(_t)
+  _t = setTimeout(() => {
+    if (page.value !== 1) page.value = 1
+    else refresh()
+  }, 300)
+})
+
+watch(pagoCompraId, async (newId) => {
+  await cargarDetalleCompraPago(newId)
+})
+
+onMounted(() => refresh())
+onBeforeUnmount(() => { if (_t) clearTimeout(_t) })
 </script>
 
 <style scoped>
 .proveedores-page {
   min-height: 100%;
-}
-
-.modal-round {
-  border-radius: 18px;
-}
-
-.switch-inline {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.filters-bar {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.filters-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  flex: 1;
-  min-width: 0;
-}
-
-.table-main {
-  color: #fff;
-  font-weight: 600;
-}
-
-.table-sub {
-  color: rgba(255,255,255,.58);
-  font-size: .82rem;
-  margin-top: 2px;
-}
-
-.footer-summary {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-top: 16px;
-}
-
-.pager-minimal {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-@media (max-width: 992px) {
-  .filters-grid {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

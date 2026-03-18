@@ -728,7 +728,7 @@ watch(clienteIdSel, async (v, oldV) => {
 
         <div class="col-6 col-md-3">
           <div class="kpi-card">
-            <div class="kpi-label">Saldo visible</div>
+            <div class="kpi-label">Saldo en esta página</div>
             <div class="kpi-value">$ {{ formatMoney(saldoFinal) }}</div>
           </div>
         </div>

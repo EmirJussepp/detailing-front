@@ -151,12 +151,6 @@
           </table>
         </div>
 
-        <div class="footer-summary">
-          <div class="helper-text">
-            Página <b>{{ page + 1 }}</b> de <b>{{ totalPages }}</b>
-          </div>
-        </div>
-
         <div class="mt-3">
           <div class="pager-minimal">
             <button class="btn btn-sm btn-outline-light" @click="prevPage" :disabled="loading || !canPrev">
@@ -187,12 +181,11 @@
             <div class="row g-3">
               <div class="col-md-8">
                 <label class="form-label field-label">Proveedor</label>
-                <select v-model.number="form.proveedorId" class="form-select app-input">
-                  <option :value="null">Seleccionar...</option>
-                  <option v-for="p in proveedores" :key="p.proveedorId" :value="p.proveedorId">
-                    {{ p.displayName }}
-                  </option>
-                </select>
+                <AppCombobox
+                  v-model="form.proveedorId"
+                  :items="proveedoresItems"
+                  placeholder="Buscar proveedor..."
+                />
               </div>
 
               <div class="col-md-4">
@@ -227,12 +220,12 @@
             <div class="row g-2 align-items-end">
               <div class="col-md-6">
                 <label class="form-label field-label">Producto</label>
-                <select v-model.number="itemDraft.productoId" @change="onProductoChange" class="form-select app-input">
-                  <option :value="null">Seleccionar...</option>
-                  <option v-for="p in productos" :key="p.productoId ?? p.id" :value="Number(p.productoId ?? p.id)">
-                    {{ p.nombre }}
-                  </option>
-                </select>
+                <AppCombobox
+                  v-model="itemDraft.productoId"
+                  :items="productosItems"
+                  placeholder="Buscar producto o código..."
+                  @picked="onProductoChange"
+                />
               </div>
 
               <div class="col-md-2">
@@ -623,7 +616,9 @@
 </div>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, onMounted } from "vue"
+import AppCombobox from "../components/AppCombobox.vue"
 import { comprasApi } from "../services/comprasApi"
 import { pagosProveedorApi } from "../services/pagosProveedorApi"
 import { proveedoresApi } from "../services/proveedoresApi"
@@ -635,9 +630,7 @@ function unwrapPage(data) {
   if (Array.isArray(data)) {
     return { content: data, page: 0, size: data.length, totalElements: data.length, totalPages: 1 }
   }
-
   const content = data?.content ?? data?.items ?? data?.data ?? []
-
   return {
     content: Array.isArray(content) ? content : [],
     page: Number(data?.page ?? data?.number ?? 0),
@@ -647,44 +640,39 @@ function unwrapPage(data) {
   }
 }
 
-export default {
-  name: "ComprasView",
+const loading = ref(false)
+const error = ref("")
+const success = ref("")
 
-  data() {
-    return {
-      loading: false,
-      error: "",
-      success: "",
+const q = ref("")
+const sortBy = ref("fechaDesc")
 
-      q: "",
-      sortBy: "fechaDesc",
+const page = ref(0)
+const size = ref(10)
+const totalElements = ref(0)
+const totalPages = ref(1)
 
-      page: 0,
-      size: 10,
-      totalElements: 0,
-      totalPages: 1,
+const proveedores = ref([])
+const productos = ref([])
+const categorias = ref([])
+const marcas = ref([])
+const compras = ref([])
+const metodosPago = ref([])
 
-      proveedores: [],
-      productos: [],
-      categorias: [],
-      marcas: [],
-      compras: [],
-      metodosPago: [],
+const form = ref({
+  proveedorId: null,
+  fecha: new Date().toISOString().slice(0, 10),
+  detalles: [],
+  impactarStock: false,
+})
 
-      form: {
-        proveedorId: null,
-        fecha: new Date().toISOString().slice(0, 10),
-        detalles: [],
-        impactarStock: false,
-      },
+const itemDraft = ref({
+  productoId: null,
+  cantidad: 1,
+  precioUnitario: 0,
+})
 
-      itemDraft: {
-        productoId: null,
-        cantidad: 1,
-        precioUnitario: 0,
-      },
-
-     nuevoProducto: {
+const nuevoProducto = ref({
   nombre: "",
   codigoProducto: "",
   categoriaId: null,
@@ -693,258 +681,233 @@ export default {
   precioVenta: 0,
   precioMayorista: 0,
   stockMinimo: 0,
-},
+})
 
-      detalle: null,
-      pagosDetalle: [],
+const detalle = ref(null)
+const pagosDetalle = ref([])
 
-      pagoForm: {
-        compraId: null,
-        monto: 0,
-        metodoPagoId: null,
-        referencia: "",
-      },
+const pagoForm = ref({
+  compraId: null,
+  monto: 0,
+  metodoPagoId: null,
+  referencia: "",
+})
 
-      compraSeleccionada: null,
-      pagadoCompraSeleccionada: 0,
-      saldoCompraSeleccionada: 0,
+const compraSeleccionada = ref(null)
+const pagadoCompraSeleccionada = ref(0)
+const saldoCompraSeleccionada = ref(0)
 
-      _t: null,
-    }
-  },
+// Computeds
 
-  computed: {
-    totalDraft() {
-      return (this.form.detalles || []).reduce(
-        (acc, d) => acc + Number(d.cantidad) * Number(d.precioUnitario),
-        0
+const totalDraft = computed(() =>
+  (form.value.detalles || []).reduce(
+    (acc, d) => acc + Number(d.cantidad) * Number(d.precioUnitario),
+    0
+  )
+)
+
+const comprasFiltradas = computed(() => {
+  let arr = [...compras.value]
+  const t = String(q.value || "").trim().toLowerCase()
+
+  if (t) {
+    arr = arr.filter((c) => {
+      const id = String(c.compraId || "")
+      const prov = proveedorName(c.proveedorId).toLowerCase()
+      return id.includes(t) || prov.includes(t)
+    })
+  }
+
+  switch (sortBy.value) {
+    case "fechaAsc":
+      arr.sort((a, b) => String(a.fecha || "").localeCompare(String(b.fecha || "")))
+      break
+    case "fechaDesc":
+      arr.sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")))
+      break
+    case "totalAsc":
+      arr.sort((a, b) => Number(a.total || 0) - Number(b.total || 0))
+      break
+    case "totalDesc":
+      arr.sort((a, b) => Number(b.total || 0) - Number(a.total || 0))
+      break
+    case "proveedor":
+      arr.sort((a, b) =>
+        proveedorName(a.proveedorId).localeCompare(proveedorName(b.proveedorId), "es")
       )
-    },
+      break
+    case "estado":
+      arr.sort((a, b) => String(a.estado || "").localeCompare(String(b.estado || ""), "es"))
+      break
+  }
 
-    comprasFiltradas() {
-      let arr = [...this.compras]
-      const t = String(this.q || "").trim().toLowerCase()
+  return arr
+})
 
-      if (t) {
-        arr = arr.filter((c) => {
-          const id = String(c.compraId || "")
-          const prov = this.proveedorName(c.proveedorId).toLowerCase()
-          return id.includes(t) || prov.includes(t)
-        })
-      }
+const canPrev = computed(() => page.value > 0)
+const canNext = computed(() => page.value < totalPages.value - 1)
 
-      switch (this.sortBy) {
-        case "fechaAsc":
-          arr.sort((a, b) => String(a.fecha || "").localeCompare(String(b.fecha || "")))
-          break
-        case "fechaDesc":
-          arr.sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")))
-          break
-        case "totalAsc":
-          arr.sort((a, b) => Number(a.total || 0) - Number(b.total || 0))
-          break
-        case "totalDesc":
-          arr.sort((a, b) => Number(b.total || 0) - Number(a.total || 0))
-          break
-        case "proveedor":
-          arr.sort((a, b) =>
-            this.proveedorName(a.proveedorId).localeCompare(this.proveedorName(b.proveedorId), "es")
-          )
-          break
-        case "estado":
-          arr.sort((a, b) => String(a.estado || "").localeCompare(String(b.estado || ""), "es"))
-          break
-      }
+// Items para AppCombobox
+const proveedoresItems = computed(() =>
+  proveedores.value.map(p => ({
+    id: p.proveedorId,
+    label: p.displayName,
+  }))
+)
 
-      return arr
-    },
+const productosItems = computed(() =>
+  productos.value.map(p => ({
+    id: Number(p.productoId ?? p.id),
+    label: p.nombre,
+    sublabel: p.codigoProducto ? `Cód: ${p.codigoProducto}` : null,
+  }))
+)
 
-    canPrev() {
-      return this.page > 0
-    },
+// Helpers
 
-    canNext() {
-      return this.page < this.totalPages - 1
-    },
-  },
+function formatMoney(n) {
+  const num = Number(n ?? 0)
+  return num.toLocaleString("es-AR", { style: "currency", currency: "ARS" })
+}
 
-  mounted() {
-    this.refreshAll()
-  },
+function estadoBadgeClass(estado) {
+  const e = String(estado || "").toUpperCase()
+  if (e === "PAGADA") return "text-bg-success"
+  if (e === "PENDIENTE" || e === "PARCIAL") return "text-bg-warning"
+  if (e === "ANULADA") return "text-bg-secondary"
+  return "text-bg-dark border border-secondary"
+}
 
-  watch: {
-    q() {
-      clearTimeout(this._t)
-      this._t = setTimeout(() => {
-        this.page = 0
-        this.refreshCompras()
-      }, 250)
-    },
+function toastSuccess(msg) {
+  success.value = msg
+  setTimeout(() => (success.value = ""), 2200)
+}
 
-    page() {
-      this.refreshCompras()
-    },
+function productoName(id) {
+  const pid = Number(id)
+  const p = productos.value.find((x) => Number(x.productoId ?? x.id) === pid)
+  return p?.nombre ?? `#${id}`
+}
 
-    size() {
-      this.page = 0
-    },
-  },
+function proveedorName(id) {
+  const pid = Number(id)
+  const p = proveedores.value.find((x) => Number(x.proveedorId ?? x.id) === pid)
+  if (!p) return pid ? `#${pid}` : "#—"
+  return p.displayName || `#${pid}`
+}
 
-  methods: {
-    formatMoney(n) {
-      const num = Number(n ?? 0)
-      return num.toLocaleString("es-AR", { style: "currency", currency: "ARS" })
-    },
+function mapProveedorApiToVM(raw) {
+  const proveedorId = Number(raw?.proveedorId ?? raw?.id ?? 0)
+  const tipo = (raw?.tipoProveedor ?? raw?.tipo ?? "PERSONA") === "EMPRESA" ? "EMPRESA" : "PERSONA"
+  const nombre = raw?.nombre ?? ""
+  const apellido = raw?.apellido ?? ""
+  const razonSocial = raw?.razonSocial ?? ""
+  const displayName = tipo === "EMPRESA" ? (razonSocial || "—") : `${nombre} ${apellido}`.trim() || "—"
+  return { proveedorId, tipo, displayName }
+}
 
-    estadoBadgeClass(estado) {
-      const e = String(estado || "").toUpperCase()
-      if (e === "PAGADA") return "text-bg-success"
-      if (e === "PENDIENTE" || e === "PARCIAL") return "text-bg-warning"
-      if (e === "ANULADA") return "text-bg-secondary"
-      return "text-bg-dark border border-secondary"
-    },
+function mapCompraApiToVM(raw) {
+  const c = raw?.compra ?? raw ?? {}
+  return {
+    compraId: Number(c?.compraId ?? c?.id ?? 0),
+    proveedorId: Number(c?.proveedorId ?? 0),
+    fecha: c?.fecha ?? c?.createdAt ?? "",
+    total: Number(c?.total ?? 0),
+    estado: c?.estado ?? "—",
+  }
+}
 
-    toastSuccess(msg) {
-      this.success = msg
-      setTimeout(() => (this.success = ""), 2200)
-    },
+// Actions
 
-    productoName(id) {
-      const pid = Number(id)
-      const p = this.productos.find((x) => Number(x.productoId ?? x.id) === pid)
-      return p?.nombre ?? `#${id}`
-    },
+async function refreshAll() {
+  loading.value = true
+  error.value = ""
 
-    proveedorName(id) {
-      const pid = Number(id)
-      const p = this.proveedores.find((x) => Number(x.proveedorId ?? x.id) === pid)
-      if (!p) return pid ? `#${pid}` : "#—"
-      return p.displayName || `#${pid}`
-    },
+  try {
+    const [provRes, prodRes, catRes, marcaRes, mpRes] = await Promise.all([
+      proveedoresApi.list(),
+      productosApi.list({ page: 0, size: 9999 }).catch(() => ({ data: [] })),
+      categoriasApi.list().catch(() => ({ data: [] })),
+      marcasApi.list().catch(() => ({ data: [] })),
+      metodosPagoApi.list().catch(() => ({ data: [] })),
+    ])
 
-    mapProveedorApiToVM(raw) {
-      const proveedorId = Number(raw?.proveedorId ?? raw?.id ?? 0)
-      const tipo =
-        (raw?.tipoProveedor ?? raw?.tipo ?? "PERSONA") === "EMPRESA" ? "EMPRESA" : "PERSONA"
+    proveedores.value = unwrapPage(provRes?.data).content.map(mapProveedorApiToVM)
+    productos.value = unwrapPage(prodRes?.data).content ?? prodRes?.data ?? []
+    categorias.value = unwrapPage(catRes?.data).content ?? catRes?.data ?? []
+    marcas.value = unwrapPage(marcaRes?.data).content ?? marcaRes?.data ?? []
+    metodosPago.value = (unwrapPage(mpRes?.data).content ?? mpRes?.data ?? []).map((m) => ({
+      metodoPagoId: Number(m?.metodoPagoId ?? m?.id ?? 0),
+      nombre: m?.nombre ?? m?.descripcion ?? "—",
+    }))
 
-      const nombre = raw?.nombre ?? ""
-      const apellido = raw?.apellido ?? ""
-      const razonSocial = raw?.razonSocial ?? ""
+    await refreshCompras()
+  } catch (e) {
+    error.value = e?.response?.data?.error || e?.message || "Error cargando compras"
+  } finally {
+    loading.value = false
+  }
+}
 
-      const displayName =
-        tipo === "EMPRESA" ? (razonSocial || "—") : `${nombre} ${apellido}`.trim() || "—"
+function onProductoChange(item) {
+  const id = item?.id ?? itemDraft.value.productoId
+  const prod = productos.value.find(
+    (p) => Number(p.productoId ?? p.id) === Number(id)
+  )
+  itemDraft.value.precioUnitario = prod ? Number(prod.precioCosto ?? 0) : 0
+}
 
-      return { proveedorId, tipo, displayName }
-    },
+async function refreshCompras() {
+  loading.value = true
+  error.value = ""
 
-    mapCompraApiToVM(raw) {
-      const c = raw?.compra ?? raw ?? {}
-      return {
-        compraId: Number(c?.compraId ?? c?.id ?? 0),
-        proveedorId: Number(c?.proveedorId ?? 0),
-        fecha: c?.fecha ?? c?.createdAt ?? "",
-        total: Number(c?.total ?? 0),
-        estado: c?.estado ?? "—",
-      }
-    },
+  try {
+    const res = await comprasApi.list({
+      page: page.value,
+      size: size.value,
+      search: q.value.trim() || null,
+    })
 
-    async refreshAll() {
-      this.loading = true
-      this.error = ""
+    const p = unwrapPage(res?.data)
+    compras.value = p.content.map(mapCompraApiToVM)
+    totalElements.value = p.totalElements
+    totalPages.value = p.totalPages
+    page.value = p.page
+    size.value = p.size
+  } catch (e) {
+    compras.value = []
+    totalElements.value = 0
+    totalPages.value = 1
+    error.value = e?.response?.data?.error || e?.message || "Error cargando compras"
+  } finally {
+    loading.value = false
+  }
+}
 
-      try {
-        const [provRes, prodRes, catRes, marcaRes, mpRes] = await Promise.all([
-          proveedoresApi.list(),
-          productosApi.list({ page: 0, size: 9999 }).catch(() => ({ data: [] })),
-          categoriasApi.list().catch(() => ({ data: [] })),
-          marcasApi.list().catch(() => ({ data: [] })),
-          metodosPagoApi.list().catch(() => ({ data: [] })),
-        ])
+function prevPage() {
+  if (!canPrev.value) return
+  page.value--
+}
 
-        const provPage = unwrapPage(provRes?.data)
-        this.proveedores = provPage.content.map(this.mapProveedorApiToVM)
+function nextPage() {
+  if (!canNext.value) return
+  page.value++
+}
 
-        const prodPage = unwrapPage(prodRes?.data)
-        this.productos = prodPage.content ?? prodRes?.data ?? []
+function prepareCreate() {
+  error.value = ""
+  form.value = {
+    proveedorId: null,
+    fecha: new Date().toISOString().slice(0, 10),
+    detalles: [],
+    impactarStock: false,
+  }
+  itemDraft.value = { productoId: null, cantidad: 1, precioUnitario: 0 }
+}
 
-        const catPage = unwrapPage(catRes?.data)
-        this.categorias = catPage.content ?? catRes?.data ?? []
-
-        const marcaPage = unwrapPage(marcaRes?.data)
-        this.marcas = marcaPage.content ?? marcaRes?.data ?? []
-
-        const mpPage = unwrapPage(mpRes?.data)
-        this.metodosPago = (mpPage.content ?? mpRes?.data ?? []).map((m) => ({
-          metodoPagoId: Number(m?.metodoPagoId ?? m?.id ?? 0),
-          nombre: m?.nombre ?? m?.descripcion ?? "—",
-        }))
-
-        await this.refreshCompras()
-      } catch (e) {
-        this.error = e?.response?.data?.error || e?.message || "Error cargando compras"
-      } finally {
-        this.loading = false
-      }
-    },
-
-    onProductoChange() {
-      const prod = this.productos.find(
-        (p) => Number(p.productoId ?? p.id) === Number(this.itemDraft.productoId)
-      )
-      this.itemDraft.precioUnitario = prod ? Number(prod.precioCosto ?? 0) : 0
-    },
-
-    async refreshCompras() {
-      this.loading = true
-      this.error = ""
-
-      try {
-        const res = await comprasApi.list({
-          page: this.page,
-          size: this.size,
-          search: this.q.trim() || null,
-        })
-
-        const p = unwrapPage(res?.data)
-        this.compras = p.content.map(this.mapCompraApiToVM)
-        this.totalElements = p.totalElements
-        this.totalPages = p.totalPages
-        this.page = p.page
-        this.size = p.size
-      } catch (e) {
-        this.compras = []
-        this.totalElements = 0
-        this.totalPages = 1
-        this.error = e?.response?.data?.error || e?.message || "Error cargando compras"
-      } finally {
-        this.loading = false
-      }
-    },
-
-    prevPage() {
-      if (!this.canPrev) return
-      this.page--
-    },
-
-    nextPage() {
-      if (!this.canNext) return
-      this.page++
-    },
-
-    prepareCreate() {
-      this.error = ""
-      this.form = {
-        proveedorId: null,
-        fecha: new Date().toISOString().slice(0, 10),
-        detalles: [],
-        impactarStock: false,
-      }
-      this.itemDraft = { productoId: null, cantidad: 1, precioUnitario: 0 }
-    },
-
-    prepareNewProducto() {
-  this.error = ""
-  this.nuevoProducto = {
+function prepareNewProducto() {
+  error.value = ""
+  nuevoProducto.value = {
     nombre: "",
     codigoProducto: "",
     categoriaId: null,
@@ -954,250 +917,210 @@ export default {
     precioMayorista: 0,
     stockMinimo: 0,
   }
-},
-
-    async crearProducto() {
-      this.loading = true
-      this.error = ""
-
-      try {
-        const session = getSession() ?? null
-        const userId = Number(session?.userId ?? 1)
-
-       const payload = {
-  nombre: String(this.nuevoProducto.nombre || "").trim(),
-  codigoProducto: String(this.nuevoProducto.codigoProducto || "").trim() || null,
-  categoriaId: this.nuevoProducto.categoriaId ? Number(this.nuevoProducto.categoriaId) : null,
-  marcaId: this.nuevoProducto.marcaId ? Number(this.nuevoProducto.marcaId) : null,
-  precioCosto: Number(this.nuevoProducto.precioCosto || 0),
-  precioVenta: Number(this.nuevoProducto.precioVenta || 0),
-  precioMayorista: Number(this.nuevoProducto.precioMayorista || 0),
-  stockMinimo: Number(this.nuevoProducto.stockMinimo || 0),
-  userId,
 }
-        if (!payload.nombre) throw new Error("Ingresá el nombre del producto.")
-        if (payload.precioCosto < 0) throw new Error("Precio costo inválido.")
-        if (payload.precioVenta < 0) throw new Error("Precio venta inválido.")
-        if (payload.precioMayorista < 0) throw new Error("Precio mayorista inválido.")
-        if (payload.stockMinimo < 0) throw new Error("Stock mínimo inválido.")
 
-        await productosApi.create(payload)
+async function crearProducto() {
+  loading.value = true
+  error.value = ""
 
-        this.toastSuccess("Producto creado ✅")
-        this.prepareNewProducto()
+  try {
+    const session = getSession() ?? null
+    const userId = Number(session?.userId ?? 1)
 
-        const prodRes = await productosApi.list({ page: 0, size: 9999 }).catch(() => ({ data: [] }))
-        const prodPage = unwrapPage(prodRes?.data)
-        this.productos = prodPage.content ?? prodRes?.data ?? []
-      } catch (e) {
-        this.error = e?.response?.data?.error || e?.message || "Error creando producto"
-      } finally {
-        this.loading = false
-      }
-    },
+    const payload = {
+      nombre: String(nuevoProducto.value.nombre || "").trim(),
+      codigoProducto: String(nuevoProducto.value.codigoProducto || "").trim() || null,
+      categoriaId: nuevoProducto.value.categoriaId ? Number(nuevoProducto.value.categoriaId) : null,
+      marcaId: nuevoProducto.value.marcaId ? Number(nuevoProducto.value.marcaId) : null,
+      precioCosto: Number(nuevoProducto.value.precioCosto || 0),
+      precioVenta: Number(nuevoProducto.value.precioVenta || 0),
+      precioMayorista: Number(nuevoProducto.value.precioMayorista || 0),
+      stockMinimo: Number(nuevoProducto.value.stockMinimo || 0),
+      userId,
+    }
 
-    addItem() {
-      this.error = ""
-      const productoId = Number(this.itemDraft.productoId || 0)
-      const cantidad = Number(this.itemDraft.cantidad || 0)
-      const precioUnitario = Number(this.itemDraft.precioUnitario || 0)
+    if (!payload.nombre) throw new Error("Ingresá el nombre del producto.")
+    if (payload.precioCosto < 0) throw new Error("Precio costo inválido.")
+    if (payload.precioVenta < 0) throw new Error("Precio venta inválido.")
+    if (payload.precioMayorista < 0) throw new Error("Precio mayorista inválido.")
+    if (payload.stockMinimo < 0) throw new Error("Stock mínimo inválido.")
 
-      if (!productoId) return (this.error = "Elegí un producto")
-      if (cantidad <= 0) return (this.error = "Cantidad inválida")
-      if (precioUnitario < 0) return (this.error = "Precio inválido")
+    await productosApi.create(payload)
+    toastSuccess("Producto creado correctamente.")
+    prepareNewProducto()
 
-      this.form.detalles.push({ productoId, cantidad, precioUnitario })
-      this.itemDraft = { productoId: null, cantidad: 1, precioUnitario: 0 }
-    },
-
-    removeItem(idx) {
-      this.form.detalles.splice(idx, 1)
-    },
-
-    async crearCompra() {
-      this.loading = true
-      this.error = ""
-
-      try {
-        const session = getSession() ?? null
-        const userId = Number(session?.userId ?? 1)
-
-        if (!this.form.proveedorId) throw new Error("Seleccioná proveedor")
-        if (!this.form.detalles.length) throw new Error("Agregá al menos 1 ítem")
-
-        const detallesConPrecio = this.form.detalles.map((d) => {
-          const prod = this.productos.find((p) => Number(p.productoId ?? p.id) === Number(d.productoId))
-          if (!prod) throw new Error(`Producto ${d.productoId} no existe`)
-          const precioUnitario = Number(prod.precioCosto ?? d.precioUnitario ?? 0)
-
-          return {
-            productoId: d.productoId,
-            cantidad: d.cantidad,
-            precioUnitario,
-          }
-        })
-
-        const payload = {
-          userId,
-          proveedorId: Number(this.form.proveedorId),
-          fecha: this.form.fecha,
-          detalles: detallesConPrecio,
-          impactaStock: Boolean(this.form.impactarStock),
-        }
-
-        await comprasApi.create(payload)
-        this.toastSuccess("Compra creada ✅")
-
-        this.page = 0
-        await this.refreshCompras()
-      } catch (e) {
-        this.error = e?.response?.data?.error || e?.message || "Error creando compra"
-      } finally {
-        this.loading = false
-      }
-    },
-
-    async openDetalle(compraId) {
-      this.detalle = null
-      this.pagosDetalle = []
-      this.loading = true
-      this.error = ""
-
-      try {
-        const [cRes, pRes] = await Promise.all([
-          comprasApi.porId(compraId),
-          pagosProveedorApi.porCompra(compraId),
-        ])
-
-        this.detalle = cRes?.data ?? null
-
-        const pagosPage = unwrapPage(pRes?.data)
-        this.pagosDetalle = pagosPage.content ?? pRes?.data ?? []
-      } catch (e) {
-        this.error = e?.response?.data?.error || e?.message || "Error cargando detalle"
-      } finally {
-        this.loading = false
-      }
-    },
-
-    async preparePago(compraId) {
-      this.error = ""
-      this.pagoForm = { compraId, monto: 0, metodoPagoId: null, referencia: "" }
-      this.compraSeleccionada = this.compras.find((c) => Number(c.compraId) === Number(compraId)) || null
-      this.pagadoCompraSeleccionada = 0
-      this.saldoCompraSeleccionada = Number(this.compraSeleccionada?.total || 0)
-
-      try {
-        const res = await pagosProveedorApi.porCompra(compraId)
-        const pagosPage = unwrapPage(res?.data)
-        const pagos = pagosPage.content ?? []
-
-        const pagado = pagos.reduce((acc, p) => acc + Number(p.monto || 0), 0)
-        const total = Number(this.compraSeleccionada?.total || 0)
-        const saldo = Math.max(total - pagado, 0)
-
-        this.pagadoCompraSeleccionada = pagado
-        this.saldoCompraSeleccionada = saldo
-        this.pagoForm.monto = saldo
-      } catch {
-        this.pagadoCompraSeleccionada = 0
-        this.saldoCompraSeleccionada = Number(this.compraSeleccionada?.total || 0)
-        this.pagoForm.monto = this.saldoCompraSeleccionada
-      }
-    },
-
-    async registrarPago() {
-      this.loading = true
-      this.error = ""
-
-      try {
-        const compraId = Number(this.pagoForm.compraId || 0)
-        const monto = Number(this.pagoForm.monto || 0)
-        const metodoPagoId = Number(this.pagoForm.metodoPagoId || 0)
-
-        if (!compraId) throw new Error("Compra inválida")
-        if (monto <= 0) throw new Error("Monto inválido")
-        if (!metodoPagoId) throw new Error("Elegí un método de pago")
-        if (this.saldoCompraSeleccionada > 0 && monto > this.saldoCompraSeleccionada) {
-          throw new Error("El monto supera el saldo pendiente de la compra.")
-        }
-
-        const payload = {
-          compraId,
-          metodoPagoId,
-          monto,
-          referencia: (this.pagoForm.referencia || "").trim() || null,
-        }
-
-        await pagosProveedorApi.create(payload)
-        this.toastSuccess("Pago registrado ✅")
-
-        await this.refreshCompras()
-
-        if (this.detalle?.compra?.compraId === compraId) {
-          await this.openDetalle(compraId)
-        }
-
-        await this.preparePago(compraId)
-      } catch (e) {
-        this.error = e?.response?.data?.error || e?.message || "Error registrando pago"
-      } finally {
-        this.loading = false
-      }
-    },
-  },
+    const prodRes = await productosApi.list({ page: 0, size: 9999 }).catch(() => ({ data: [] }))
+    productos.value = unwrapPage(prodRes?.data).content ?? prodRes?.data ?? []
+  } catch (e) {
+    error.value = e?.response?.data?.error || e?.message || "Error creando producto"
+  } finally {
+    loading.value = false
+  }
 }
+
+function addItem() {
+  error.value = ""
+  const productoId = Number(itemDraft.value.productoId || 0)
+  const cantidad = Number(itemDraft.value.cantidad || 0)
+  const precioUnitario = Number(itemDraft.value.precioUnitario || 0)
+
+  if (!productoId) { error.value = "Elegí un producto"; return }
+  if (cantidad <= 0) { error.value = "Cantidad inválida"; return }
+  if (precioUnitario < 0) { error.value = "Precio inválido"; return }
+
+  form.value.detalles.push({ productoId, cantidad, precioUnitario })
+  itemDraft.value = { productoId: null, cantidad: 1, precioUnitario: 0 }
+}
+
+function removeItem(idx) {
+  form.value.detalles.splice(idx, 1)
+}
+
+async function crearCompra() {
+  loading.value = true
+  error.value = ""
+
+  try {
+    const session = getSession() ?? null
+    const userId = Number(session?.userId ?? 1)
+
+    if (!form.value.proveedorId) throw new Error("Seleccioná proveedor")
+    if (!form.value.detalles.length) throw new Error("Agregá al menos 1 ítem")
+
+    const detallesConPrecio = form.value.detalles.map((d) => {
+      const prod = productos.value.find((p) => Number(p.productoId ?? p.id) === Number(d.productoId))
+      if (!prod) throw new Error(`Producto ${d.productoId} no encontrado`)
+      return {
+        productoId: d.productoId,
+        cantidad: d.cantidad,
+        precioUnitario: Number(prod.precioCosto ?? d.precioUnitario ?? 0),
+      }
+    })
+
+    await comprasApi.create({
+      userId,
+      proveedorId: Number(form.value.proveedorId),
+      fecha: form.value.fecha,
+      detalles: detallesConPrecio,
+      impactaStock: Boolean(form.value.impactarStock),
+    })
+
+    toastSuccess("Compra creada correctamente.")
+    page.value = 0
+    await refreshCompras()
+  } catch (e) {
+    error.value = e?.response?.data?.error || e?.message || "Error creando compra"
+  } finally {
+    loading.value = false
+  }
+}
+
+async function openDetalle(compraId) {
+  detalle.value = null
+  pagosDetalle.value = []
+  loading.value = true
+  error.value = ""
+
+  try {
+    const [cRes, pRes] = await Promise.all([
+      comprasApi.porId(compraId),
+      pagosProveedorApi.porCompra(compraId),
+    ])
+
+    detalle.value = cRes?.data ?? null
+    pagosDetalle.value = unwrapPage(pRes?.data).content ?? pRes?.data ?? []
+  } catch (e) {
+    error.value = e?.response?.data?.error || e?.message || "Error cargando detalle"
+  } finally {
+    loading.value = false
+  }
+}
+
+async function preparePago(compraId) {
+  error.value = ""
+  pagoForm.value = { compraId, monto: 0, metodoPagoId: null, referencia: "" }
+  compraSeleccionada.value = compras.value.find((c) => Number(c.compraId) === Number(compraId)) || null
+  pagadoCompraSeleccionada.value = 0
+  saldoCompraSeleccionada.value = Number(compraSeleccionada.value?.total || 0)
+
+  try {
+    const res = await pagosProveedorApi.porCompra(compraId)
+    const pagos = unwrapPage(res?.data).content ?? []
+    const pagado = pagos.reduce((acc, p) => acc + Number(p.monto || 0), 0)
+    const total = Number(compraSeleccionada.value?.total || 0)
+    const saldo = Math.max(total - pagado, 0)
+
+    pagadoCompraSeleccionada.value = pagado
+    saldoCompraSeleccionada.value = saldo
+    pagoForm.value.monto = saldo
+  } catch {
+    pagadoCompraSeleccionada.value = 0
+    saldoCompraSeleccionada.value = Number(compraSeleccionada.value?.total || 0)
+    pagoForm.value.monto = saldoCompraSeleccionada.value
+  }
+}
+
+async function registrarPago() {
+  loading.value = true
+  error.value = ""
+
+  try {
+    const compraId = Number(pagoForm.value.compraId || 0)
+    const monto = Number(pagoForm.value.monto || 0)
+    const metodoPagoId = Number(pagoForm.value.metodoPagoId || 0)
+
+    if (!compraId) throw new Error("Compra inválida")
+    if (monto <= 0) throw new Error("Monto inválido")
+    if (!metodoPagoId) throw new Error("Elegí un método de pago")
+    if (saldoCompraSeleccionada.value > 0 && monto > saldoCompraSeleccionada.value) {
+      throw new Error("El monto supera el saldo pendiente de la compra.")
+    }
+
+    await pagosProveedorApi.create({
+      compraId,
+      metodoPagoId,
+      monto,
+      referencia: (pagoForm.value.referencia || "").trim() || null,
+    })
+
+    toastSuccess("Pago registrado correctamente.")
+    await refreshCompras()
+
+    if (detalle.value?.compra?.compraId === compraId) {
+      await openDetalle(compraId)
+    }
+
+    await preparePago(compraId)
+  } catch (e) {
+    error.value = e?.response?.data?.error || e?.message || "Error registrando pago"
+  } finally {
+    loading.value = false
+  }
+}
+
+// Watchers
+
+let _t = null
+watch(q, () => {
+  clearTimeout(_t)
+  _t = setTimeout(() => {
+    page.value = 0
+    refreshCompras()
+  }, 250)
+})
+
+watch(page, () => {
+  refreshCompras()
+})
+
+onMounted(() => {
+  refreshAll()
+})
 </script>
 
 <style scoped>
 .compras-page {
   min-height: 100%;
-}
-
-.modal-round {
-  border-radius: 18px;
-}
-
-.filters-bar {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.filters-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  flex: 1;
-  min-width: 0;
-}
-
-.table-main {
-  color: #fff;
-  font-weight: 600;
-}
-
-.table-sub {
-  color: rgba(255,255,255,.58);
-  font-size: .82rem;
-}
-
-.footer-summary {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-top: 16px;
-}
-
-.pager-minimal {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
 }
 
 .detalle-top {
@@ -1207,21 +1130,10 @@ export default {
   flex-wrap: wrap;
 }
 
-.detalle-title {
-  color: #fff;
-  font-weight: 800;
-  font-size: 1.05rem;
-}
-
+.detalle-title,
 .detalle-total {
   color: #fff;
   font-weight: 800;
   font-size: 1.05rem;
-}
-
-@media (max-width: 992px) {
-  .filters-grid {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

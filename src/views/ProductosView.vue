@@ -339,8 +339,7 @@ async function importarExcel() {
     okMsg.value = `Importación finalizada · Creados: ${creados} · Actualizados: ${actualizados}`
 
     if (Array.isArray(data?.errores) && data.errores.length > 0) {
-      infoMsg.value = `Errores en ${data.errores.length} filas (ver consola)`
-      console.log("Errores importación Excel:", data.errores)
+      infoMsg.value = `Se encontraron errores en ${data.errores.length} fila(s): ${data.errores.slice(0, 3).map(e => e?.mensaje || e?.error || JSON.stringify(e)).join(' · ')}${data.errores.length > 3 ? ' ...' : ''}`
     }
 
     clearExcelFile()
@@ -1000,9 +999,7 @@ onMounted(async () => {
       <div class="card-body">
         <div class="section-header mb-3">
           <h2 class="section-title mb-0">Nuevo producto</h2>
-          <div class="helper-text">
-            userId detectado: <b>{{ userId ?? "-" }}</b>
-          </div>
+          <div class="helper-text">Completá los datos del producto y hacé clic en Crear.</div>
         </div>
 
         <div class="row g-3 align-items-end">
@@ -1093,7 +1090,7 @@ onMounted(async () => {
         </div>
 
         <div class="helper-text mt-3">
-          Podés crear productos manualmente o importarlos por Excel. El costo queda oculto para que no esté visible a empleados.
+          Podés crear productos manualmente o importarlos por Excel.
         </div>
       </div>
     </div>
@@ -1123,7 +1120,7 @@ onMounted(async () => {
           </div>
 
           <div class="col-12 col-md-2">
-            <label class="form-label field-label">Δ stock</label>
+            <label class="form-label field-label">Cantidad a ajustar</label>
             <input v-model.number="stockDelta" type="number" class="form-control app-input" />
           </div>
         </div>
@@ -1360,7 +1357,7 @@ onMounted(async () => {
         </div>
 
         <div class="helper-text mt-3">
-          El costo queda oculto por defecto. El ajuste rápido de stock usa actualización directa y no registra movimiento.
+          El costo queda oculto por defecto. Usá los botones +/- para ajustar el stock rápidamente.
         </div>
       </div>
     </div>

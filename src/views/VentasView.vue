@@ -113,7 +113,7 @@ function round2(n) {
 function normalizePct(v) {
   const n = Number(String(v ?? "0").replace(",", "."))
   if (!Number.isFinite(n)) return 0
-  if (n < 0) return 0
+  if (n < -100) return -100
   if (n > 100) return 100
   return round2(n)
 }
@@ -294,7 +294,7 @@ function recalcItem(it) {
   const cost = Number(it.cost ?? 0)
   const qty = Number.isFinite(Number(it.qty)) ? Number(it.qty) : 0
 
-  const price = round2(basePrice * (1 - porcentajeAjuste / 100))
+  const price = round2(basePrice * (1 + porcentajeAjuste / 100))
   const subtotal = round2(price * qty)
 
   let invalidReason = ""
@@ -380,7 +380,12 @@ function updateItemQty(itemId, v) {
 }
 
 function updateItemPct(itemId, v) {
-  const pct = normalizePct(v)
+  const raw = String(v ?? "")
+
+  // Dejamos escribir libremente sin recalcular mientras el valor es incompleto
+  if (raw === "-" || raw === "" || raw.endsWith(",") || raw.endsWith(".") || raw === "-0") return
+
+  const pct = normalizePct(raw)
   items.value = items.value.map((it) =>
     it.id === itemId ? recalcItem({ ...it, porcentajeAjuste: pct }) : it
   )
@@ -1021,7 +1026,7 @@ onBeforeUnmount(() => {
               @keydown="onSearchKeydown"
             />
             <div class="helper-text mt-1">
-              Tip: si tipeás el código exacto y apretás Enter, agrega 1 unidad.
+              Consejo: si ingresás el código exacto y presionás Enter, agrega 1 unidad automáticamente.
             </div>
           </div>
         </div>
@@ -1064,7 +1069,7 @@ onBeforeUnmount(() => {
               <tr>
                 <th>Producto</th>
                 <th style="width: 130px">Base</th>
-                <th style="width: 140px">Desc. %</th>
+                <th style="width: 140px">Porcentaje(+/-)</th>
                 <th style="width: 140px">Final</th>
                 <th style="width: 120px">Cant.</th>
                 <th style="width: 160px">Subtotal</th>
@@ -1086,8 +1091,9 @@ onBeforeUnmount(() => {
                     :value="it.porcentajeAjuste"
                     inputmode="decimal"
                     @input="updateItemPct(it.id, $event.target.value)"
+                    @change="updateItemPct(it.id, $event.target.value)"
+                    placeholder="-10 desc / 10 aum"
                     :disabled="!canSell"
-                    placeholder="0"
                   />
                 </td>
 

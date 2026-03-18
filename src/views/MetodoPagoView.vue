@@ -197,15 +197,12 @@ onMounted(fetchAll)
           <table class="table table-dark table-hover align-middle app-table mb-0">
             <thead>
               <tr>
-                <th style="width: 110px">Método</th>
                 <th>Nombre</th>
                 <th class="text-end" style="width: 220px">Acciones</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="m in items" :key="m.id">
-                <td class="text-secondary">#{{ m.id }}</td>
-
                 <td>
                   <span v-if="editId !== m.id" class="table-main">
                     {{ m.nombre }}

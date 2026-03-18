@@ -283,7 +283,6 @@ onMounted(fetchUsuarios)
             <table class="table table-dark table-hover align-middle app-table mb-0">
               <thead>
                 <tr>
-                  <th style="width: 90px">Usuario</th>
                   <th>Nombre</th>
                   <th>Email</th>
                   <th style="width: 180px">Roles</th>
@@ -293,8 +292,6 @@ onMounted(fetchUsuarios)
 
               <tbody>
                 <tr v-for="u in usuarios" :key="u.userId">
-                  <td class="text-secondary">#{{ u.userId }}</td>
-
                   <td>
                     <div class="table-main">{{ u.name || "—" }}</div>
                   </td>
@@ -341,7 +338,7 @@ onMounted(fetchUsuarios)
           </div>
 
           <div class="helper-text mt-3">
-            Para crear, editar o eliminar usuarios necesitás el permiso <b>usuarios:gestionar</b>.
+            Solo los administradores pueden crear, editar o eliminar usuarios.
           </div>
         </div>
       </div>
