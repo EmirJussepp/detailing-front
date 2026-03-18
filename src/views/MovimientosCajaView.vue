@@ -72,9 +72,17 @@ function formatDateTime(v) {
   if (!v) return "—"
   try {
     const text = String(v).includes("T") ? String(v) : `${v}T00:00:00`
-    return new Date(text).toLocaleString("es-AR")
+    return new Date(text).toLocaleString("es-AR", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
   } catch {
-    return v
+    return String(v)
   }
 }
 

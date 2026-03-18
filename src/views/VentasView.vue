@@ -615,6 +615,9 @@ async function devolverVentaConfirmed(ventaId) {
     await refreshProductos(productSearch.value?.trim() || null)
     await refreshCaja()
 
+    // ✅ AGREGAR ESTO — refresca la tabla de ventas del cliente
+    if (devClienteId.value) await buscarVentasCliente()
+
     window.dispatchEvent(new Event("cuentaCorriente:changed"))
   } catch (e) {
     setErr(pickErr(e, "Error devolviendo venta."))
@@ -636,6 +639,61 @@ function devolverVenta(ventaId) {
     onConfirm: () => devolverVentaConfirmed(ventaId),
   })
 }
+
+const devClienteId = ref("")
+const devVentas = ref([])
+const devLoading = ref(false)
+const devError = ref("")
+ 
+const devClienteEsMayorista = computed(
+  () => clientes.value.find((c) => String(c.id) === String(devClienteId.value))?.tipoClienteId === 2
+)
+ 
+async function buscarVentasCliente() {
+  devError.value = ""
+  devVentas.value = []
+ 
+  if (!devClienteId.value) {
+    devError.value = "Seleccioná un cliente."
+    return
+  }
+ 
+  devLoading.value = true
+  try {
+    const { data } = await ventasApi.porClienteId(Number(devClienteId.value))
+    const arr = Array.isArray(data) ? data : (data?.content ?? [])
+    // Mostrar solo no anuladas
+    devVentas.value = arr
+      .filter((v) => String(v.estado ?? "").toUpperCase() !== "ANULADA")
+      .map((v) => ({
+        ventaId: Number(v.ventaId ?? v.id),
+        total: Number(v.total ?? 0),
+        estado: String(v.estado ?? "PENDIENTE").toUpperCase(),
+        fecha: v.fecha ?? null,
+      }))
+      .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
+ 
+    if (!devVentas.value.length) devError.value = "No hay ventas activas para este cliente."
+  } catch (e) {
+    devError.value = pickErr(e, "Error buscando ventas.")
+  } finally {
+    devLoading.value = false
+  }
+}
+ 
+function formatDateShort(v) {
+  if (!v) return "—"
+  try {
+    return new Date(v).toLocaleString("es-AR", {
+      day: "2-digit", month: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    })
+  } catch { return String(v) }
+}
+
+
+
+
 
 function normalizePago(p) {
   const id = Number(p?.pagoId ?? p?.id ?? 0)
@@ -974,6 +1032,7 @@ onBeforeUnmount(() => {
               {{ devolviendoVenta ? "Devolviendo..." : "Devolver venta" }}
             </button>
           </div>
+
         </div>
       </div>
     </div>
@@ -1280,6 +1339,81 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+    <div class="card bg-panel border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <div class="section-header mb-3">
+      <h2 class="section-title mb-0">Devolver venta anterior</h2>
+      <div class="helper-text">Buscá las ventas activas de un cliente para devolverlas.</div>
+    </div>
+ 
+    <div class="row g-3 align-items-end">
+      <div class="col-12 col-md-6">
+        <label class="form-label field-label">Cliente</label>
+        <select v-model="devClienteId" class="form-select app-input" :disabled="devLoading">
+          <option value="">Seleccionar cliente…</option>
+          <option v-for="c in clientes" :key="c.id" :value="String(c.id)">
+            {{ c.nombre }} {{ c.apellido || "" }} — DNI: {{ c.dni || "-" }}
+            {{ c.tipoClienteId === 2 ? "🏷️ MAYORISTA" : "" }}
+          </option>
+        </select>
+      </div>
+ 
+      <div class="col-12 col-md-3">
+        <button
+          class="btn btn-outline-light w-100"
+          @click="buscarVentasCliente"
+          :disabled="devLoading || !devClienteId"
+        >
+          {{ devLoading ? "Buscando..." : "Buscar ventas" }}
+        </button>
+      </div>
+    </div>
+ 
+    <div v-if="devError" class="alert alert-danger py-2 mt-3 mb-0">{{ devError }}</div>
+ 
+    <div v-if="devVentas.length" class="table-responsive mt-3">
+      <table class="table table-dark table-hover align-middle app-table mb-0">
+        <thead>
+          <tr>
+            <th style="width: 90px">#Venta</th>
+            <th>Fecha</th>
+            <th style="width: 160px" class="text-end">Total</th>
+            <th style="width: 120px">Estado</th>
+            <th style="width: 130px" class="text-end">Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="v in devVentas" :key="v.ventaId">
+            <td class="text-secondary">#{{ v.ventaId }}</td>
+            <td class="text-secondary">{{ formatDateShort(v.fecha) }}</td>
+            <td class="text-end fw-bold">$ {{ formatMoney(v.total) }}</td>
+            <td>
+              <span
+                class="badge"
+                :class="{
+                  'badge-soft-success': v.estado === 'PAGADA',
+                  'badge-soft-warning': v.estado === 'PARCIAL',
+                  'badge-soft-secondary': v.estado === 'PENDIENTE',
+                }"
+              >
+                {{ v.estado }}
+              </span>
+            </td>
+            <td class="text-end">
+              <button
+                class="btn btn-sm btn-outline-danger"
+                :disabled="devolviendoVenta || !canSell"
+                @click="devolverVenta(v.ventaId)"
+              >
+                Devolver
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
   </div>
 </template>
 

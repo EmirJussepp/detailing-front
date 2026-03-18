@@ -22,10 +22,33 @@ const form = reactive({
   name: "",
   email: "",
   password: "",
-  confirmPassword: "", // ← nuevo
+  confirmPassword: "",
   role: "EMPLEADO",
   shift: "MANIANA",
 })
+
+// ✅ modal de confirmación
+const confirmState = ref({
+  open: false,
+  title: "",
+  message: "",
+  onConfirm: null,
+})
+
+function openConfirm({ title, message, onConfirm }) {
+  confirmState.value = { open: true, title, message, onConfirm }
+}
+
+function closeConfirm() {
+  confirmState.value = { open: false, title: "", message: "", onConfirm: null }
+}
+
+async function confirmAccept() {
+  const action = confirmState.value.onConfirm
+  closeConfirm()
+  if (typeof action === "function") await action()
+}
+
 function normalizeEmail(v) {
   return String(v || "").trim().toLowerCase()
 }
@@ -39,10 +62,11 @@ function resetForm() {
   form.name = ""
   form.email = ""
   form.password = ""
-  form.confirmPassword = "" // ← nuevo
+  form.confirmPassword = ""
   form.role = "EMPLEADO"
   form.shift = "MANIANA"
 }
+
 function roleBadgeClass(role) {
   const r = String(role || "").toUpperCase()
   if (r === "ADMIN") return "text-bg-warning"
@@ -98,14 +122,12 @@ function openCreate() {
 function openEdit(u) {
   resetAlerts()
   resetForm()
-
   isEditing.value = true
   editingId.value = u.userId ?? u.id
   form.name = u.name ?? ""
   form.email = u.email ?? ""
   form.password = ""
   form.role = Array.isArray(u.roles) && u.roles.includes("ADMIN") ? "ADMIN" : "EMPLEADO"
-
   modalOpen.value = true
 }
 
@@ -125,12 +147,10 @@ function validateForm() {
   }
 
   const email = normalizeEmail(form.email)
-
   if (!email) {
     error.value = "Ingresá email."
     return false
   }
-
   if (!email.includes("@")) {
     error.value = "Email inválido."
     return false
@@ -176,26 +196,21 @@ async function submitUsuario() {
   try {
     if (isEditing.value) {
       const rawPassword = String(form.password || "").trim()
-
-      const payload = {
+      await usuariosApi.update(editingId.value, {
         userId: editingId.value,
         name: String(form.name).trim(),
         email: normalizeEmail(form.email),
         password: rawPassword || null,
         roles: [String(form.role)],
-      }
-
-      await usuariosApi.update(editingId.value, payload)
+      })
       success.value = "Usuario actualizado correctamente."
     } else {
-      const payload = {
+      await usuariosApi.create({
         name: String(form.name).trim(),
         email: normalizeEmail(form.email),
         password: String(form.password),
         roles: [String(form.role)],
-      }
-
-      await usuariosApi.create(payload)
+      })
       success.value = "Usuario creado correctamente."
     }
 
@@ -212,7 +227,8 @@ async function submitUsuario() {
   }
 }
 
-async function removeUsuario(u) {
+// ✅ usa modal en vez de confirm()
+function removeUsuario(u) {
   if (!canManage.value) {
     error.value = "Sin permiso para gestionar usuarios."
     return
@@ -221,24 +237,27 @@ async function removeUsuario(u) {
   const id = u.userId ?? u.id
   const nombre = u.name ?? "usuario"
 
-  if (!confirm(`Eliminar "${nombre}"?`)) return
-
-  loading.value = true
-  resetAlerts()
-
-  try {
-    await usuariosApi.delete(id)
-    success.value = "Usuario eliminado correctamente."
-    await fetchUsuarios()
-  } catch (e) {
-    error.value =
-      e?.response?.data?.error ||
-      e?.response?.data?.message ||
-      e?.message ||
-      "No se pudo eliminar el usuario."
-  } finally {
-    loading.value = false
-  }
+  openConfirm({
+    title: "Eliminar usuario",
+    message: `¿Seguro que querés eliminar a "${nombre}"? Esta acción no se puede deshacer.`,
+    onConfirm: async () => {
+      loading.value = true
+      resetAlerts()
+      try {
+        await usuariosApi.delete(id)
+        success.value = "Usuario eliminado correctamente."
+        await fetchUsuarios()
+      } catch (e) {
+        error.value =
+          e?.response?.data?.error ||
+          e?.response?.data?.message ||
+          e?.message ||
+          "No se pudo eliminar el usuario."
+      } finally {
+        loading.value = false
+      }
+    },
+  })
 }
 
 onMounted(fetchUsuarios)
@@ -259,7 +278,6 @@ onMounted(fetchUsuarios)
         <button class="btn btn-outline-light" @click="fetchUsuarios" :disabled="loading || !canView">
           {{ loading ? "Actualizando..." : "Actualizar" }}
         </button>
-
         <button class="btn btn-primary btn-accent" @click="openCreate" :disabled="loading || !canManage">
           Nuevo usuario
         </button>
@@ -287,9 +305,7 @@ onMounted(fetchUsuarios)
 
           <div v-else-if="usuarios.length === 0" class="empty-block">
             <div class="empty-title">No hay usuarios para mostrar</div>
-            <div class="helper-text">
-              Creá un usuario nuevo para comenzar.
-            </div>
+            <div class="helper-text">Creá un usuario nuevo para comenzar.</div>
           </div>
 
           <div v-else class="table-responsive">
@@ -303,36 +319,25 @@ onMounted(fetchUsuarios)
                   <th class="text-end" style="width: 220px">Acciones</th>
                 </tr>
               </thead>
-
               <tbody>
                 <tr v-for="u in usuarios" :key="u.userId">
                   <td class="text-secondary">#{{ u.userId }}</td>
-
-                  <td>
-                    <div class="table-main">{{ u.name || "—" }}</div>
-                  </td>
-
+                  <td><div class="table-main">{{ u.name || "—" }}</div></td>
                   <td class="text-secondary">{{ u.email || "—" }}</td>
-
                   <td>
                     <template v-if="u.roles && u.roles.length">
                       <span v-for="r in u.roles" :key="r" class="badge rounded-pill me-1" :class="roleBadgeClass(r)">
                         {{ r }}
                       </span>
                     </template>
-
                     <span v-else class="text-secondary">—</span>
                   </td>
-
                   <td class="text-end">
                     <div class="d-flex justify-content-end gap-2 flex-wrap">
-                      <button class="btn btn-sm btn-outline-light" @click="openEdit(u)"
-                        :disabled="loading || !canManage">
+                      <button class="btn btn-sm btn-outline-light" @click="openEdit(u)" :disabled="loading || !canManage">
                         Editar
                       </button>
-
-                      <button class="btn btn-sm btn-outline-danger" @click="removeUsuario(u)"
-                        :disabled="loading || !canManage">
+                      <button class="btn btn-sm btn-outline-danger" @click="removeUsuario(u)" :disabled="loading || !canManage">
                         Eliminar
                       </button>
                     </div>
@@ -349,21 +354,15 @@ onMounted(fetchUsuarios)
       </div>
     </template>
 
+    <!-- Modal crear/editar -->
     <div v-if="modalOpen" class="modal-backdrop-custom" @click.self="closeModal">
       <div class="modal-custom">
         <div class="section-header mb-3">
           <div>
-            <div class="section-title">
-              {{ isEditing ? "Editar usuario" : "Nuevo usuario" }}
-            </div>
-            <div class="helper-text">
-              Completá los datos básicos del usuario.
-            </div>
+            <div class="section-title">{{ isEditing ? "Editar usuario" : "Nuevo usuario" }}</div>
+            <div class="helper-text">Completá los datos básicos del usuario.</div>
           </div>
-
-          <button class="btn btn-sm btn-outline-light" @click="closeModal" :disabled="loading">
-            Cerrar
-          </button>
+          <button class="btn btn-sm btn-outline-light" @click="closeModal" :disabled="loading">Cerrar</button>
         </div>
 
         <div v-if="error" class="alert alert-danger py-2 mb-3">{{ error }}</div>
@@ -373,20 +372,16 @@ onMounted(fetchUsuarios)
             <label class="form-label field-label">Nombre</label>
             <input class="form-control app-input" v-model="form.name" :disabled="loading" />
           </div>
-
           <div class="col-12">
             <label class="form-label field-label">Email</label>
             <input class="form-control app-input" v-model="form.email" :disabled="loading" />
           </div>
-
           <div class="col-12">
             <label class="form-label field-label">
               {{ isEditing ? "Nueva contraseña (opcional)" : "Contraseña" }}
             </label>
             <input class="form-control app-input" type="password" v-model="form.password" :disabled="loading" />
           </div>
-
-          <!-- ← nuevo campo -->
           <div class="col-12">
             <label class="form-label field-label">
               {{ isEditing ? "Repetir nueva contraseña" : "Repetir contraseña" }}
@@ -394,28 +389,34 @@ onMounted(fetchUsuarios)
             <input class="form-control app-input" type="password" v-model="form.confirmPassword" :disabled="loading"
               :placeholder="isEditing ? 'Solo si cambiás la contraseña' : ''" />
           </div>
-
           <div class="col-12">
             <label class="form-label field-label">Rol</label>
             <select class="form-select app-input" v-model="form.role" :disabled="loading">
               <option value="EMPLEADO">EMPLEADO</option>
               <option value="ADMIN">ADMIN</option>
             </select>
-
-            <div class="helper-text mt-2">
-              EMPLEADO: operación general · ADMIN: acceso completo.
-            </div>
+            <div class="helper-text mt-2">EMPLEADO: operación general · ADMIN: acceso completo.</div>
           </div>
         </div>
 
         <div class="d-flex gap-2 justify-content-end mt-4">
-          <button class="btn btn-outline-light" @click="closeModal" :disabled="loading">
-            Cancelar
-          </button>
-
+          <button class="btn btn-outline-light" @click="closeModal" :disabled="loading">Cancelar</button>
           <button class="btn btn-primary btn-accent" @click="submitUsuario" :disabled="loading || !canManage">
             {{ loading ? "Guardando..." : isEditing ? "Guardar cambios" : "Crear" }}
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ✅ Modal de confirmación -->
+    <div v-if="confirmState.open" class="modal-backdrop-custom" @click.self="closeConfirm">
+      <div class="confirm-card">
+        <div class="confirm-icon confirm-icon--danger">!</div>
+        <div class="confirm-title">{{ confirmState.title }}</div>
+        <div class="confirm-text">{{ confirmState.message }}</div>
+        <div class="confirm-actions">
+          <button class="btn btn-outline-light" @click="closeConfirm">Cancelar</button>
+          <button class="btn btn-confirm-danger" @click="confirmAccept">Confirmar</button>
         </div>
       </div>
     </div>
@@ -423,43 +424,22 @@ onMounted(fetchUsuarios)
 </template>
 
 <style scoped>
-.usuarios-page {
-  min-height: 100%;
-}
-
-.table-main {
-  color: #fff;
-  font-weight: 600;
-}
-
-.empty-block {
-  padding: 14px 0;
-}
-
-.empty-title {
-  color: #fff;
-  font-weight: 700;
-  margin-bottom: 4px;
-}
-
+.usuarios-page { min-height: 100%; }
+.table-main { color: #fff; font-weight: 600; }
+.empty-block { padding: 14px 0; }
+.empty-title { color: #fff; font-weight: 700; margin-bottom: 4px; }
 .modal-backdrop-custom {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, .55);
-  display: grid;
-  place-items: center;
-  z-index: 2000;
-  padding: 16px;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.55);
+  display: grid; place-items: center;
+  z-index: 2000; padding: 16px;
 }
-
 .modal-custom {
-  width: 100%;
-  max-width: 520px;
+  width: 100%; max-width: 520px;
   border-radius: 18px;
-  background: rgba(18, 22, 32, .98);
-  border: 1px solid rgba(255, 255, 255, .10);
-  box-shadow: 0 18px 55px rgba(0, 0, 0, .45);
-  padding: 18px;
-  color: #fff;
+  background: rgba(18,22,32,.98);
+  border: 1px solid rgba(255,255,255,.10);
+  box-shadow: 0 18px 55px rgba(0,0,0,.45);
+  padding: 18px; color: #fff;
 }
 </style>

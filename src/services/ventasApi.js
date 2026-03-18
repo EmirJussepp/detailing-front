@@ -13,6 +13,10 @@ export const ventasApi = {
     return http.get(`/ventas/${id}`)
   },
 
+  porClienteId(clienteId) {
+    return http.get("/ventas", { params: { clienteId } })
+  },
+
   devolver(id, payload = {}) {
     return http.post(`/ventas/${id}/devolver`, payload)
   },

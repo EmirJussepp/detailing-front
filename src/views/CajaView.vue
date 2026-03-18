@@ -25,7 +25,6 @@ const canCerrarCajaPerm = computed(() => hasPermission("caja:cerrar"))
 const canCrearMovimientoPerm = computed(() => hasPermission("movimientos_caja:crear"))
 const isAdmin = computed(() => permissions.includes("admin:all"))
 
-
 function formatMoney(n) {
   const num = Number(n ?? 0)
   return num.toLocaleString("es-AR", {
@@ -47,7 +46,15 @@ function formatDateTime(v) {
   if (!v) return "—"
   try {
     const text = String(v).includes("T") ? String(v) : `${v}T00:00:00`
-    return new Date(text).toLocaleString("es-AR")
+    return new Date(text).toLocaleString("es-AR", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
   } catch {
     return String(v)
   }
@@ -125,24 +132,13 @@ function clearMsgs() {
 }
 
 function openConfirm({ title, message, variant = "primary", onConfirm }) {
-  confirmState.value = {
-    open: true,
-    title,
-    message,
-    variant,
-    onConfirm,
-  }
+  confirmState.value = { open: true, title, message, variant, onConfirm }
 }
 
 function closeConfirm() {
-  confirmState.value = {
-    open: false,
-    title: "",
-    message: "",
-    variant: "primary",
-    onConfirm: null,
-  }
+  confirmState.value = { open: false, title: "", message: "", variant: "primary", onConfirm: null }
 }
+
 function safeId(x) {
   const n = Number(x ?? 0)
   return Number.isFinite(n) && n > 0 ? n : 0
@@ -188,14 +184,10 @@ async function fetchProductosOnce() {
     const { data } = await productosApi.list({ page: 0, size: 1000, search: "" })
     const arr = unwrapPageLite(data)
     const map = new Map()
-
     for (const p of arr) {
       const id = safeId(p?.productoId ?? p?.id)
-      if (id) {
-        map.set(id, String(p?.nombre ?? `Producto #${id}`))
-      }
+      if (id) map.set(id, String(p?.nombre ?? `Producto #${id}`))
     }
-
     productosById.value = map
   } catch {
     productosById.value = new Map()
@@ -228,19 +220,15 @@ async function fetchClientesOnce() {
 
 const clienteById = computed(() => {
   const map = new Map()
-  for (const c of clientes.value) {
-    map.set(Number(c.id), c)
-  }
+  for (const c of clientes.value) map.set(Number(c.id), c)
   return map
 })
 
 function clienteTxtById(clienteId) {
   const cid = safeId(clienteId)
   if (!cid) return "Mostrador"
-
   const c = clienteById.value.get(cid)
   if (!c) return `Cliente #${cid}`
-
   const full = `${c.nombre ?? ""} ${c.apellido ?? ""}`.trim()
   return full || `Cliente #${cid}`
 }
@@ -251,9 +239,7 @@ function pickClienteIdFromVenta(venta) {
     venta?.cliente_id ??
     venta?.cliente?.clienteId ??
     venta?.cliente?.id ??
-    venta?.cliente?.cliente_id ??
     null
-
   const n = Number(raw)
   return Number.isFinite(n) && n > 0 ? n : null
 }
@@ -268,18 +254,9 @@ async function hydrateVentaInfoFromVentaId(ventaId) {
     const venta = data?.venta ?? data?.ventaActualizada ?? data ?? null
 
     const clienteId = pickClienteIdFromVenta(venta)
-    const metodoPagoId =
-      venta?.metodoPagoId ??
-      venta?.metodo_pago_id ??
-      venta?.metodoId ??
-      null
+    const metodoPagoId = venta?.metodoPagoId ?? venta?.metodo_pago_id ?? null
 
-    const detalles =
-      venta?.detallesVenta ??
-      venta?.detalles ??
-      venta?.items ??
-      venta?.detalleVenta ??
-      []
+    const detalles = venta?.detallesVenta ?? venta?.detalles ?? venta?.items ?? []
 
     const itemsTxt = Array.isArray(detalles)
       ? detalles
@@ -292,7 +269,6 @@ async function hydrateVentaInfoFromVentaId(ventaId) {
               d?.nombreProducto ??
               productosById.value.get(pid) ??
               (pid ? `Producto #${pid}` : "Producto")
-
             return cant > 0 ? `${cant}× ${nombre}` : nombre
           })
           .filter(Boolean)
@@ -302,54 +278,45 @@ async function hydrateVentaInfoFromVentaId(ventaId) {
 
     ventaInfoCache.value = {
       ...ventaInfoCache.value,
-      [vid]: {
-        clienteId,
-        metodoPagoId,
-        itemsTxt,
-      },
+      [vid]: { clienteId, metodoPagoId, itemsTxt },
     }
   } catch {
     ventaInfoCache.value = {
       ...ventaInfoCache.value,
-      [vid]: {
-        clienteId: null,
-        metodoPagoId: null,
-        itemsTxt: "",
-      },
+      [vid]: { clienteId: null, metodoPagoId: null, itemsTxt: "" },
     }
   }
 }
 
 function pickVentaIdFromMovimiento(m) {
-  return safeId(m?.ventaId ?? m?.venta_id ?? m?.venta ?? 0)
+  return safeId(m?.ventaId ?? m?.venta_id ?? 0)
 }
 
-function movimientoVentaResumen(m) {
+// ✅ FIX: ahora se usa en el template
+function movimientoResumen(m) {
+  const concepto = String(m?.concepto ?? "").toUpperCase()
   const ventaId = pickVentaIdFromMovimiento(m)
-  if (!ventaId) return m.descripcion ?? "—"
 
-  const info = ventaInfoCache.value[ventaId]
-  if (!info) return `Venta #${ventaId}`
+  if (ventaId) {
+    const info = ventaInfoCache.value[ventaId]
+    if (info) {
+      const cliente = clienteTxtById(info.clienteId)
+      const metodo = info.metodoPagoId ? metodoNombreById(info.metodoPagoId) : null
+      const items = info.itemsTxt ? ` · ${info.itemsTxt}` : ""
+      return [`Venta #${ventaId}`, cliente, metodo].filter(Boolean).join(" · ") + items
+    }
+    return `Venta #${ventaId}`
+  }
 
-  const cliente = clienteTxtById(info.clienteId)
-  const metodo = info.metodoPagoId ? metodoNombreById(info.metodoPagoId) : null
-
-  return [`Venta #${ventaId}`, cliente, metodo].filter(Boolean).join(" · ")
-}
-
-function movimientoVentaItems(m) {
-  const ventaId = pickVentaIdFromMovimiento(m)
-  if (!ventaId) return ""
-  const info = ventaInfoCache.value[ventaId]
-  return info?.itemsTxt || ""
+  if (m?.descripcion) return m.descripcion
+  if (concepto) return concepto.charAt(0) + concepto.slice(1).toLowerCase()
+  return "—"
 }
 
 async function confirmAccept() {
   const action = confirmState.value.onConfirm
   closeConfirm()
-  if (typeof action === "function") {
-    await action()
-  }
+  if (typeof action === "function") await action()
 }
 
 function tipoMovimientoParaForm() {
@@ -410,6 +377,7 @@ const cierreHint = computed(() => {
   return "Podés seguir operando o cerrar la caja cuando finalice el turno."
 })
 
+// ✅ FIX: hidrata movimientos con info de ventas
 async function loadMovimientos() {
   if (!caja.value?.cajaId) {
     movimientos.value = []
@@ -424,6 +392,19 @@ async function loadMovimientos() {
       : Array.isArray(data?.items)
         ? data.items
         : []
+
+  // Hidratar info de ventas, productos y clientes en paralelo
+  await Promise.all([
+    fetchMetodosPagoOnce(),
+    fetchProductosOnce(),
+    fetchClientesOnce(),
+  ])
+
+  const ventaIds = movimientos.value
+    .map((m) => safeId(m?.ventaId))
+    .filter((id) => id > 0)
+
+  await Promise.all(ventaIds.map(hydrateVentaInfoFromVentaId))
 }
 
 async function refresh() {
@@ -469,11 +450,7 @@ async function refresh() {
 
 async function abrirCajaConfirmed(monto) {
   try {
-    await cajaApi.abrir({
-      turno: selectedTurno.value,
-      montoInicial: monto ?? 0,
-    })
-
+    await cajaApi.abrir({ turno: selectedTurno.value, montoInicial: monto ?? 0 })
     okMsg.value = "Caja abierta correctamente."
     abrirMontoInicial.value = ""
     emitCajaChanged()
@@ -485,7 +462,6 @@ async function abrirCajaConfirmed(monto) {
 
 function abrirCaja() {
   clearMsgs()
-
   const monto = toMoneyNumber(abrirMontoInicial.value)
 
   if (monto === null) {
@@ -513,13 +489,10 @@ function abrirCaja() {
 
 async function cerrarCajaConfirmed() {
   try {
-    const payload = {
+    await cajaApi.cerrar(caja.value.cajaId, {
       observacion: "Cierre de caja",
       montoContado: Number.isFinite(contadoNum.value) ? contadoNum.value : null,
-    }
-
-    await cajaApi.cerrar(caja.value.cajaId, payload)
-
+    })
     okMsg.value = "Caja cerrada correctamente."
     montoContado.value = ""
     emitCajaChanged()
@@ -531,12 +504,10 @@ async function cerrarCajaConfirmed() {
 
 function cerrarCaja() {
   clearMsgs()
-
   if (!caja.value?.cajaId) {
     errorMsg.value = "No hay caja abierta para cerrar."
     return
   }
-
   openConfirm({
     title: "Cerrar caja",
     message: "¿Seguro querés cerrar la caja? Una vez cerrada, no podrás volver a abrirla en este turno.",
@@ -547,17 +518,10 @@ function cerrarCaja() {
 
 async function crearMovimientoManual() {
   clearMsgs()
-
-  if (!caja.value?.cajaId) {
-    errorMsg.value = "Abrí una caja primero."
-    return
-  }
+  if (!caja.value?.cajaId) { errorMsg.value = "Abrí una caja primero."; return }
 
   const monto = toMoneyNumber(movForm.value.monto)
-  if (!Number.isFinite(monto) || monto <= 0) {
-    errorMsg.value = "Monto inválido."
-    return
-  }
+  if (!Number.isFinite(monto) || monto <= 0) { errorMsg.value = "Monto inválido."; return }
 
   try {
     await movimientosCajaApi.crear({
@@ -567,15 +531,8 @@ async function crearMovimientoManual() {
       descripcion: movForm.value.descripcion?.trim() || null,
       monto,
     })
-
     okMsg.value = "Movimiento registrado correctamente."
-    movForm.value = {
-      concepto: "GASTO",
-      tipoManual: "EGRESO",
-      monto: "",
-      descripcion: "",
-    }
-
+    movForm.value = { concepto: "GASTO", tipoManual: "EGRESO", monto: "", descripcion: "" }
     showMovModal.value = false
     emitCajaChanged()
     await refresh()
@@ -591,7 +548,6 @@ watch(selectedTurno, async (v) => {
 
 onMounted(async () => {
   selectedTurno.value = getTurnoOperativo()
-
   if (canViewCaja.value) {
     await refresh()
   } else {
@@ -636,7 +592,6 @@ onMounted(async () => {
                   <option value="MANIANA">MAÑANA</option>
                   <option value="TARDE">TARDE</option>
                 </select>
-
                 <div v-if="caja?.cajaId" class="helper-text mt-2">
                   El turno queda bloqueado mientras la caja esté abierta.
                 </div>
@@ -647,7 +602,6 @@ onMounted(async () => {
                   <div class="status-summary-icon">
                     <span class="status-dot" :class="{ active: !!caja?.cajaId }"></span>
                   </div>
-
                   <div class="status-summary-content">
                     <div class="field-label mb-1">Estado actual</div>
                     <div class="status-summary-title">
@@ -686,7 +640,8 @@ onMounted(async () => {
               <div class="info-list">
                 <div class="info-row">
                   <span>Apertura</span>
-                  <strong>{{ formatDateTime(caja.apertura || caja.fecha) }}</strong>
+                  <!-- ✅ FIX: muestra hora de apertura real, no la fecha -->
+                  <strong>{{ caja.apertura ? formatDateTime(caja.apertura) : "—" }}</strong>
                 </div>
                 <div class="info-row">
                   <span>Monto inicial</span>
@@ -698,9 +653,7 @@ onMounted(async () => {
                 </div>
               </div>
 
-              <div class="helper-text mt-3">
-                {{ cierreHint }}
-              </div>
+              <div class="helper-text mt-3">{{ cierreHint }}</div>
             </template>
 
             <template v-else>
@@ -763,24 +716,16 @@ onMounted(async () => {
                     inputmode="numeric"
                     :disabled="loading || !canAbrirCajaPerm"
                   />
-
                   <button class="btn btn-primary btn-accent w-100 mt-3" @click="abrirCaja" :disabled="!canAbrir">
                     Abrir caja
                   </button>
-
-                  <div class="helper-text mt-2">
-                    Se abrirá una única caja para el turno seleccionado.
-                  </div>
+                  <div class="helper-text mt-2">Se abrirá una única caja para el turno seleccionado.</div>
                 </template>
 
                 <template v-else>
                   <label class="form-label field-label">Caja operativa</label>
-                  <div class="static-field">
-                    Caja abierta en turno {{ turnoLabel(caja.turno) }}
-                  </div>
-                  <div class="helper-text mt-2">
-                    La apertura ya fue realizada. Podés seguir operando normalmente.
-                  </div>
+                  <div class="static-field">Caja abierta en turno {{ turnoLabel(caja.turno) }}</div>
+                  <div class="helper-text mt-2">La apertura ya fue realizada. Podés seguir operando normalmente.</div>
                 </template>
               </div>
 
@@ -802,14 +747,12 @@ onMounted(async () => {
 
                 <div class="info-row mt-2">
                   <span class="helper-text">Diferencia</span>
-
                   <strong
                     v-if="diferencia !== null"
                     :class="diferencia === 0 ? 'text-success' : diferencia > 0 ? 'text-success' : 'text-danger'"
                   >
                     {{ diferencia > 0 ? "+" : "" }}$ {{ formatMoney(diferencia) }}
                   </strong>
-
                   <span v-else class="helper-text">—</span>
                 </div>
 
@@ -845,7 +788,40 @@ onMounted(async () => {
       </div>
     </div>
 
-    
+    <!-- ✅ Últimos movimientos con info de ventas hidratada -->
+    <div v-if="caja?.cajaId && ultimosMovs.length" class="card bg-panel border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <div class="section-header mb-3">
+          <h2 class="section-title mb-0">Últimos movimientos</h2>
+          <div class="helper-text">Los 8 más recientes del turno actual</div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-dark table-hover align-middle app-table mb-0">
+            <thead>
+              <tr>
+                <th style="width: 160px">Hora</th>
+                <th style="width: 110px">Tipo</th>
+                <th>Descripción</th>
+                <th style="width: 160px" class="text-end">Monto</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="m in ultimosMovs" :key="m.movimientoCajaId ?? m.fecha">
+                <td class="text-secondary">{{ formatDateTime(m.fecha) }}</td>
+                <td>
+                  <span class="badge" :class="badgeTipoClass(m.tipo)">
+                    {{ String(m.tipo || "").toUpperCase() }}
+                  </span>
+                </td>
+                <td class="text-secondary">{{ movimientoResumen(m) }}</td>
+                <td class="text-end fw-bold">$ {{ formatMoney(m.monto) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
 
     <div v-if="showMovModal" class="modal-backdrop" @click.self="showMovModal = false">
       <div class="modal-card">
@@ -867,7 +843,7 @@ onMounted(async () => {
               <option value="AJUSTE">AJUSTE</option>
             </select>
             <div class="helper-text mt-2">
-              VENTA y PAGO_PROVEEDOR deberían generarse automáticamente desde sus módulos.
+              VENTA y PAGO_PROVEEDOR se generan automáticamente desde sus módulos.
             </div>
           </div>
 
@@ -886,11 +862,7 @@ onMounted(async () => {
 
           <div class="col-12">
             <label class="form-label field-label">Descripción</label>
-            <input
-              v-model="movForm.descripcion"
-              class="form-control app-input"
-              placeholder="Detalle opcional"
-            />
+            <input v-model="movForm.descripcion" class="form-control app-input" placeholder="Detalle opcional" />
           </div>
         </div>
 
@@ -907,15 +879,10 @@ onMounted(async () => {
           <span v-else-if="confirmState.variant === 'warning'">!</span>
           <span v-else>✓</span>
         </div>
-
         <div class="confirm-title">{{ confirmState.title }}</div>
         <div class="confirm-text">{{ confirmState.message }}</div>
-
         <div class="confirm-actions">
-          <button class="btn btn-outline-light" @click="closeConfirm">
-            Cancelar
-          </button>
-
+          <button class="btn btn-outline-light" @click="closeConfirm">Cancelar</button>
           <button
             class="btn"
             :class="{
@@ -934,9 +901,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.caja-page {
-  min-height: 100%;
-}
+.caja-page { min-height: 100%; }
 
 .status-summary-card {
   min-height: 76px;
