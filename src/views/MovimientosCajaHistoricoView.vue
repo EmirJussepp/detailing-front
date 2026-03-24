@@ -305,7 +305,11 @@ async function hydrateVentaInfoFromVentaId(ventaId) {
     const clienteId = pickClienteIdFromVenta(venta)
     const total = Number(venta?.total ?? 0) || 0
 
+    // ✅ FIX: el backend devuelve VentaConDetalles = { venta, detallesVenta }
+    // detallesVenta está en data (raíz), NO dentro de data.venta
     const detalles =
+      data?.detallesVenta ??
+      data?.detalles ??
       venta?.detallesVenta ??
       venta?.detalles ??
       venta?.items ??
@@ -729,7 +733,7 @@ onMounted(() => {
                 <td>
                   <div v-if="m.ventaId" class="mov-detail">
                     <div class="mov-detail-sub">
-                      {{ ventaInfoCache[safeId(m.ventaId)]?.itemsTxt || "Sin detalle de productos" }}
+                      {{ ventaInfoCache[safeId(m.ventaId)] === undefined ? "Cargando…" : (ventaInfoCache[safeId(m.ventaId)]?.itemsTxt || "—") }}
                     </div>
                   </div>
                   <span v-else class="text-secondary">—</span>

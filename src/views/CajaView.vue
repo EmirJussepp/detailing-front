@@ -110,11 +110,14 @@ const abrirMontoInicial = ref("")
 const montoContado = ref("")
 
 const showMovModal = ref(false)
+
+// ✅ FIX: formulario de movimiento manual incluye metodoPagoId
 const movForm = ref({
   concepto: "GASTO",
   tipoManual: "EGRESO",
   monto: "",
   descripcion: "",
+  metodoPagoId: null,   // ← NUEVO campo obligatorio
 })
 
 const confirmState = ref({
@@ -256,7 +259,8 @@ async function hydrateVentaInfoFromVentaId(ventaId) {
     const clienteId = pickClienteIdFromVenta(venta)
     const metodoPagoId = venta?.metodoPagoId ?? venta?.metodo_pago_id ?? null
 
-    const detalles = venta?.detallesVenta ?? venta?.detalles ?? venta?.items ?? []
+    // ✅ FIX: detallesVenta está en data (raíz), no dentro de data.venta
+    const detalles = data?.detallesVenta ?? data?.detalles ?? venta?.detallesVenta ?? venta?.detalles ?? venta?.items ?? []
 
     const itemsTxt = Array.isArray(detalles)
       ? detalles
@@ -292,7 +296,6 @@ function pickVentaIdFromMovimiento(m) {
   return safeId(m?.ventaId ?? m?.venta_id ?? 0)
 }
 
-// ✅ FIX: ahora se usa en el template
 function movimientoResumen(m) {
   const concepto = String(m?.concepto ?? "").toUpperCase()
   const ventaId = pickVentaIdFromMovimiento(m)
@@ -377,7 +380,11 @@ const cierreHint = computed(() => {
   return "Podés seguir operando o cerrar la caja cuando finalice el turno."
 })
 
-// ✅ FIX: hidrata movimientos con info de ventas
+// ✅ FIX: validación de metodoPagoId requerido para conceptos manuales
+const metodoPagoRequerido = computed(() => {
+  return ["GASTO", "RETIRO", "APORTE"].includes(movForm.value.concepto)
+})
+
 async function loadMovimientos() {
   if (!caja.value?.cajaId) {
     movimientos.value = []
@@ -393,7 +400,6 @@ async function loadMovimientos() {
         ? data.items
         : []
 
-  // Hidratar info de ventas, productos y clientes en paralelo
   await Promise.all([
     fetchMetodosPagoOnce(),
     fetchProductosOnce(),
@@ -516,12 +522,19 @@ function cerrarCaja() {
   })
 }
 
+// ✅ FIX: crearMovimientoManual ahora valida y envía metodoPagoId
 async function crearMovimientoManual() {
   clearMsgs()
   if (!caja.value?.cajaId) { errorMsg.value = "Abrí una caja primero."; return }
 
   const monto = toMoneyNumber(movForm.value.monto)
   if (!Number.isFinite(monto) || monto <= 0) { errorMsg.value = "Monto inválido."; return }
+
+  // ✅ FIX: validar que se seleccionó método de pago para conceptos que lo requieren
+  if (metodoPagoRequerido.value && !movForm.value.metodoPagoId) {
+    errorMsg.value = "Seleccioná un método de pago."
+    return
+  }
 
   try {
     await movimientosCajaApi.crear({
@@ -530,9 +543,11 @@ async function crearMovimientoManual() {
       concepto: movForm.value.concepto,
       descripcion: movForm.value.descripcion?.trim() || null,
       monto,
+      // ✅ FIX: se envía el metodoPagoId al backend
+      metodoPagoId: movForm.value.metodoPagoId ? Number(movForm.value.metodoPagoId) : null,
     })
     okMsg.value = "Movimiento registrado correctamente."
-    movForm.value = { concepto: "GASTO", tipoManual: "EGRESO", monto: "", descripcion: "" }
+    movForm.value = { concepto: "GASTO", tipoManual: "EGRESO", monto: "", descripcion: "", metodoPagoId: null }
     showMovModal.value = false
     emitCajaChanged()
     await refresh()
@@ -549,6 +564,7 @@ watch(selectedTurno, async (v) => {
 onMounted(async () => {
   selectedTurno.value = getTurnoOperativo()
   if (canViewCaja.value) {
+    await fetchMetodosPagoOnce()
     await refresh()
   } else {
     errorMsg.value = "No tenés permisos para acceder a Caja."
@@ -640,7 +656,6 @@ onMounted(async () => {
               <div class="info-list">
                 <div class="info-row">
                   <span>Apertura</span>
-                  <!-- ✅ FIX: muestra hora de apertura real, no la fecha -->
                   <strong>{{ caja.apertura ? formatDateTime(caja.apertura) : "—" }}</strong>
                 </div>
                 <div class="info-row">
@@ -788,7 +803,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- ✅ Últimos movimientos con info de ventas hidratada -->
+    <!-- Últimos movimientos -->
     <div v-if="caja?.cajaId && ultimosMovs.length" class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
         <div class="section-header mb-3">
@@ -823,6 +838,7 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- ✅ FIX: Modal movimiento manual con campo Método de Pago -->
     <div v-if="showMovModal" class="modal-backdrop" @click.self="showMovModal = false">
       <div class="modal-card">
         <div class="d-flex justify-content-between align-items-center mb-3">
@@ -855,6 +871,23 @@ onMounted(async () => {
             </select>
           </div>
 
+          <!-- ✅ FIX: Campo Método de Pago — obligatorio para GASTO, RETIRO y APORTE -->
+          <div class="col-12">
+            <label class="form-label field-label">
+              Método de pago
+              <span v-if="metodoPagoRequerido" class="text-danger ms-1">*</span>
+            </label>
+            <select v-model="movForm.metodoPagoId" class="form-select app-input">
+              <option :value="null">— Seleccioná un método —</option>
+              <option v-for="mp in metodosPago" :key="mp.id" :value="mp.id">
+                {{ mp.nombre }}
+              </option>
+            </select>
+            <div v-if="metodoPagoRequerido" class="helper-text mt-1 text-danger-soft">
+              Requerido para {{ movForm.concepto }}.
+            </div>
+          </div>
+
           <div class="col-12">
             <label class="form-label field-label">Monto</label>
             <input v-model="movForm.monto" class="form-control app-input" inputmode="numeric" />
@@ -872,6 +905,7 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- Confirm dialog -->
     <div v-if="confirmState.open" class="modal-backdrop" @click.self="closeConfirm">
       <div class="confirm-card">
         <div class="confirm-icon" :class="`confirm-icon--${confirmState.variant}`">
@@ -952,5 +986,9 @@ onMounted(async () => {
 .status-dot.active {
   background: #27d17f;
   box-shadow: 0 0 0 6px rgba(39, 209, 127, .10);
+}
+
+.text-danger-soft {
+  color: rgba(255, 100, 100, 0.85);
 }
 </style>

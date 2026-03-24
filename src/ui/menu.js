@@ -39,7 +39,7 @@ export function buildMenuFromPermissions(perms = getPermissions()) {
     { section: "Operación" },
     { label: "Caja", to: { name: "caja.dashboard" }, icon: "Wallet", perm: "caja:ver" },
     { label: "Ventas", to: { name: "caja.ventas" }, icon: "ShoppingCart", perm: "ventas:ver" },
-    { label: "Movimientos", to: { name: "caja.movimientos" }, icon: "ArrowLeftRight", perm: "movimientos_caja:ver" },
+    { label: "Movimientos Caja", to: { name: "caja.movimientos" }, icon: "ArrowLeftRight", perm: "movimientos_caja:ver" },
     { label: "Cuenta Corriente", to: { name: "caja.cuenta" }, icon: "BookOpen", perm: "pagos:ver" },
 
     { section: "Clientes" },
@@ -47,6 +47,13 @@ export function buildMenuFromPermissions(perms = getPermissions()) {
 
     { section: "Inventario" },
     { label: "Productos", to: { name: "productos" }, icon: "Package", perm: "productos:ver" },
+    // ✅ NUEVO: acceso a movimientos de stock desde el menú
+    {
+      label: "Movimientos Stock",
+      to: { name: "productos.movimientos-stock" },
+      icon: "ArrowUpDown",
+      perm: "movimientos_stock:ver",
+    },
 
     { section: "Compras" },
     { label: "Compras", to: { name: "compras" }, icon: "ShoppingBag", perm: "compras:ver" },
@@ -106,7 +113,7 @@ export function buildMenu(role = getRole()) {
     { section: "Operación", roles: ["ADMIN", "CASHIER"] },
     { label: "Caja", to: { name: "caja.dashboard" }, icon: "Wallet", roles: ["ADMIN", "CASHIER"] },
     { label: "Ventas", to: { name: "caja.ventas" }, icon: "ShoppingCart", roles: ["ADMIN", "CASHIER"] },
-    { label: "Movimientos", to: { name: "caja.movimientos" }, icon: "ArrowLeftRight", roles: ["ADMIN", "CASHIER"] },
+    { label: "Movimientos Caja", to: { name: "caja.movimientos" }, icon: "ArrowLeftRight", roles: ["ADMIN", "CASHIER"] },
 
     { section: "Clientes", roles: ["ADMIN", "CASHIER"] },
     { label: "Clientes", to: { name: "clientes" }, icon: "Users", roles: ["ADMIN", "CASHIER"] },
@@ -114,6 +121,8 @@ export function buildMenu(role = getRole()) {
 
     { section: "Inventario", roles: ["ADMIN", "CASHIER"] },
     { label: "Productos", to: { name: "productos" }, icon: "Package", roles: ["ADMIN", "CASHIER"] },
+    // ✅ NUEVO: movimientos de stock en el menú legacy también
+    { label: "Movimientos Stock", to: { name: "productos.movimientos-stock" }, icon: "ArrowUpDown", roles: ["ADMIN"] },
 
     { section: "Compras", roles: ["ADMIN"] },
     { label: "Compras", to: { name: "compras" }, icon: "ShoppingBag", roles: ["ADMIN"] },

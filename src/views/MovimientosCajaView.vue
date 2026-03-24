@@ -229,6 +229,8 @@ async function hydrateVentaInfoFromVentaId(ventaId) {
 
   try {
     const { data } = await ventasApi.porId(vid)
+    // DEBUG TEMPORAL — borrar después de confirmar
+    console.log('[hydrate] venta', vid, JSON.stringify(data))
     const venta = data?.venta ?? data?.ventaActualizada ?? data ?? null
 
     const clienteId = pickClienteIdFromVenta(venta)
@@ -239,7 +241,11 @@ async function hydrateVentaInfoFromVentaId(ventaId) {
       venta?.metodoId ??
       null
 
+    // ✅ FIX: el backend devuelve VentaConDetalles = { venta, detallesVenta }
+    // detallesVenta está en data (raíz), NO dentro de data.venta
     const detalles =
+      data?.detallesVenta ??
+      data?.detalles ??
       venta?.detallesVenta ??
       venta?.detalles ??
       venta?.items ??
@@ -302,9 +308,13 @@ function detalleVentaTemplate(ventaId) {
   if (!vid) return "—"
 
   const info = ventaInfoCache.value[vid]
-  if (!info) return "Cargando…"
-
-  return info.itemsTxt || "Sin detalle de productos"
+  // ✅ FIX: si el cache aún no tiene la venta, mostrar "Cargando…"
+  if (info === undefined) return "Cargando…"
+  // ✅ FIX: si itemsTxt es vacío puede ser que los detalles no traían nombre
+  // (datos viejos). Mostramos "—" en lugar de "Sin detalle de productos"
+  // para no confundir al usuario
+  if (!info.itemsTxt) return "—"
+  return info.itemsTxt
 }
 
 function metodoVentaTemplate(m) {
@@ -356,6 +366,46 @@ const kpiEgresos = computed(() =>
     .filter((m) => m.tipo === "EGRESO")
     .reduce((a, m) => a + Number(m.monto ?? 0), 0)
 )
+// Agregar después de kpiNeto
+const kpiIngresosPorMetodo = computed(() => {
+  const map = new Map()
+
+  for (const m of movimientosFiltrados.value) {
+    if (m.tipo !== "INGRESO") continue
+
+    const midDirecto = safeId(m?.metodoPagoId)
+    const ventaId = pickVentaIdFromMovimiento(m)
+    const midVenta = ventaId ? safeId(ventaInfoCache.value[ventaId]?.metodoPagoId) : 0
+    const mid = midDirecto || midVenta
+
+    const nombre = mid ? metodoNombreById(mid) : "Sin método"
+    map.set(nombre, (map.get(nombre) ?? 0) + Number(m.monto ?? 0))
+  }
+
+  return Array.from(map.entries())
+    .map(([nombre, total]) => ({ nombre, total }))
+    .sort((a, b) => b.total - a.total)
+})
+
+const kpiEgresosPorMetodo = computed(() => {
+  const map = new Map()
+
+  for (const m of movimientosFiltrados.value) {
+    if (m.tipo !== "EGRESO") continue
+
+    const midDirecto = safeId(m?.metodoPagoId)
+    const ventaId = pickVentaIdFromMovimiento(m)
+    const midVenta = ventaId ? safeId(ventaInfoCache.value[ventaId]?.metodoPagoId) : 0
+    const mid = midDirecto || midVenta
+
+    const nombre = mid ? metodoNombreById(mid) : "Sin método"
+    map.set(nombre, (map.get(nombre) ?? 0) + Number(m.monto ?? 0))
+  }
+
+  return Array.from(map.entries())
+    .map(([nombre, total]) => ({ nombre, total }))
+    .sort((a, b) => b.total - a.total)
+})
 
 const kpiNeto = computed(() => kpiIngresos.value - kpiEgresos.value)
 
@@ -623,34 +673,63 @@ onMounted(() => {
     </div>
 
     <div class="row g-3 mb-3">
-      <div class="col-6 col-md-3">
-        <div class="kpi-card">
-          <div class="kpi-label">Ingresos</div>
-          <div class="kpi-value text-success">$ {{ formatMoney(kpiIngresos) }}</div>
-        </div>
-      </div>
+  <div class="col-6 col-md-3">
+    <div class="kpi-card">
+      <div class="kpi-label">Ingresos</div>
+      <div class="kpi-value text-success">$ {{ formatMoney(kpiIngresos) }}</div>
+    </div>
+  </div>
 
-      <div class="col-6 col-md-3">
-        <div class="kpi-card">
-          <div class="kpi-label">Egresos</div>
-          <div class="kpi-value text-danger">$ {{ formatMoney(kpiEgresos) }}</div>
-        </div>
-      </div>
+  <div class="col-6 col-md-3">
+    <div class="kpi-card">
+      <div class="kpi-label">Egresos</div>
+      <div class="kpi-value text-danger">$ {{ formatMoney(kpiEgresos) }}</div>
+    </div>
+  </div>
 
-      <div class="col-6 col-md-3">
-        <div class="kpi-card">
-          <div class="kpi-label">Neto</div>
-          <div class="kpi-value">$ {{ formatMoney(kpiNeto) }}</div>
-        </div>
-      </div>
+  <div class="col-6 col-md-3">
+    <div class="kpi-card">
+      <div class="kpi-label">Neto</div>
+      <div class="kpi-value">$ {{ formatMoney(kpiNeto) }}</div>
+    </div>
+  </div>
 
-      <div class="col-6 col-md-3">
-        <div class="kpi-card">
-          <div class="kpi-label">Saldo</div>
-          <div class="kpi-value">$ {{ formatMoney(resumen.saldo) }}</div>
+  <div class="col-6 col-md-3">
+    <div class="kpi-card">
+      <div class="kpi-label">Saldo</div>
+      <div class="kpi-value">$ {{ formatMoney(resumen.saldo) }}</div>
+    </div>
+  </div>
+</div>
+
+<!-- Ingresos y egresos por método de pago -->
+<div v-if="kpiIngresosPorMetodo.length || kpiEgresosPorMetodo.length" class="row g-3 mb-3">
+
+  <div class="col-12" v-if="kpiIngresosPorMetodo.length">
+    <div class="metodos-strip">
+      <span class="metodos-strip-label">Ingresos por método</span>
+      <div class="metodos-strip-items">
+        <div v-for="item in kpiIngresosPorMetodo" :key="item.nombre" class="metodo-chip">
+          <span class="metodo-chip-nombre">{{ item.nombre }}</span>
+          <span class="metodo-chip-monto metodo-chip-monto--ingreso">$ {{ formatMoney(item.total) }}</span>
         </div>
       </div>
     </div>
+  </div>
+
+  <div class="col-12" v-if="kpiEgresosPorMetodo.length">
+    <div class="metodos-strip">
+      <span class="metodos-strip-label">Egresos por método</span>
+      <div class="metodos-strip-items">
+        <div v-for="item in kpiEgresosPorMetodo" :key="item.nombre" class="metodo-chip">
+          <span class="metodo-chip-nombre">{{ item.nombre }}</span>
+          <span class="metodo-chip-monto text-danger metodo-chip-monto--egreso">$ {{ formatMoney(item.total) }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
 
     <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
@@ -869,6 +948,55 @@ onMounted(() => {
 
 .filter-search {
   min-width: 0;
+}
+
+/* ── Ingresos por método de pago ── */
+.metodos-strip {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 14px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.metodos-strip-label {
+  color: rgba(255,255,255,.55);
+  font-size: .8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+
+.metodos-strip-items {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.metodo-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.11);
+  border-radius: 10px;
+  padding: 6px 14px;
+}
+
+.metodo-chip-nombre {
+  color: rgba(255,255,255,.75);
+  font-size: .85rem;
+  font-weight: 600;
+}
+
+.metodo-chip-monto {
+  color: #4ade80;
+  font-size: .95rem;
+  font-weight: 800;
 }
 
 @media (max-width: 992px) {

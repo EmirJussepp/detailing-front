@@ -48,10 +48,7 @@ const routes = [
         path: "reportes",
         name: "reportes",
         component: () => import("../views/ReportesView.vue"),
-        meta: {
-          requiresAuth: true,
-          perm: "usuarios:ver",
-        },
+        meta: { requiresAuth: true, perm: "usuarios:ver" },
       },
 
       {
@@ -98,6 +95,15 @@ const routes = [
         component: ProductosView,
         meta: { requiresAuth: true, perm: "productos:ver" },
       },
+
+      // ✅ NUEVO: ruta para movimientos de stock
+      {
+        path: "productos/movimientos-stock",
+        name: "productos.movimientos-stock",
+        component: () => import("../views/MovimientosStockView.vue"),
+        meta: { requiresAuth: true, perm: "movimientos_stock:ver" },
+      },
+
       {
         path: "caja/movimientos-historico",
         name: "caja.movimientos-historico",
@@ -169,7 +175,6 @@ router.beforeEach((to) => {
   const perm = to.meta?.perm
   if (perm) {
     const permissions = session?.permissions || []
-
     const hasPermission =
       permissions.includes("admin:all") ||
       permissions.includes(perm)
@@ -181,4 +186,5 @@ router.beforeEach((to) => {
 
   return true
 })
+
 export default router

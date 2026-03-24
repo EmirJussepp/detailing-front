@@ -91,9 +91,38 @@ function mapProducto(row) {
 
 const loading = ref(false)
 const saving = ref(false)
-const errorMsg = ref("")
-const okMsg = ref("")
-const infoMsg = ref("")
+
+// ── Toast system ──────────────────────────────────────────────
+const toasts = ref([])
+let toastId = 0
+
+function showToast(message, type = "success") {
+  const id = ++toastId
+  toasts.value.push({ id, message, type })
+  setTimeout(() => {
+    toasts.value = toasts.value.filter(t => t.id !== id)
+  }, 3500)
+}
+
+function dismissToast(id) {
+  toasts.value = toasts.value.filter(t => t.id !== id)
+}
+
+// Computed setters que reemplazan errorMsg/okMsg/infoMsg
+// El resto del código no necesita cambiar nada
+const errorMsg = computed({
+  get: () => "",
+  set: (v) => v && showToast(v, "danger"),
+})
+const okMsg = computed({
+  get: () => "",
+  set: (v) => v && showToast(v, "success"),
+})
+const infoMsg = computed({
+  get: () => "",
+  set: (v) => v && showToast(v, "info"),
+})
+// ─────────────────────────────────────────────────────────────
 
 const q = ref("")
 const onlyLowStock = ref(false)
@@ -681,65 +710,61 @@ async function saveEdit() {
     return
   }
 
-  const pc = editForm.value.precioCosto?.toString().trim()
+  const pc = showCostoEdicion.value && editForm.value.precioCosto?.toString().trim()
     ? toNumber(editForm.value.precioCosto)
-    : 0
+    : null
 
   const pv = toNumber(editForm.value.precioVenta)
   const pm = editForm.value.precioMayorista?.trim() ? toNumber(editForm.value.precioMayorista) : null
 
-  if (!Number.isFinite(pc) || pc < 0) {
+  if (pc !== null && (!Number.isFinite(pc) || pc < 0)) {
     errorMsg.value = "Precio costo inválido."
     return
   }
 
-  if (!Number.isFinite(pv) || pv < pc) {
+  if (!Number.isFinite(pv) || pv <= 0) {
+    errorMsg.value = "Precio venta inválido."
+    return
+  }
+
+  if (pc !== null && pv < pc) {
     errorMsg.value = "Precio venta no puede ser menor al costo."
     return
   }
 
-  if (pm !== null && (!Number.isFinite(pm) || pm < pc)) {
+  if (pm !== null && !Number.isFinite(pm)) {
+    errorMsg.value = "Precio mayorista inválido."
+    return
+  }
+
+  if (pc !== null && pm !== null && pm < pc) {
     errorMsg.value = "Mayorista no puede ser menor al costo."
     return
   }
 
-  const sMin = editForm.value.stockMinimo == null || editForm.value.stockMinimo === "" ? null : Number(editForm.value.stockMinimo)
-  const sMax = editForm.value.stockMaximo == null || editForm.value.stockMaximo === "" ? null : Number(editForm.value.stockMaximo)
+  const sMin = editForm.value.stockMinimo == null || editForm.value.stockMinimo === ""
+    ? null : Number(editForm.value.stockMinimo)
+  const sMax = editForm.value.stockMaximo == null || editForm.value.stockMaximo === ""
+    ? null : Number(editForm.value.stockMaximo)
   const sAct = Number(editForm.value.stockActual ?? 0)
 
-  if (sMin !== null && sMin < 0) {
-    errorMsg.value = "Stock mínimo no puede ser negativo."
-    return
-  }
-
-  if (sMax !== null && sMax < 0) {
-    errorMsg.value = "Stock máximo no puede ser negativo."
-    return
-  }
-
-  if (sMin !== null && sMax !== null && sMin > sMax) {
-    errorMsg.value = "Stock mínimo no puede ser mayor al máximo."
-    return
-  }
-
-  if (sAct < 0) {
-    errorMsg.value = "Stock no puede ser negativo."
-    return
-  }
+  if (sMin !== null && sMin < 0) { errorMsg.value = "Stock mínimo no puede ser negativo."; return }
+  if (sMax !== null && sMax < 0) { errorMsg.value = "Stock máximo no puede ser negativo."; return }
+  if (sAct < 0) { errorMsg.value = "Stock no puede ser negativo."; return }
 
   saving.value = true
   try {
     await productosApi.update(editing.value.id, {
-      nombre: editForm.value.nombre.trim(),
-      codigoProducto: editForm.value.codigoProducto?.trim() || null,
-      categoria: editForm.value.categoria?.trim() || null,
-      categoriaId: editForm.value.categoriaId ? Number(editForm.value.categoriaId) : null,
-      marcaId: editForm.value.marcaId ? Number(editForm.value.marcaId) : null,
-      stockMinimo: sMin,
-      stockMaximo: sMax,
-      stockActual: sAct,
-      precioCosto: pc,
-      precioVenta: pv,
+      nombre:          editForm.value.nombre.trim(),
+      codigoProducto:  editForm.value.codigoProducto?.trim() || null,
+      categoria:       editForm.value.categoria?.trim() || null,
+      categoriaId:     editForm.value.categoriaId ? Number(editForm.value.categoriaId) : null,
+      marcaId:         editForm.value.marcaId ? Number(editForm.value.marcaId) : null,
+      stockMinimo:     sMin,
+      stockMaximo:     sMax,
+      stockActual:     sAct,
+      precioCosto:     pc ?? undefined,
+      precioVenta:     pv,
       precioMayorista: pm,
     })
 
@@ -836,7 +861,6 @@ function aplicarAumento() {
   }
 
   let scopeText = "todos los productos"
-
   if (incScope.value === "MARCA") {
     scopeText = `los productos de la marca ${marcaName(incMarcaId.value)}`
   } else if (incScope.value === "CATEGORIA") {
@@ -844,7 +868,6 @@ function aplicarAumento() {
   }
 
   let aplicarAText = "precio de venta"
-
   if (incAplicarA.value === "MAYORISTA") {
     aplicarAText = "precio mayorista"
   } else if (incAplicarA.value === "AMBOS") {
@@ -884,10 +907,6 @@ onMounted(async () => {
         </button>
       </div>
     </section>
-
-    <div v-if="errorMsg" class="alert alert-danger py-2 mb-3">{{ errorMsg }}</div>
-    <div v-if="okMsg" class="alert alert-success py-2 mb-3">{{ okMsg }}</div>
-    <div v-if="infoMsg" class="alert alert-secondary py-2 mb-3">{{ infoMsg }}</div>
 
     <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
@@ -1260,7 +1279,8 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div v-if="editing" class="modal-backdrop" @click.self="closeEdit">
+    <!-- ── Modal: Editar producto ── -->
+    <div v-if="editing" class="modal-backdrop">
       <div class="modal-card">
         <div class="section-header mb-3">
           <h2 class="section-title mb-0">Editar producto</h2>
@@ -1362,6 +1382,7 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- ── Modal: Nueva marca ── -->
     <div v-if="showMarcaModal" class="modal-backdrop" @click.self="closeMarcaModal">
       <div class="modal-card modal-card-sm">
         <div class="section-header mb-3">
@@ -1390,6 +1411,7 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- ── Modal: Nueva categoría ── -->
     <div v-if="showCategoriaModal" class="modal-backdrop" @click.self="closeCategoriaModal">
       <div class="modal-card modal-card-sm">
         <div class="section-header mb-3">
@@ -1418,6 +1440,7 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- ── Modal: Confirmar acción ── -->
     <div v-if="confirmState.open" class="modal-backdrop" @click.self="closeConfirm">
       <div class="confirm-card">
         <div class="confirm-icon" :class="`confirm-icon--${confirmState.variant}`">
@@ -1448,6 +1471,29 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+
+    <!-- ── Toasts flotantes ── -->
+    <Teleport to="body">
+      <div class="toast-container">
+        <TransitionGroup name="toast">
+          <div
+            v-for="t in toasts"
+            :key="t.id"
+            class="toast-item"
+            :class="`toast-item--${t.type}`"
+            @click="dismissToast(t.id)"
+          >
+            <span class="toast-icon">
+              <span v-if="t.type === 'danger'">✕</span>
+              <span v-else-if="t.type === 'info'">ℹ</span>
+              <span v-else>✓</span>
+            </span>
+            {{ t.message }}
+          </div>
+        </TransitionGroup>
+      </div>
+    </Teleport>
+
   </div>
 </template>
 
@@ -1455,8 +1501,78 @@ onMounted(async () => {
 .productos-page {
   min-height: 100%;
 }
+.confirm-card {
+  margin: auto 0;
+}
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  z-index: 1050;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.modal-card {
+  width: min(720px, 100%);
+  background: rgba(18, 22, 32, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 18px;
+  padding: 24px;
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.55);
+  color: #fff;
+  margin: auto 0;
+}
 
 .modal-card-sm {
   max-width: 520px;
 }
+
+/* ── Toasts ── */
+.toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+  max-width: min(380px, calc(100vw - 32px));
+}
+
+.toast-item {
+  pointer-events: all;
+  cursor: pointer;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.toast-item--success { background: rgba(22, 163, 74, 0.88); }
+.toast-item--danger  { background: rgba(220, 38, 38, 0.88); }
+.toast-item--info    { background: rgba(59, 130, 246, 0.88); }
+
+.toast-icon {
+  font-size: 1rem;
+  line-height: 1.3;
+  flex-shrink: 0;
+}
+
+/* Animación entrada/salida */
+.toast-enter-active { transition: all 0.28s cubic-bezier(.22, 1, .36, 1); }
+.toast-leave-active { transition: all 0.22s ease-in; }
+.toast-enter-from   { opacity: 0; transform: translateX(60px); }
+.toast-leave-to     { opacity: 0; transform: translateX(60px); }
 </style>
