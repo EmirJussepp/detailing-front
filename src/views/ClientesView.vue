@@ -58,6 +58,11 @@ const email = ref("")
 const localidadId = ref("")
 const tipoClienteId = ref("")
 
+
+const editErrorMsg = ref("")  // errores del modal de edición
+
+// refs nuevos
+const editando = ref(null) // cliente siendo editado (objeto completo)
 const search = ref("")
 
 function mapCliente(c) {
@@ -180,7 +185,6 @@ function resetForm() {
 
 async function create() {
   if (saving.value) return
-
   saving.value = true
   errorMsg.value = ""
   okMsg.value = ""
@@ -210,13 +214,13 @@ async function create() {
   } catch (e) {
     errorMsg.value =
       e?.response?.data?.error ||
+      e?.response?.data?.message ||
       e?.message ||
       "Error creando cliente."
   } finally {
     saving.value = false
   }
 }
-
 function goCuentaCorriente(clienteId) {
   router.push({ name: "caja.cuenta", query: { clienteId: String(clienteId) } })
 }
@@ -229,6 +233,49 @@ function onSizeChange() {
   // el pager minimalista no expone cambio de tamaño
 }
 
+function startEdit(c) {
+  editando.value = { ...c } // copia para no mutar la lista
+}
+
+function cancelEdit() {
+  editando.value = null
+  editErrorMsg.value = ""
+}
+async function saveEdit() {
+  if (saving.value || !editando.value) return
+  saving.value = true
+  editErrorMsg.value = ""
+
+  try {
+    const payload = {
+      nombre: editando.value.nombre?.trim(),
+      apellido: editando.value.apellido?.trim() || null,
+      dni: editando.value.dni?.trim(),
+      telefono: editando.value.telefono?.trim() || null,
+      email: editando.value.email?.trim() || null,
+      localidadId: editando.value.localidadId ? Number(editando.value.localidadId) : null,
+      tipoClienteId: editando.value.tipoClienteId ? Number(editando.value.tipoClienteId) : null,
+      activo: editando.value.activo ?? true,
+    }
+
+    if (!payload.nombre) throw new Error("Ingresá el nombre.")
+    if (!payload.dni) throw new Error("Ingresá el DNI.")
+
+    await clientesApi.update(editando.value.id, payload)
+
+    okMsg.value = "Cliente actualizado correctamente."
+    editando.value = null
+    await fetchAll()
+  } catch (e) {
+    editErrorMsg.value =
+      e?.response?.data?.error ||
+      e?.response?.data?.message ||
+      e?.message ||
+      "Error actualizando cliente."
+  } finally {
+    saving.value = false
+  }
+}
 let t = null
 watch(search, () => {
   clearTimeout(t)
@@ -356,6 +403,9 @@ onMounted(async () => {
               </option>
             </select>
           </div>
+
+<div v-if="errorMsg" class="alert alert-danger py-2 mt-3 mb-0">{{ errorMsg }}</div>
+<div v-if="okMsg" class="alert alert-success py-2 mt-3 mb-0">{{ okMsg }}</div>
         </div>
       </div>
     </div>
@@ -388,23 +438,20 @@ onMounted(async () => {
 
             <tbody>
               <tr v-for="c in filtrados" :key="c.id">
-                <td class="fw-semibold">
-                  {{ c.nombre }} {{ c.apellido || "" }}
-                </td>
-
+                <td class="fw-semibold">{{ c.nombre }} {{ c.apellido || "" }}</td>
                 <td class="text-secondary">{{ c.dni || "-" }}</td>
                 <td class="text-secondary">{{ c.telefono || "-" }}</td>
                 <td class="text-secondary">{{ c.email || "-" }}</td>
-
                 <td class="text-secondary">
                   {{ tipoById.get(String(c.tipoClienteId))?.name || "-" }}
                 </td>
-
                 <td class="text-secondary">
                   {{ locById.get(String(c.localidadId))?.nombre || "-" }}
                 </td>
-
-                <td class="text-end">
+                <td class="text-end d-flex gap-1 justify-content-end">
+                  <button class="btn btn-sm btn-outline-secondary" @click="startEdit(c)">
+                    Editar
+                  </button>
                   <button class="btn btn-sm btn-outline-light" @click="goCuentaCorriente(c.id)">
                     Ver cuenta
                   </button>
@@ -430,11 +477,83 @@ onMounted(async () => {
           </div>
 
           <div class="helper-text mt-3">
-            “Ver cuenta” abre la cuenta corriente del cliente seleccionado.
+            "Ver cuenta" abre la cuenta corriente del cliente seleccionado.
           </div>
         </div>
       </div>
     </div>
+
+    <!-- ── Modal: Editar cliente ── -->
+    <div v-if="editando" class="modal-backdrop">
+      <div class="modal-card">
+        <div class="section-header mb-3">
+          <h2 class="section-title mb-0">Editar cliente</h2>
+          <button class="btn btn-sm btn-outline-light" @click="cancelEdit" :disabled="saving">
+            Cerrar
+          </button>
+        </div>
+
+        <div class="row g-3 align-items-end">
+          <div class="col-12 col-md-6">
+            <label class="form-label field-label">Nombre</label>
+            <input v-model="editando.nombre" class="form-control app-input" />
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label field-label">Apellido</label>
+            <input v-model="editando.apellido" class="form-control app-input" />
+          </div>
+
+          <div class="col-12 col-md-4">
+            <label class="form-label field-label">DNI</label>
+            <input v-model="editando.dni" class="form-control app-input" />
+          </div>
+
+          <div class="col-12 col-md-4">
+            <label class="form-label field-label">Teléfono</label>
+            <input v-model="editando.telefono" class="form-control app-input" />
+          </div>
+
+          <div class="col-12 col-md-4">
+            <label class="form-label field-label">Email</label>
+            <input v-model="editando.email" class="form-control app-input" />
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label field-label">Tipo de cliente</label>
+            <select v-model="editando.tipoClienteId" class="form-select app-input">
+              <option v-for="t in tipos" :key="t.id" :value="t.id">
+                {{ t.name }}
+              </option>
+            </select>
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label field-label">Localidad</label>
+            <select v-model="editando.localidadId" class="form-select app-input">
+              <option :value="null">Sin localidad</option>
+              <option v-for="l in localidades" :key="l.id" :value="l.id">
+                {{ l.nombre }}
+              </option>
+            </select>
+          </div>
+<div class="col-12 d-flex gap-2 mt-2">
+  <button class="btn btn-outline-light" @click="cancelEdit" :disabled="saving">
+    Cancelar
+  </button>
+  <button class="btn btn-primary btn-accent" @click="saveEdit" :disabled="saving">
+    {{ saving ? "Guardando..." : "Guardar cambios" }}
+  </button>
+</div>
+
+<!-- alerta justo abajo de los botones -->
+<div v-if="editErrorMsg" class="col-12">
+  <div class="alert alert-danger py-2 mb-0">{{ editErrorMsg }}</div>
+</div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 

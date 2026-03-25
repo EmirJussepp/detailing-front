@@ -15,9 +15,9 @@ function formatMoney2(n) {
   const num = Number(n ?? 0)
   return Number.isFinite(num)
     ? num.toLocaleString("es-AR", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
     : "0,00"
 }
 
@@ -451,8 +451,8 @@ function normalizeVentaFromApi(payload) {
   const clienteId =
     v.clienteId != null ? Number(v.clienteId)
       : v.cliente?.id != null ? Number(v.cliente.id)
-      : v.cliente?.clienteId != null ? Number(v.cliente.clienteId)
-      : null
+        : v.cliente?.clienteId != null ? Number(v.cliente.clienteId)
+          : null
 
   return { ventaId, total, estado, clienteId, raw: v }
 }
@@ -644,20 +644,20 @@ const devClienteId = ref("")
 const devVentas = ref([])
 const devLoading = ref(false)
 const devError = ref("")
- 
+
 const devClienteEsMayorista = computed(
   () => clientes.value.find((c) => String(c.id) === String(devClienteId.value))?.tipoClienteId === 2
 )
- 
+
 async function buscarVentasCliente() {
   devError.value = ""
   devVentas.value = []
- 
+
   if (!devClienteId.value) {
     devError.value = "Seleccioná un cliente."
     return
   }
- 
+
   devLoading.value = true
   try {
     const { data } = await ventasApi.porClienteId(Number(devClienteId.value))
@@ -672,7 +672,7 @@ async function buscarVentasCliente() {
         fecha: v.fecha ?? null,
       }))
       .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
- 
+
     if (!devVentas.value.length) devError.value = "No hay ventas activas para este cliente."
   } catch (e) {
     devError.value = pickErr(e, "Error buscando ventas.")
@@ -680,7 +680,7 @@ async function buscarVentasCliente() {
     devLoading.value = false
   }
 }
- 
+
 function formatDateShort(v) {
   if (!v) return "—"
   try {
@@ -750,8 +750,15 @@ async function openPagoModal(ventaId, total = 0) {
 }
 
 function closePagoModal() {
+  const vid = pagoVentaId.value
+  const total = pagoTotalVenta.value
+  const metodo = metodoNombreById(Number(pagoMetodoPagoId.value))
   showPagoModal.value = false
-  nextTick(() => codeInputRef.value?.focus?.())
+  if (vid) {
+    nextTick(() => abrirComprobante(vid, total, metodo))
+  } else {
+    nextTick(() => codeInputRef.value?.focus?.())
+  }
 }
 
 function setPagarRestante() {
@@ -759,9 +766,9 @@ function setPagarRestante() {
   pagoMonto.value =
     restante > 0
       ? restante.toLocaleString("es-AR", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
       : ""
 }
 
@@ -829,12 +836,56 @@ async function registrarPago() {
   }
 }
 
+const showComprobanteModal = ref(false)
+const comprobanteVentaId = ref(null)
+const comprobanteTotal = ref(0)
+const comprobanteEmail = ref("")
+const comprobanteTipo = ref("VENTA")
+const comprobanteMetodo = ref("")
+const enviandoComprobante = ref(false)
+const comprobanteOk = ref(false)
+const comprobanteErr = ref("")
+
+function abrirComprobante(ventaId, total, metodoPago = "") {
+  comprobanteVentaId.value = ventaId
+  comprobanteTotal.value = total
+  comprobanteMetodo.value = metodoPago
+  comprobanteEmail.value = clienteSel.value?.email ?? ""
+  comprobanteTipo.value = "VENTA"
+  comprobanteOk.value = false
+  comprobanteErr.value = ""
+  showComprobanteModal.value = true
+}
+
+async function enviarComprobante() {
+  if (!comprobanteEmail.value.trim()) {
+    comprobanteErr.value = "Ingresá un email."
+    return
+  }
+  comprobanteErr.value = ""
+  enviandoComprobante.value = true
+  try {
+    await ventasApi.enviarComprobante(comprobanteVentaId.value, {
+      email: comprobanteEmail.value.trim(),
+      metodoPago: comprobanteMetodo.value || "Efectivo",
+      tipo: comprobanteTipo.value,
+    })
+    comprobanteOk.value = true
+    setTimeout(() => { showComprobanteModal.value = false }, 2000)
+  } catch (e) {
+    comprobanteErr.value = pickErr(e, "Error enviando el comprobante.")
+  } finally {
+    enviandoComprobante.value = false
+  }
+}
+
 function onKeydown(e) {
   if (e?.key === "Escape") {
     if (showPagoModal.value) closePagoModal()
     if (confirmState.value.open) closeConfirm()
   }
 }
+
 
 let refreshSeq = 0
 
@@ -949,10 +1000,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="col-12 col-md-6">
-            <div
-              v-if="!canSell"
-              class="status-warning d-flex justify-content-between align-items-center gap-2"
-            >
+            <div v-if="!canSell" class="status-warning d-flex justify-content-between align-items-center gap-2">
               <span>{{ infoMsg || cajaCheck.error || "Caja no disponible." }}</span>
               <button class="btn btn-sm btn-outline-light" @click="goCaja">Ir a Caja</button>
             </div>
@@ -981,18 +1029,14 @@ onBeforeUnmount(() => {
 
             <div class="sale-summary-item">
               <div class="helper-text">Estado</div>
-              <div
-                class="sale-summary-value"
-                :class="
-                  lastVenta.estado === 'ANULADA'
-                    ? 'text-danger'
-                    : lastVenta.estado === 'PAGADA'
+              <div class="sale-summary-value" :class="lastVenta.estado === 'ANULADA'
+                  ? 'text-danger'
+                  : lastVenta.estado === 'PAGADA'
                     ? 'text-success'
                     : lastVenta.estado === 'PARCIAL'
-                    ? 'text-warning'
-                    : 'text-secondary'
-                "
-              >
+                      ? 'text-warning'
+                      : 'text-secondary'
+                ">
                 {{ lastVenta.estado }}
               </div>
             </div>
@@ -1016,20 +1060,19 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="d-flex flex-wrap gap-2 mt-3">
-            <button
-              class="btn btn-outline-light"
-              @click="openPagoModal(lastVenta.ventaId, lastVenta.total)"
-              :disabled="lastVenta.estado === 'ANULADA' || lastVenta.estado === 'PAGADA'"
-            >
+            <button class="btn btn-outline-light" @click="openPagoModal(lastVenta.ventaId, lastVenta.total)"
+              :disabled="lastVenta.estado === 'ANULADA' || lastVenta.estado === 'PAGADA'">
               Cobrar venta
             </button>
 
-            <button
-              class="btn btn-outline-danger"
-              @click="devolverVenta(lastVenta.ventaId)"
-              :disabled="devolviendoVenta || lastVenta.estado === 'ANULADA'"
-            >
+            <button class="btn btn-outline-danger" @click="devolverVenta(lastVenta.ventaId)"
+              :disabled="devolviendoVenta || lastVenta.estado === 'ANULADA'">
               {{ devolviendoVenta ? "Devolviendo..." : "Devolver venta" }}
+            </button>
+
+            <button class="btn btn-outline-light"
+              @click="abrirComprobante(lastVenta.ventaId, lastVenta.total, lastVenta.metodoTxt)">
+              📧 Comprobante
             </button>
           </div>
 
@@ -1046,12 +1089,8 @@ onBeforeUnmount(() => {
         <div class="row g-2 mb-2">
           <div class="col-12 col-md-4">
             <label class="form-label field-label">Buscar cliente</label>
-            <input
-              v-model="clientesSearch"
-              class="form-control app-input"
-              placeholder="nombre / dni / teléfono"
-              :disabled="!canSell"
-            />
+            <input v-model="clientesSearch" class="form-control app-input" placeholder="nombre / dni / teléfono"
+              :disabled="!canSell" />
           </div>
 
           <div class="col-12 col-md-8">
@@ -1076,14 +1115,8 @@ onBeforeUnmount(() => {
         <div class="row g-2 mb-2">
           <div class="col-12">
             <label class="form-label field-label">Buscar producto (nombre o código)</label>
-            <input
-              ref="codeInputRef"
-              v-model="productSearch"
-              class="form-control app-input"
-              placeholder="Ej: shampoo / 779123..."
-              :disabled="!canSell"
-              @keydown="onSearchKeydown"
-            />
+            <input ref="codeInputRef" v-model="productSearch" class="form-control app-input"
+              placeholder="Ej: shampoo / 779123..." :disabled="!canSell" @keydown="onSearchKeydown" />
             <div class="helper-text mt-1">
               Consejo: si ingresás el código exacto y presionás Enter, agrega 1 unidad automáticamente.
             </div>
@@ -1106,13 +1139,8 @@ onBeforeUnmount(() => {
 
           <div class="col-6 col-md-2">
             <label class="form-label field-label">Cant.</label>
-            <input
-              v-model="itemQty"
-              class="form-control app-input"
-              inputmode="numeric"
-              :disabled="!canSell"
-              @keydown="onQtyKeydown"
-            />
+            <input v-model="itemQty" class="form-control app-input" inputmode="numeric" :disabled="!canSell"
+              @keydown="onQtyKeydown" />
           </div>
 
           <div class="col-12 col-md-3">
@@ -1145,27 +1173,17 @@ onBeforeUnmount(() => {
                 <td class="text-secondary">$ {{ formatMoney(it.basePrice) }}</td>
 
                 <td>
-                  <input
-                    class="form-control form-control-sm app-input"
-                    :value="it.porcentajeAjuste"
-                    inputmode="decimal"
+                  <input class="form-control form-control-sm app-input" :value="it.porcentajeAjuste" inputmode="decimal"
                     @input="updateItemPct(it.id, $event.target.value)"
-                    @change="updateItemPct(it.id, $event.target.value)"
-                    placeholder="-10 desc / 10 aum"
-                    :disabled="!canSell"
-                  />
+                    @change="updateItemPct(it.id, $event.target.value)" placeholder="-10 desc / 10 aum"
+                    :disabled="!canSell" />
                 </td>
 
                 <td class="text-secondary fw-semibold">$ {{ formatMoney(it.price) }}</td>
 
                 <td>
-                  <input
-                    class="form-control form-control-sm app-input"
-                    :value="it.qty"
-                    inputmode="numeric"
-                    @input="updateItemQty(it.id, $event.target.value)"
-                    :disabled="!canSell"
-                  />
+                  <input class="form-control form-control-sm app-input" :value="it.qty" inputmode="numeric"
+                    @input="updateItemQty(it.id, $event.target.value)" :disabled="!canSell" />
                 </td>
 
                 <td class="fw-bold">$ {{ formatMoney(it.subtotal) }}</td>
@@ -1201,7 +1219,8 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="helper-text mt-2">
-          Caja abierta requerida · la venta descuenta stock · cada ítem admite descuento % · el cobro puede ser parcial o total.
+          Caja abierta requerida · la venta descuenta stock · cada ítem admite descuento % · el cobro puede ser parcial
+          o total.
         </div>
       </div>
     </div>
@@ -1213,15 +1232,12 @@ onBeforeUnmount(() => {
             <div class="section-title">Registrar pago</div>
             <div class="helper-text">
               Estado:
-              <b
-                :class="
-                  estadoPagoVenta === 'PAGADA'
-                    ? 'text-success'
-                    : estadoPagoVenta === 'PARCIAL'
+              <b :class="estadoPagoVenta === 'PAGADA'
+                  ? 'text-success'
+                  : estadoPagoVenta === 'PARCIAL'
                     ? 'text-warning'
                     : 'text-secondary'
-                "
-              >
+                ">
                 {{ estadoPagoVenta }}
               </b>
             </div>
@@ -1240,7 +1256,8 @@ onBeforeUnmount(() => {
             <label class="form-label field-label">Monto</label>
             <div class="d-flex gap-2">
               <input v-model="pagoMonto" class="form-control app-input" placeholder="Ej: 20000" />
-              <button class="btn btn-outline-light" @click="setPagarRestante" :disabled="pagoLoading || estadoPagoVenta === 'PAGADA'">
+              <button class="btn btn-outline-light" @click="setPagarRestante"
+                :disabled="pagoLoading || estadoPagoVenta === 'PAGADA'">
                 Restante
               </button>
             </div>
@@ -1257,12 +1274,8 @@ onBeforeUnmount(() => {
 
           <div class="col-12">
             <label class="form-label field-label">Referencia (opcional)</label>
-            <input
-              v-model="pagoReferencia"
-              class="form-control app-input"
-              placeholder="Ej: comprobante / alias"
-              :disabled="estadoPagoVenta === 'PAGADA'"
-            />
+            <input v-model="pagoReferencia" class="form-control app-input" placeholder="Ej: comprobante / alias"
+              :disabled="estadoPagoVenta === 'PAGADA'" />
           </div>
         </div>
 
@@ -1272,7 +1285,8 @@ onBeforeUnmount(() => {
               Dejar fiado
             </button>
 
-            <button class="btn btn-primary btn-accent" @click="registrarPago" :disabled="pagoLoading || !canSell || estadoPagoVenta === 'PAGADA'">
+            <button class="btn btn-primary btn-accent" @click="registrarPago"
+              :disabled="pagoLoading || !canSell || estadoPagoVenta === 'PAGADA'">
               {{ pagoLoading ? "Guardando..." : "Registrar pago" }}
             </button>
           </div>
@@ -1325,95 +1339,145 @@ onBeforeUnmount(() => {
             Cancelar
           </button>
 
-          <button
-            class="btn"
-            :class="{
-              'btn-confirm-primary': confirmState.variant === 'primary',
-              'btn-confirm-danger': confirmState.variant === 'danger',
-              'btn-confirm-warning': confirmState.variant === 'warning',
-            }"
-            @click="confirmAccept"
-          >
+          <button class="btn" :class="{
+            'btn-confirm-primary': confirmState.variant === 'primary',
+            'btn-confirm-danger': confirmState.variant === 'danger',
+            'btn-confirm-warning': confirmState.variant === 'warning',
+          }" @click="confirmAccept">
             Confirmar
           </button>
         </div>
       </div>
     </div>
     <div class="card bg-panel border-0 shadow-sm mb-3">
-  <div class="card-body">
-    <div class="section-header mb-3">
-      <h2 class="section-title mb-0">Devolver venta anterior</h2>
-      <div class="helper-text">Buscá las ventas activas de un cliente para devolverlas.</div>
-    </div>
- 
-    <div class="row g-3 align-items-end">
-      <div class="col-12 col-md-6">
-        <label class="form-label field-label">Cliente</label>
-        <select v-model="devClienteId" class="form-select app-input" :disabled="devLoading">
-          <option value="">Seleccionar cliente…</option>
-          <option v-for="c in clientes" :key="c.id" :value="String(c.id)">
-            {{ c.nombre }} {{ c.apellido || "" }} — DNI: {{ c.dni || "-" }}
-            {{ c.tipoClienteId === 2 ? "🏷️ MAYORISTA" : "" }}
-          </option>
-        </select>
+      <div class="card-body">
+        <div class="section-header mb-3">
+          <h2 class="section-title mb-0">Devolver venta anterior</h2>
+          <div class="helper-text">Buscá las ventas activas de un cliente para devolverlas.</div>
+        </div>
+
+        <div class="row g-3 align-items-end">
+          <div class="col-12 col-md-6">
+            <label class="form-label field-label">Cliente</label>
+            <select v-model="devClienteId" class="form-select app-input" :disabled="devLoading">
+              <option value="">Seleccionar cliente…</option>
+              <option v-for="c in clientes" :key="c.id" :value="String(c.id)">
+                {{ c.nombre }} {{ c.apellido || "" }} — DNI: {{ c.dni || "-" }}
+                {{ c.tipoClienteId === 2 ? "🏷️ MAYORISTA" : "" }}
+              </option>
+            </select>
+          </div>
+
+          <div class="col-12 col-md-3">
+            <button class="btn btn-outline-light w-100" @click="buscarVentasCliente"
+              :disabled="devLoading || !devClienteId">
+              {{ devLoading ? "Buscando..." : "Buscar ventas" }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="devError" class="alert alert-danger py-2 mt-3 mb-0">{{ devError }}</div>
+
+        <div v-if="devVentas.length" class="table-responsive mt-3">
+          <table class="table table-dark table-hover align-middle app-table mb-0">
+            <thead>
+              <tr>
+                <th style="width: 90px">#Venta</th>
+                <th>Fecha</th>
+                <th style="width: 160px" class="text-end">Total</th>
+                <th style="width: 120px">Estado</th>
+                <th style="width: 130px" class="text-end">Acción</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="v in devVentas" :key="v.ventaId">
+                <td class="text-secondary">#{{ v.ventaId }}</td>
+                <td class="text-secondary">{{ formatDateShort(v.fecha) }}</td>
+                <td class="text-end fw-bold">$ {{ formatMoney(v.total) }}</td>
+                <td>
+                  <span class="badge" :class="{
+                    'badge-soft-success': v.estado === 'PAGADA',
+                    'badge-soft-warning': v.estado === 'PARCIAL',
+                    'badge-soft-secondary': v.estado === 'PENDIENTE',
+                  }">
+                    {{ v.estado }}
+                  </span>
+                </td>
+                <td class="text-end">
+                  <button class="btn btn-sm btn-outline-danger" :disabled="devolviendoVenta || !canSell"
+                    @click="devolverVenta(v.ventaId)">
+                    Devolver
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        
       </div>
- 
-      <div class="col-12 col-md-3">
-        <button
-          class="btn btn-outline-light w-100"
-          @click="buscarVentasCliente"
-          :disabled="devLoading || !devClienteId"
-        >
-          {{ devLoading ? "Buscando..." : "Buscar ventas" }}
-        </button>
+    </div>
+
+    <!-- Modal comprobante -->
+<div v-if="showComprobanteModal" class="modal-backdrop-custom"
+     @click.self="showComprobanteModal = false">
+  <div class="modal-comprobante">
+
+    <div class="d-flex justify-content-between align-items-start mb-3">
+      <div>
+        <div class="section-title">Enviar comprobante</div>
+        <div class="helper-text">
+          Venta #{{ comprobanteVentaId }} · $ {{ formatMoney(comprobanteTotal) }}
+        </div>
       </div>
+      <button class="btn btn-sm btn-outline-light"
+              @click="showComprobanteModal = false">✕</button>
     </div>
- 
-    <div v-if="devError" class="alert alert-danger py-2 mt-3 mb-0">{{ devError }}</div>
- 
-    <div v-if="devVentas.length" class="table-responsive mt-3">
-      <table class="table table-dark table-hover align-middle app-table mb-0">
-        <thead>
-          <tr>
-            <th style="width: 90px">#Venta</th>
-            <th>Fecha</th>
-            <th style="width: 160px" class="text-end">Total</th>
-            <th style="width: 120px">Estado</th>
-            <th style="width: 130px" class="text-end">Acción</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="v in devVentas" :key="v.ventaId">
-            <td class="text-secondary">#{{ v.ventaId }}</td>
-            <td class="text-secondary">{{ formatDateShort(v.fecha) }}</td>
-            <td class="text-end fw-bold">$ {{ formatMoney(v.total) }}</td>
-            <td>
-              <span
-                class="badge"
-                :class="{
-                  'badge-soft-success': v.estado === 'PAGADA',
-                  'badge-soft-warning': v.estado === 'PARCIAL',
-                  'badge-soft-secondary': v.estado === 'PENDIENTE',
-                }"
-              >
-                {{ v.estado }}
-              </span>
-            </td>
-            <td class="text-end">
-              <button
-                class="btn btn-sm btn-outline-danger"
-                :disabled="devolviendoVenta || !canSell"
-                @click="devolverVenta(v.ventaId)"
-              >
-                Devolver
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+
+    <div class="mb-3">
+      <label class="form-label field-label">Email destinatario</label>
+      <input
+        v-model="comprobanteEmail"
+        class="form-control app-input"
+        type="email"
+        placeholder="cliente@ejemplo.com"
+        :disabled="enviandoComprobante || comprobanteOk"
+      />
     </div>
+
+    <div class="mb-3">
+      <label class="form-label field-label">Tipo de comprobante</label>
+      <select v-model="comprobanteTipo" class="form-select app-input"
+              :disabled="enviandoComprobante || comprobanteOk">
+        <option value="VENTA">Venta / Cobro</option>
+        <option value="FIADO">Fiado / Cuenta corriente</option>
+      </select>
+    </div>
+
+    <div v-if="comprobanteErr" class="alert alert-danger py-2 mb-3">
+      {{ comprobanteErr }}
+    </div>
+    <div v-if="comprobanteOk" class="alert alert-success py-2 mb-3">
+      ✅ Comprobante enviado correctamente.
+    </div>
+
+    <div class="d-flex justify-content-end gap-2">
+      <button class="btn btn-outline-light"
+              @click="showComprobanteModal = false"
+              :disabled="enviandoComprobante">
+        Omitir
+      </button>
+      <button
+        class="btn btn-primary btn-accent"
+        @click="enviarComprobante"
+        :disabled="!comprobanteEmail || enviandoComprobante || comprobanteOk"
+      >
+        {{ enviandoComprobante ? "Enviando..." : "Enviar comprobante" }}
+      </button>
+    </div>
+
   </div>
 </div>
+    
   </div>
 </template>
 
@@ -1421,8 +1485,8 @@ onBeforeUnmount(() => {
 .sale-summary {
   padding: 16px;
   border-radius: 16px;
-  border: 1px solid rgba(255,255,255,.08);
-  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255, 255, 255, .08);
+  background: rgba(255, 255, 255, .03);
 }
 
 .sale-summary-grid {
@@ -1453,6 +1517,7 @@ onBeforeUnmount(() => {
     grid-template-columns: 1fr;
   }
 }
+
 .ventas-page {
   min-height: 100%;
 }
@@ -1470,8 +1535,8 @@ onBeforeUnmount(() => {
   min-height: 44px;
   padding: 10px 14px;
   border-radius: 14px;
-  background: rgba(255,255,255,.03);
-  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255, 255, 255, .03);
+  border: 1px solid rgba(255, 255, 255, .08);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1479,6 +1544,15 @@ onBeforeUnmount(() => {
 }
 
 .status-ok-text {
-  color: rgba(255,255,255,.78);
+  color: rgba(255, 255, 255, .78);
+}
+.modal-comprobante {
+  width: min(500px, 100%);
+  background: rgba(18, 22, 32, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 18px;
+  padding: 24px;
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.55);
+  color: #fff;
 }
 </style>

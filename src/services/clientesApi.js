@@ -32,4 +32,8 @@ export const clientesApi = {
   estadoCuenta(clienteId) {
     return http.get(`/clientes/${clienteId}/estado-cuenta`)
   },
+
+  update(id, payload) {
+  return http.put(`/clientes/${id}`, payload)
+},
 }

@@ -5,13 +5,26 @@ import Pager from "../components/Pager.vue"
 
 import { clientesApi } from "../services/clientesApi"
 import { cuentaCorrienteApi } from "../services/cuentaCorrienteService"
+import { pagosApi } from "../services/pagosApi"
+import { cajaApi } from "../services/cajaApi"
+import { metodosPagoApi } from "../services/metodopagoservice"
+import { getTurnoOperativo } from "../ui/turnoOperativo"
 
-const route = useRoute()
-const router = useRouter()
+// ─────────────────────────────────────────────
+// Constantes
+// ─────────────────────────────────────────────
 
-// =========================
-// Helpers
-// =========================
+/**
+ * FIX #1: Tolerancia de punto flotante centralizada.
+ * Se usaba 0.001 hardcodeado en dos lugares distintos;
+ * ahora cualquier cambio se propaga solo.
+ */
+const FLOAT_EPSILON = 0.001
+
+// ─────────────────────────────────────────────
+// Helpers puros (sin efectos secundarios)
+// ─────────────────────────────────────────────
+
 function formatMoney(n) {
   const num = Number(n ?? 0)
   return num.toLocaleString("es-AR", {
@@ -63,7 +76,9 @@ function badgeOrigen(tipo) {
   const t = String(tipo || "").toUpperCase()
   if (t === "VENTA") return { text: "VENTA", cls: "badge badge-soft-primary" }
   if (t === "PAGO") return { text: "PAGO", cls: "badge badge-soft-success" }
-  if (t === "NOTA_CREDITO" || t === "NC") return { text: "NC", cls: "badge badge-soft-warning" }
+  if (t === "NOTA_CREDITO" || t === "NC") {
+    return { text: "NC", cls: "badge badge-soft-warning" }
+  }
   return { text: t || "OTRO", cls: "badge badge-soft-secondary" }
 }
 
@@ -73,9 +88,24 @@ function clampPage(p) {
   return n
 }
 
-// =========================
-// State
-// =========================
+function pickErr(e, fallback = "Ocurrió un error.") {
+  return (
+    e?.response?.data?.error ||
+    e?.response?.data?.message ||
+    e?.response?.data ||
+    e?.message ||
+    fallback
+  )
+}
+
+function getCajaInfoMessage() {
+  return "No hay una caja abierta para registrar cobros. Abrí una caja antes de cobrar deuda."
+}
+
+// ─────────────────────────────────────────────
+// Estado general
+// ─────────────────────────────────────────────
+
 const loading = ref(false)
 const errorMsg = ref("")
 const okMsg = ref("")
@@ -105,13 +135,281 @@ const searchError = ref("")
 const showSuggest = ref(false)
 const suggestions = ref([])
 
-let debounceTimer = null
-let requestSeq = 0
+// FIX #4: debounceTimer y requestSeq como refs de instancia,
+// no como variables de módulo que se comparten entre instancias
+// (evita bugs en SSR y hot-reload).
+const debounceTimer = ref(null)
+const requestSeq = ref(0)
+
 const bootstrapped = ref(false)
 
-// =========================
-// Expandible
-// =========================
+// FIX #8: flag para no mutar estado si el componente ya se desmontó
+const isMounted = ref(false)
+
+// ─────────────────────────────────────────────
+// Caja
+// ─────────────────────────────────────────────
+
+const turnoSel = ref(getTurnoOperativo())
+const cajaCheck = ref({ ok: false, error: "" })
+const cajaAbierta = ref(null)
+
+async function refreshCaja() {
+  try {
+    const { data } = await cajaApi.abierta({ turno: turnoSel.value })
+    cajaAbierta.value = data ?? null
+
+    if (cajaAbierta.value?.cajaId) {
+      cajaCheck.value = { ok: true, error: "" }
+      if (infoMsg.value === getCajaInfoMessage()) infoMsg.value = ""
+    } else {
+      cajaCheck.value = { ok: false, error: "No hay caja ABIERTA." }
+      infoMsg.value = getCajaInfoMessage()
+    }
+  } catch (e) {
+    cajaAbierta.value = null
+
+    if (e?.response?.status === 404) {
+      cajaCheck.value = { ok: false, error: "No hay caja ABIERTA." }
+      infoMsg.value = getCajaInfoMessage()
+    } else {
+      cajaCheck.value = {
+        ok: false,
+        error: pickErr(e, "No se pudo validar la caja."),
+      }
+    }
+  }
+}
+
+// ─────────────────────────────────────────────
+// Alert UI
+// ─────────────────────────────────────────────
+
+const uiAlert = ref({ show: false, type: "info", title: "", message: "" })
+let alertTimer = null
+
+function showAlert(type, title, message) {
+  uiAlert.value = { show: true, type, title, message }
+  clearTimeout(alertTimer)
+  alertTimer = setTimeout(() => {
+    uiAlert.value.show = false
+  }, 3600)
+}
+
+function closeAlert() {
+  uiAlert.value.show = false
+}
+
+// ─────────────────────────────────────────────
+// Pago de deuda
+// ─────────────────────────────────────────────
+
+const showPagoModal = ref(false)
+const ventaSeleccionada = ref(null)
+
+const pagoMonto = ref("")
+const pagoMetodoPagoId = ref("")
+const pagoReferencia = ref("")
+const pagoLoading = ref(false)
+const pagoError = ref("")
+const pagoInfo = ref("")
+const pagoSuccess = ref("")
+
+// FIX #2: métodos de pago desde la API, no hardcodeados
+const metodosPago = ref([])
+
+async function fetchMetodosPago() {
+  try {
+    const { data } = await metodosPagoApi.list()
+    metodosPago.value = Array.isArray(data) ? data : (data?.content ?? [])
+  } catch {
+    // Fallback razonable si la API no existe aún
+    metodosPago.value = [
+      { metodoPagoId: 1, nombre: "Efectivo" },
+      { metodoPagoId: 2, nombre: "Transferencia" },
+    ]
+  }
+}
+
+const pagoRestante = computed(() => {
+  return ventaSeleccionada.value?.pendiente ?? 0
+})
+
+const pagoMontoNumero = computed(() => {
+  const n = Number(pagoMonto.value)
+  return Number.isFinite(n) ? n : 0
+})
+
+// FIX #1: usa FLOAT_EPSILON en lugar de 0.001 hardcodeado
+const pagoEsTotal = computed(() => {
+  return (
+    pagoMontoNumero.value > 0 &&
+    Math.abs(pagoMontoNumero.value - pagoRestante.value) < FLOAT_EPSILON
+  )
+})
+
+const pagoEsParcial = computed(() => {
+  return pagoMontoNumero.value > 0 && pagoMontoNumero.value < pagoRestante.value - FLOAT_EPSILON
+})
+
+const saldoDespuesDelPago = computed(() => {
+  const restante = pagoRestante.value - pagoMontoNumero.value
+  return restante > FLOAT_EPSILON ? restante : 0
+})
+
+const cajaDisponibleLabel = computed(() => {
+  if (!cajaAbierta.value?.cajaId) return "Sin caja abierta"
+  return `Caja #${cajaAbierta.value.cajaId}`
+})
+
+function resetPagoModal() {
+  showPagoModal.value = false
+  ventaSeleccionada.value = null
+  pagoMonto.value = ""
+  pagoMetodoPagoId.value = ""
+  pagoReferencia.value = ""
+  pagoLoading.value = false
+  pagoError.value = ""
+  pagoInfo.value = ""
+  pagoSuccess.value = ""
+}
+
+function cerrarPagoModal() {
+  resetPagoModal()
+}
+
+function abrirPago(row) {
+  // FIX #5: guard interna aunque el botón esté disabled
+  if (!cajaCheck.value.ok) {
+    showAlert("warning", "Sin caja abierta", getCajaInfoMessage())
+    return
+  }
+
+  ventaSeleccionada.value = row
+  pagoError.value = ""
+  pagoSuccess.value = ""
+
+  // FIX #6: usa row.pendiente (ya calculado en normalizeRow)
+  const restante = row.pendiente
+
+  if (!Number.isFinite(restante) || restante <= 0) {
+    pagoMonto.value = ""
+    pagoInfo.value = "Esta venta no tiene saldo pendiente."
+  } else {
+    pagoMonto.value = restante.toFixed(2)
+    pagoInfo.value =
+      "Se cargó automáticamente el saldo pendiente total. Podés modificarlo para registrar un pago parcial."
+  }
+
+  pagoMetodoPagoId.value = ""
+  pagoReferencia.value = ""
+  showPagoModal.value = true
+}
+
+function pagarTotal() {
+  if (!pagoRestante.value) return
+  pagoMonto.value = pagoRestante.value.toFixed(2)
+}
+
+function pagarMitad() {
+  if (!pagoRestante.value) return
+  pagoMonto.value = (pagoRestante.value / 2).toFixed(2)
+}
+
+function limpiarMonto() {
+  pagoMonto.value = ""
+}
+
+function validarPago() {
+  pagoError.value = ""
+
+  if (!cajaAbierta.value?.cajaId) {
+    pagoError.value = "No hay una caja abierta para registrar el cobro."
+    return false
+  }
+
+  const ventaId = Number(ventaSeleccionada.value?.ventaId || 0)
+  if (!ventaId) {
+    pagoError.value = "La venta seleccionada no es válida."
+    return false
+  }
+
+  const monto = Number(pagoMonto.value)
+  if (!Number.isFinite(monto) || monto <= 0) {
+    pagoError.value = "Ingresá un monto válido mayor a cero."
+    return false
+  }
+
+  // FIX #1: tolerancia consistente con FLOAT_EPSILON
+  if (monto > pagoRestante.value + FLOAT_EPSILON) {
+    pagoError.value = "El monto no puede superar el saldo pendiente."
+    return false
+  }
+
+  const metodoId = Number(pagoMetodoPagoId.value)
+  if (!metodoId) {
+    pagoError.value = "Seleccioná un método de pago."
+    return false
+  }
+
+  return true
+}
+
+async function confirmarPago() {
+  if (pagoLoading.value) return
+  if (!validarPago()) return
+
+  // FIX #7: calcular el mensaje ANTES del await,
+  // porque después el estado puede haber cambiado
+  const esTotalPago = pagoEsTotal.value
+  const montoACobrar = Number(pagoMonto.value)
+  const ventaId = Number(ventaSeleccionada.value.ventaId)
+
+  try {
+    pagoLoading.value = true
+    pagoError.value = ""
+    pagoSuccess.value = ""
+
+    await pagosApi.create({
+      ventaId,
+      cajaId: Number(cajaAbierta.value.cajaId),
+      metodoPagoId: Number(pagoMetodoPagoId.value),
+      monto: montoACobrar,
+      referencia: pagoReferencia.value?.trim() || null,
+    })
+
+    pagoSuccess.value = esTotalPago
+      ? "Cobro total registrado correctamente."
+      : "Cobro parcial registrado correctamente."
+
+    await refreshCurrentCuenta()
+    await refreshCaja()
+
+    showAlert(
+      "success",
+      "Cobro registrado",
+      esTotalPago
+        ? "La deuda de esta venta quedó cancelada."
+        : "El cobro parcial quedó registrado correctamente."
+    )
+
+    // FIX #8: solo ejecutar el timeout si el componente sigue montado
+    setTimeout(() => {
+      if (isMounted.value) resetPagoModal()
+    }, 650)
+  } catch (e) {
+    const msg = pickErr(e, "No se pudo registrar el cobro.")
+    pagoError.value = msg
+    showAlert("danger", "Error al registrar cobro", msg)
+  } finally {
+    pagoLoading.value = false
+  }
+}
+
+// ─────────────────────────────────────────────
+// Expandible (filas de detalle)
+// ─────────────────────────────────────────────
+
 function toggleRow(key) {
   const s = new Set(expanded.value)
   if (s.has(key)) s.delete(key)
@@ -119,9 +417,10 @@ function toggleRow(key) {
   expanded.value = s
 }
 
-// =========================
+// ─────────────────────────────────────────────
 // Clientes
-// =========================
+// ─────────────────────────────────────────────
+
 function mapCliente(c) {
   return {
     id: Number(c?.clienteId ?? c?.id ?? 0),
@@ -144,21 +443,22 @@ const clienteSel = computed(() => {
 const clienteTitulo = computed(() => {
   if (!clienteSel.value) return "Cuenta Corriente"
   const c = clienteSel.value
-  return `${`${c.nombre} ${c.apellido || ""}`.trim()}`
+  return `${c.nombre} ${c.apellido || ""}`.trim()
 })
 
 const clienteSubtitulo = computed(() => {
   if (!clienteSel.value) {
-    return "Seguimiento de deuda, historial y detalle de movimientos por cliente."
+    return "Seguimiento de deuda, historial y cobros por cliente."
   }
   return clienteSel.value.dni
     ? `DNI: ${clienteSel.value.dni}`
-    : "Seguimiento de deuda e historial del cliente."
+    : "Seguimiento de deuda, historial y cobros del cliente."
 })
 
-// =========================
+// ─────────────────────────────────────────────
 // Buscador
-// =========================
+// ─────────────────────────────────────────────
+
 function clienteLabel(c) {
   const full = `${c.nombre} ${c.apellido || ""}`.trim()
   const dni = c.dni ? ` · DNI ${c.dni}` : ""
@@ -213,14 +513,12 @@ async function searchByDni(dni) {
 
     selectCliente(c)
     okMsg.value = `Cliente encontrado: ${c.nombre} ${c.apellido || ""}`.trim()
-
     setTimeout(() => {
       if (okMsg.value.startsWith("Cliente encontrado:")) okMsg.value = ""
     }, 1800)
   } catch (e) {
     searchError.value =
-      e?.response?.data?.error ||
-      "No se encontró cliente con ese DNI."
+      e?.response?.data?.error || "No se encontró cliente con ese DNI."
   } finally {
     searching.value = false
   }
@@ -236,8 +534,8 @@ function onSearchInput() {
     return
   }
 
-  clearTimeout(debounceTimer)
-  debounceTimer = setTimeout(async () => {
+  clearTimeout(debounceTimer.value)
+  debounceTimer.value = setTimeout(async () => {
     if (searchMode.value === "NOMBRE") {
       suggestions.value = buildSuggestions(v)
       showSuggest.value = suggestions.value.length > 0
@@ -306,14 +604,18 @@ function clearCliente() {
   infoMsg.value = "Elegí un cliente para ver su cuenta corriente."
 }
 
+// ─────────────────────────────────────────────
+// Eventos globales
+// ─────────────────────────────────────────────
+
 function onGlobalClick(e) {
-  const el = e.target
-  if (!el?.closest?.(".cc-search")) showSuggest.value = false
+  if (!e.target?.closest?.(".cc-search")) showSuggest.value = false
 }
 
-// =========================
+// ─────────────────────────────────────────────
 // Loaders
-// =========================
+// ─────────────────────────────────────────────
+
 async function fetchClientes() {
   const { data } = await clientesApi.list({ page: 0, size: 500 })
   const paged = unwrapPage(data)
@@ -335,20 +637,19 @@ function pushQueryCliente() {
   }
 
   router.replace({
-    query: {
-      ...route.query,
-      clienteId: String(clienteIdSel.value),
-    },
+    query: { ...route.query, clienteId: String(clienteIdSel.value) },
   })
 }
 
 async function fetchCuenta(clienteId) {
-  const currentReq = ++requestSeq
+  // FIX #3: snapshot de page actual para poder rollback si la request se cancela
+  const pageAntes = page.value
+  const currentReq = ++requestSeq.value
 
   loading.value = true
   errorMsg.value = ""
   okMsg.value = ""
-  infoMsg.value = ""
+  infoMsg.value = cajaCheck.value.ok ? "" : getCajaInfoMessage()
 
   try {
     const [rDeuda, rEstado] = await Promise.all([
@@ -359,7 +660,7 @@ async function fetchCuenta(clienteId) {
       }),
     ])
 
-    if (currentReq !== requestSeq) return
+    if (currentReq !== requestSeq.value) return
 
     deuda.value = rDeuda?.data ?? null
 
@@ -379,31 +680,30 @@ async function fetchCuenta(clienteId) {
 
     if (!paged.content.length) {
       infoMsg.value = "Este cliente todavía no tiene movimientos en cuenta corriente."
+    } else if (!cajaCheck.value.ok) {
+      infoMsg.value = getCajaInfoMessage()
     }
   } catch (e) {
-    if (currentReq !== requestSeq) return
+    if (currentReq !== requestSeq.value) return
+
+    // FIX #3: rollback de page si la request falló
+    page.value = pageAntes
 
     deuda.value = null
     estado.value = []
     totalElements.value = 0
     totalPages.value = 1
 
-    errorMsg.value =
-      e?.response?.data?.error ||
-      e?.response?.data?.message ||
-      e?.response?.data ||
-      e?.message ||
-      "Error cargando cuenta corriente."
+    errorMsg.value = pickErr(e, "Error cargando cuenta corriente.")
   } finally {
-    if (currentReq === requestSeq) {
-      loading.value = false
-    }
+    if (currentReq === requestSeq.value) loading.value = false
   }
 }
 
-// =========================
+// ─────────────────────────────────────────────
 // Normalización UI
-// =========================
+// ─────────────────────────────────────────────
+
 function normalizeRow(x, idx) {
   const fecha = x.fecha ?? x.createdAt ?? x.created_at ?? null
   const debe = Number(x.debe ?? 0) || 0
@@ -447,6 +747,11 @@ function normalizeRow(x, idx) {
     comprobanteId,
     items,
     key,
+    // Pendiente real viene del backend (GetEstadoCuentaHandler lo calcula
+    // cruzando pagos por ventaId). Para PAGO y NC el backend manda 0.0.
+    // NO calcular localmente como debe - haber: eso siempre daría el total
+    // bruto porque haber en la fila VENTA siempre es 0.
+    pendiente: Number(x.pendiente ?? 0),
   }
 }
 
@@ -460,12 +765,10 @@ const estadoFiltrado = computed(() => {
   return estadoUI.value.filter((r) => {
     if (filtroOrigen.value !== "TODOS" && r.origen !== filtroOrigen.value) return false
     if (filtroTipo.value !== "TODOS" && r.tipoMov !== filtroTipo.value) return false
-
     if (txt) {
       const blob = `${r.referencia ?? ""} ${r.origen ?? ""}`.toLowerCase()
       if (!blob.includes(txt)) return false
     }
-
     return true
   })
 })
@@ -484,9 +787,20 @@ const saldoFinal = computed(() => {
   return Number(last.saldo ?? 0)
 })
 
-// =========================
-// Pager handlers
-// =========================
+const deudaTotalActual = computed(() => {
+  const apiDebt = Number(deuda.value?.deuda)
+  if (Number.isFinite(apiDebt)) return Math.max(0, apiDebt)
+  return Math.max(0, saldoFinal.value, totDebe.value - totHaber.value)
+})
+
+const ventasConSaldoPendiente = computed(() =>
+  estadoUI.value.filter((r) => r.origen === "VENTA" && r.pendiente > 0).length
+)
+
+// ─────────────────────────────────────────────
+// Pager
+// ─────────────────────────────────────────────
+
 function onPageChange(newPage) {
   const next = clampPage(newPage)
   const maxPage = Math.max(0, totalPages.value - 1)
@@ -495,53 +809,74 @@ function onPageChange(newPage) {
   if (safeNext === page.value) return
 
   page.value = safeNext
-
-  if (clienteIdSel.value) {
-    fetchCuenta(Number(clienteIdSel.value))
-  }
+  if (clienteIdSel.value) fetchCuenta(Number(clienteIdSel.value))
 }
 
 function onSizeChange() {
-  // Se deja vacío a propósito porque tu paginador final
-  // ya no debería exponer selector de tamaño.
+  // intencionalmente vacío
 }
 
-// =========================
-// Export
-// =========================
+// ─────────────────────────────────────────────
+// Export CSV
+// ─────────────────────────────────────────────
+
+// FIX #10: feedback al usuario si el export falla
 function exportCSV() {
-  const rows = estadoFiltrado.value.map((r) => ({
-    fecha: r.fecha ?? "",
-    origen: r.origen ?? "",
-    referencia: r.referencia ?? "",
-    debe: r.debe ?? 0,
-    haber: r.haber ?? 0,
-    saldo: r.saldo ?? "",
-  }))
+  try {
+    const rows = estadoFiltrado.value.map((r) => ({
+      fecha: r.fecha ?? "",
+      origen: r.origen ?? "",
+      referencia: r.referencia ?? "",
+      debe: r.debe ?? 0,
+      haber: r.haber ?? 0,
+      pendiente: r.pendiente ?? 0,
+      saldo: r.saldo ?? "",
+    }))
 
-  const header = ["fecha", "origen", "referencia", "debe", "haber", "saldo"]
-  const csvLines = [
-    header.join(";"),
-    ...rows.map((obj) =>
-      header.map((k) => `"${String(obj[k] ?? "").replaceAll('"', '""')}"`).join(";")
-    ),
-  ]
+    const header = ["fecha", "origen", "referencia", "debe", "haber", "pendiente", "saldo"]
+    const csvLines = [
+      header.join(";"),
+      ...rows.map((obj) =>
+        header
+          .map((k) => `"${String(obj[k] ?? "").replaceAll('"', '""')}"`)
+          .join(";")
+      ),
+    ]
 
-  const csv = csvLines.join("\n")
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = url
-  a.download = `cuenta_corriente_cliente_${clienteIdSel.value || "NA"}.csv`
-  a.click()
-  URL.revokeObjectURL(url)
+    const blob = new Blob([csvLines.join("\n")], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `cuenta_corriente_cliente_${clienteIdSel.value || "NA"}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch {
+    showAlert("danger", "Error al exportar", "No se pudo generar el archivo CSV.")
+  }
 }
 
-// =========================
+// ─────────────────────────────────────────────
+// Refresh cuenta actual
+// ─────────────────────────────────────────────
+
+async function refreshCurrentCuenta() {
+  if (!clienteIdSel.value) return
+  await fetchCuenta(Number(clienteIdSel.value))
+}
+
+// ─────────────────────────────────────────────
 // Lifecycle
-// =========================
+// ─────────────────────────────────────────────
+
+const route = useRoute()
+const router = useRouter()
+
 onMounted(async () => {
-  await fetchClientes()
+  isMounted.value = true
+
+  // FIX #2: cargar métodos de pago desde la API al montar
+  await Promise.all([fetchClientes(), refreshCaja(), fetchMetodosPago()])
+
   setClienteFromQuery()
   bootstrapped.value = true
 
@@ -556,19 +891,21 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  // FIX #8: marcar como desmontado antes de limpiar
+  isMounted.value = false
+
   window.removeEventListener("click", onGlobalClick)
   window.removeEventListener("cuentaCorriente:changed", refreshCurrentCuenta)
-  clearTimeout(debounceTimer)
+  clearTimeout(debounceTimer.value)
+  clearTimeout(alertTimer)
 })
 
-async function refreshCurrentCuenta() {
-  if (!clienteIdSel.value) return
-  await fetchCuenta(Number(clienteIdSel.value))
-}
+// ─────────────────────────────────────────────
+// Watches
+// ─────────────────────────────────────────────
 
 watch(clienteIdSel, async (v, oldV) => {
-  if (!bootstrapped.value) return
-  if (v === oldV) return
+  if (!bootstrapped.value || v === oldV) return
 
   pushQueryCliente()
 
@@ -596,9 +933,7 @@ watch(clienteIdSel, async (v, oldV) => {
         <h1 class="page-title mb-1">
           {{ clienteSel ? clienteTitulo : "Cuenta Corriente" }}
         </h1>
-        <p class="page-subtitle mb-0">
-          {{ clienteSubtitulo }}
-        </p>
+        <p class="page-subtitle mb-0">{{ clienteSubtitulo }}</p>
       </div>
 
       <div class="hero-actions">
@@ -628,25 +963,36 @@ watch(clienteIdSel, async (v, oldV) => {
       </div>
     </section>
 
+    <div
+      v-if="uiAlert.show"
+      class="app-alert mb-3"
+      :class="`app-alert--${uiAlert.type}`"
+    >
+      <div>
+        <div class="app-alert__title">{{ uiAlert.title }}</div>
+        <div class="app-alert__text">{{ uiAlert.message }}</div>
+      </div>
+      <button class="app-alert__close" @click="closeAlert">×</button>
+    </div>
+
     <div v-if="errorMsg" class="alert alert-danger py-2 mb-3">{{ errorMsg }}</div>
     <div v-if="okMsg" class="alert alert-success py-2 mb-3">{{ okMsg }}</div>
     <div v-if="infoMsg" class="alert alert-secondary py-2 mb-3">{{ infoMsg }}</div>
 
+    <!-- Búsqueda de cliente -->
     <div class="card bg-panel border-0 shadow-sm mb-3 cc-search">
       <div class="card-body">
         <div class="section-header mb-3">
           <h2 class="section-title mb-0">Buscar cliente</h2>
-          <div class="helper-text">Buscá por DNI o por nombre para ver su historial.</div>
+          <div class="helper-text">
+            Buscá por DNI o por nombre para ver su deuda y sus movimientos.
+          </div>
         </div>
 
         <div class="row g-3 align-items-end">
           <div class="col-12 col-md-3">
             <label class="form-label field-label">Modo de búsqueda</label>
-            <select
-              v-model="searchMode"
-              class="form-select app-input"
-              :disabled="loading"
-            >
+            <select v-model="searchMode" class="form-select app-input" :disabled="loading">
               <option value="DNI">Por DNI</option>
               <option value="NOMBRE">Por nombre / apellido</option>
             </select>
@@ -680,7 +1026,9 @@ watch(clienteIdSel, async (v, oldV) => {
               </button>
             </div>
 
-            <div v-if="searchError" class="text-danger small mt-2">{{ searchError }}</div>
+            <div v-if="searchError" class="text-danger small mt-2">
+              {{ searchError }}
+            </div>
           </div>
 
           <div class="col-12 col-md-2">
@@ -695,13 +1043,13 @@ watch(clienteIdSel, async (v, oldV) => {
 
           <div class="col-12 col-md-2">
             <label class="form-label field-label">Cliente</label>
-            <select
-              v-model="clienteIdSel"
-              class="form-select app-input"
-              :disabled="loading"
-            >
+            <select v-model="clienteIdSel" class="form-select app-input" :disabled="loading">
               <option value="">Seleccionar…</option>
-              <option v-for="c in clientesActivos" :key="c.id" :value="String(c.id)">
+              <option
+                v-for="c in clientesActivos"
+                :key="c.id"
+                :value="String(c.id)"
+              >
                 {{ c.nombre }} {{ c.apellido || "" }} · DNI: {{ c.dni || "-" }}
               </option>
             </select>
@@ -710,7 +1058,34 @@ watch(clienteIdSel, async (v, oldV) => {
       </div>
     </div>
 
+    <!-- Contenido del cliente seleccionado -->
     <template v-if="clienteIdSel">
+
+      <!-- Tarjeta de deuda principal -->
+      <div class="debt-focus-card mb-3">
+        <div class="debt-focus-copy">
+          <div class="debt-focus-label">Total pendiente actual</div>
+          <div class="debt-focus-value">$ {{ formatMoney(deudaTotalActual) }}</div>
+          <div class="debt-focus-note">
+            Este es el monto más importante para el cliente: lo que todavía resta abonar.
+          </div>
+        </div>
+
+        <div class="debt-focus-side">
+          <div class="debt-mini">
+            <span>Ventas con saldo</span>
+            <strong>{{ ventasConSaldoPendiente }}</strong>
+          </div>
+          <div class="debt-mini">
+            <span>Caja activa</span>
+            <strong :class="cajaCheck.ok ? 'text-success' : 'text-danger'">
+              {{ cajaCheck.ok ? "Sí" : "No" }}
+            </strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- KPIs -->
       <div class="row g-3 mb-3">
         <div class="col-6 col-md-3">
           <div class="kpi-card">
@@ -718,29 +1093,27 @@ watch(clienteIdSel, async (v, oldV) => {
             <div class="kpi-value text-danger">$ {{ formatMoney(totDebe) }}</div>
           </div>
         </div>
-
         <div class="col-6 col-md-3">
           <div class="kpi-card">
             <div class="kpi-label">Haber</div>
             <div class="kpi-value text-success">$ {{ formatMoney(totHaber) }}</div>
           </div>
         </div>
-
         <div class="col-6 col-md-3">
           <div class="kpi-card">
-            <div class="kpi-label">Saldo en esta página</div>
+            <div class="kpi-label">Saldo acumulado visible</div>
             <div class="kpi-value">$ {{ formatMoney(saldoFinal) }}</div>
           </div>
         </div>
-
         <div class="col-6 col-md-3">
-          <div class="kpi-card">
-            <div class="kpi-label">Deuda total</div>
-            <div class="kpi-value">$ {{ formatMoney(deuda?.deudaTotal ?? saldoFinal) }}</div>
+          <div class="kpi-card kpi-card--accent">
+            <div class="kpi-label">Resta pagar</div>
+            <div class="kpi-value">$ {{ formatMoney(deudaTotalActual) }}</div>
           </div>
         </div>
       </div>
 
+      <!-- Filtros -->
       <div class="card bg-panel border-0 shadow-sm mb-3">
         <div class="card-body">
           <div class="section-header mb-3">
@@ -782,11 +1155,14 @@ watch(clienteIdSel, async (v, oldV) => {
         </div>
       </div>
 
+      <!-- Historial -->
       <div class="card bg-panel border-0 shadow-sm">
         <div class="card-body">
           <div class="section-header mb-3">
             <h2 class="section-title mb-0">Historial</h2>
-            <div class="helper-text">Movimientos paginados del cliente seleccionado.</div>
+            <div class="helper-text">
+              Movimientos paginados del cliente seleccionado.
+            </div>
           </div>
 
           <div v-if="loading" class="empty-block">
@@ -810,8 +1186,10 @@ watch(clienteIdSel, async (v, oldV) => {
                   <th>Referencia</th>
                   <th style="width: 140px" class="text-end">Debe</th>
                   <th style="width: 140px" class="text-end">Haber</th>
-                  <th style="width: 160px" class="text-end">Saldo</th>
+                  <th style="width: 150px" class="text-end">Pendiente</th>
+                  <th style="width: 150px" class="text-end">Saldo</th>
                   <th style="width: 120px" class="text-end">Detalle</th>
+                  <th style="width: 150px" class="text-end">Acciones</th>
                 </tr>
               </thead>
 
@@ -844,7 +1222,16 @@ watch(clienteIdSel, async (v, oldV) => {
                       {{ r.haber > 0 ? "$ " + formatMoney(r.haber) : "—" }}
                     </td>
 
-                    <td class="text-end fw-bold">$ {{ formatMoney(r.saldo ?? 0) }}</td>
+                    <td class="text-end">
+                      <span v-if="r.origen === 'VENTA' && r.pendiente > 0" class="pending-pill">
+                        $ {{ formatMoney(r.pendiente) }}
+                      </span>
+                      <span v-else class="text-secondary">—</span>
+                    </td>
+
+                    <td class="text-end fw-bold">
+                      $ {{ formatMoney(r.saldo ?? 0) }}
+                    </td>
 
                     <td class="text-end">
                       <button
@@ -857,15 +1244,33 @@ watch(clienteIdSel, async (v, oldV) => {
                         {{ expanded.has(r.key) ? "Ocultar" : "Ver" }}
                       </button>
                     </td>
+
+                    <td class="text-end">
+                      <button
+                        v-if="r.origen === 'VENTA' && r.pendiente > 0"
+                        class="btn btn-sm btn-success"
+                        @click="abrirPago(r)"
+                        :disabled="!cajaCheck.ok"
+                      >
+                        Cobrar deuda
+                      </button>
+                      <span v-else class="text-secondary small">—</span>
+                    </td>
                   </tr>
 
+                  <!-- Fila de detalle expandida -->
                   <tr v-if="expanded.has(r.key)">
-                    <td colspan="7" class="p-0">
+                    <td colspan="9" class="p-0">
                       <div class="cc-detail p-3 border-top border-secondary">
-                        <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
                           <div class="text-white fw-semibold">Detalle de la venta</div>
-                          <div class="text-secondary small">
-                            Items: <b class="text-white">{{ r.items.length }}</b>
+                          <div class="detail-pills">
+                            <span class="mini-pill">
+                              Pendiente: $ {{ formatMoney(r.pendiente) }}
+                            </span>
+                            <span class="mini-pill mini-pill--muted">
+                              Items: {{ r.items.length }}
+                            </span>
                           </div>
                         </div>
 
@@ -890,25 +1295,14 @@ watch(clienteIdSel, async (v, oldV) => {
                                     {{ it.productoNombre || "Producto" }}
                                   </div>
                                 </td>
-
                                 <td class="text-end text-white fw-semibold">
                                   {{ it.cantidad ?? "—" }}
                                 </td>
-
                                 <td class="text-end text-secondary">
-                                  {{
-                                    it.precioUnitario != null
-                                      ? "$ " + formatMoney(it.precioUnitario)
-                                      : "—"
-                                  }}
+                                  {{ it.precioUnitario != null ? "$ " + formatMoney(it.precioUnitario) : "—" }}
                                 </td>
-
                                 <td class="text-end text-white fw-semibold">
-                                  {{
-                                    it.subtotal != null
-                                      ? "$ " + formatMoney(it.subtotal)
-                                      : "—"
-                                  }}
+                                  {{ it.subtotal != null ? "$ " + formatMoney(it.subtotal) : "—" }}
                                 </td>
                               </tr>
                             </tbody>
@@ -941,6 +1335,113 @@ watch(clienteIdSel, async (v, oldV) => {
         </div>
       </div>
     </template>
+
+    <!-- Modal de cobro -->
+    <div v-if="showPagoModal" class="modal-backdrop cc-modal-backdrop">
+      <div class="cc-modal">
+        <div class="cc-modal__header">
+          <div>
+            <h5 class="mb-1">Registrar cobro</h5>
+            <p class="mb-0 text-secondary small">
+              Confirmá cuánto querés cobrar de esta deuda.
+            </p>
+          </div>
+          <button class="cc-modal__close" @click="cerrarPagoModal">×</button>
+        </div>
+
+        <div class="cc-modal__body">
+          <div class="pay-resume-card">
+            <div class="pay-resume-row">
+              <span>Referencia</span>
+              <strong>{{ ventaSeleccionada?.referencia || "—" }}</strong>
+            </div>
+            <div class="pay-resume-row">
+              <span>Saldo pendiente actual</span>
+              <strong class="text-warning">$ {{ formatMoney(pagoRestante) }}</strong>
+            </div>
+            <div class="pay-resume-row">
+              <span>Monto a cobrar</span>
+              <strong class="text-white">$ {{ formatMoney(pagoMontoNumero) }}</strong>
+            </div>
+            <div class="pay-resume-row">
+              <span>Saldo luego del cobro</span>
+              <strong :class="saldoDespuesDelPago > 0 ? 'text-warning' : 'text-success'">
+                $ {{ formatMoney(saldoDespuesDelPago) }}
+              </strong>
+            </div>
+            <div class="pay-resume-row">
+              <span>Caja activa</span>
+              <strong :class="cajaCheck.ok ? 'text-success' : 'text-danger'">
+                {{ cajaDisponibleLabel }}
+              </strong>
+            </div>
+          </div>
+
+          <div v-if="pagoError" class="alert alert-danger py-2 mt-3 mb-0">{{ pagoError }}</div>
+          <div v-if="pagoSuccess" class="alert alert-success py-2 mt-3 mb-0">{{ pagoSuccess }}</div>
+          <div v-if="pagoInfo && !pagoError" class="alert alert-secondary py-2 mt-3 mb-0">{{ pagoInfo }}</div>
+
+          <div class="row g-3 mt-1">
+            <div class="col-12">
+              <label class="form-label field-label">Monto a cobrar</label>
+              <input
+                v-model="pagoMonto"
+                type="number"
+                min="0"
+                step="0.01"
+                class="form-control app-input"
+                placeholder="Ingresá el monto"
+              />
+
+              <div class="quick-pay-actions mt-2">
+                <button class="btn btn-sm btn-outline-light" type="button" @click="pagarMitad">50%</button>
+                <button class="btn btn-sm btn-outline-light" type="button" @click="pagarTotal">Total</button>
+                <button class="btn btn-sm btn-outline-light" type="button" @click="limpiarMonto">Limpiar</button>
+
+                <span v-if="pagoEsTotal" class="pay-chip pay-chip--success">Cancelación total</span>
+                <span v-else-if="pagoEsParcial" class="pay-chip pay-chip--warning">Cobro parcial</span>
+              </div>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label class="form-label field-label">Método de pago</label>
+              <select v-model="pagoMetodoPagoId" class="form-select app-input">
+                <option value="">Seleccionar…</option>
+                <option v-for="m in metodosPago" :key="m.metodoPagoId" :value="String(m.metodoPagoId)">
+                  {{ m.nombre }}
+                </option>
+              </select>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label class="form-label field-label">Referencia</label>
+              <input
+                v-model="pagoReferencia"
+                class="form-control app-input"
+                placeholder="Ej: transferencia, alias, comprobante..."
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="cc-modal__footer">
+          <button
+            class="btn btn-outline-light"
+            @click="cerrarPagoModal"
+            :disabled="pagoLoading"
+          >
+            Cancelar
+          </button>
+          <button
+            class="btn btn-success"
+            @click="confirmarPago"
+            :disabled="pagoLoading || !cajaCheck.ok"
+          >
+            {{ pagoLoading ? "Registrando..." : "Confirmar cobro" }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -980,10 +1481,15 @@ watch(clienteIdSel, async (v, oldV) => {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .bg-panel {
-  background: linear-gradient(180deg, rgba(21, 26, 38, 0.98) 0%, rgba(15, 19, 29, 0.96) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(21, 26, 38, 0.98) 0%,
+    rgba(15, 19, 29, 0.96) 100%
+  );
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 18px;
 }
@@ -1027,12 +1533,79 @@ watch(clienteIdSel, async (v, oldV) => {
   box-shadow: 0 0 0 0.18rem rgba(123, 104, 255, 0.16);
 }
 
+.debt-focus-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 20px;
+  margin-bottom: 0;
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at top left, rgba(124, 58, 237, 0.28), transparent 35%),
+    linear-gradient(180deg, rgba(17, 24, 39, 0.98), rgba(11, 18, 32, 0.98));
+  border: 1px solid rgba(124, 58, 237, 0.22);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+}
+
+.debt-focus-copy { flex: 1 1 320px; }
+
+.debt-focus-label {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+}
+
+.debt-focus-value {
+  color: #fff;
+  font-weight: 900;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1;
+  margin-bottom: 10px;
+}
+
+.debt-focus-note {
+  color: rgba(255, 255, 255, 0.65);
+  max-width: 560px;
+}
+
+.debt-focus-side {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(140px, 1fr));
+  gap: 10px;
+  min-width: 240px;
+}
+
+.debt-mini {
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 12px 14px;
+  border-radius: 14px;
+}
+
+.debt-mini span {
+  display: block;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.8rem;
+  margin-bottom: 4px;
+}
+
+.debt-mini strong {
+  color: #fff;
+  font-size: 1rem;
+}
+
 .kpi-card {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
   padding: 14px;
   background: rgba(255, 255, 255, 0.03);
   height: 100%;
+}
+
+.kpi-card--accent {
+  border-color: rgba(124, 58, 237, 0.25);
+  background: rgba(124, 58, 237, 0.08);
 }
 
 .kpi-label {
@@ -1071,9 +1644,7 @@ watch(clienteIdSel, async (v, oldV) => {
   background: rgba(124, 58, 237, 0.16);
 }
 
-.cc-detail {
-  background: rgba(10, 12, 18, 0.82);
-}
+.cc-detail { background: rgba(10, 12, 18, 0.82); }
 
 .badge-soft-primary {
   background: rgba(59, 130, 246, 0.18);
@@ -1099,6 +1670,44 @@ watch(clienteIdSel, async (v, oldV) => {
   border: 1px solid rgba(107, 114, 128, 0.35);
 }
 
+.pending-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 96px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  color: #fcd34d;
+  font-weight: 800;
+  font-size: 0.82rem;
+}
+
+.detail-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mini-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  color: #fcd34d;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.mini-pill--muted {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.78);
+}
+
 .app-table thead th {
   color: rgba(255, 255, 255, 0.72);
   font-weight: 600;
@@ -1109,22 +1718,15 @@ watch(clienteIdSel, async (v, oldV) => {
   border-bottom-color: rgba(255, 255, 255, 0.06);
 }
 
-.table td,
-.table th {
-  vertical-align: middle;
-}
+.table td, .table th { vertical-align: middle; }
 
 .table-dark.table-hover tbody tr:hover td {
   background: rgba(255, 255, 255, 0.03);
 }
 
-.btn-expand {
-  min-width: 88px;
-}
+.btn-expand { min-width: 88px; }
 
-.empty-block {
-  padding: 14px 0;
-}
+.empty-block { padding: 14px 0; }
 
 .empty-title {
   color: #fff;
@@ -1138,9 +1740,169 @@ watch(clienteIdSel, async (v, oldV) => {
   margin-top: 16px;
 }
 
-@media (max-width: 768px) {
-  .page-title {
-    font-size: 1.6rem;
+.app-alert {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid;
+  backdrop-filter: blur(10px);
+}
+
+.app-alert__title {
+  font-weight: 800;
+  color: #fff;
+  margin-bottom: 2px;
+}
+
+.app-alert__text {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.92rem;
+}
+
+.app-alert__close {
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+  opacity: 0.8;
+}
+
+.app-alert--success {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.28);
+}
+
+.app-alert--danger {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.28);
+}
+
+.app-alert--warning {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.28);
+}
+
+.app-alert--info {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.28);
+}
+
+.cc-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 7, 15, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+  padding: 20px;
+}
+
+.cc-modal {
+  width: 100%;
+  max-width: 580px;
+  background: linear-gradient(180deg, #121826 0%, #0b1220 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 22px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
+  overflow: hidden;
+}
+
+.cc-modal__header,
+.cc-modal__footer {
+  padding: 18px 20px;
+}
+
+.cc-modal__body {
+  padding: 0 20px 20px;
+}
+
+.cc-modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.cc-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.cc-modal__close {
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
+  opacity: 0.8;
+}
+
+.pay-resume-card {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.pay-resume-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 7px 0;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.pay-resume-row + .pay-resume-row {
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+.quick-pay-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pay-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.pay-chip--success {
+  background: rgba(34, 197, 94, 0.18);
+  color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.pay-chip--warning {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fcd34d;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+@media (max-width: 900px) {
+  .debt-focus-card { flex-direction: column; }
+
+  .debt-focus-side {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
   }
+}
+
+@media (max-width: 768px) {
+  .page-title { font-size: 1.6rem; }
+  .debt-focus-side { grid-template-columns: 1fr; }
 }
 </style>
