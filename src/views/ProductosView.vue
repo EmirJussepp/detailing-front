@@ -892,7 +892,7 @@ onMounted(async () => {
     </div>
 
     <!-- Modal: Editar producto -->
-    <div v-if="editing" class="modal-backdrop">
+    <div v-if="editing" class="modal-backdrop" @click.self="!saving && closeEdit()">
       <div class="modal-card">
         <div class="section-header mb-3">
           <h2 class="section-title mb-0">Editar producto</h2>

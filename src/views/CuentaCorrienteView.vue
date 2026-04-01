@@ -1337,7 +1337,7 @@ watch(clienteIdSel, async (v, oldV) => {
     </template>
 
     <!-- Modal de cobro -->
-    <div v-if="showPagoModal" class="modal-backdrop cc-modal-backdrop">
+    <div v-if="showPagoModal" class="modal-backdrop cc-modal-backdrop" @click.self="!loading && (showPagoModal = false)">
       <div class="cc-modal">
         <div class="cc-modal__header">
           <div>

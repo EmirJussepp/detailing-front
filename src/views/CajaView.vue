@@ -110,6 +110,7 @@ const abrirMontoInicial = ref("")
 const montoContado = ref("")
 
 const showMovModal = ref(false)
+const savingMov = ref(false)
 
 // ✅ FIX: formulario de movimiento manual incluye metodoPagoId
 const movForm = ref({
@@ -536,6 +537,7 @@ async function crearMovimientoManual() {
     return
   }
 
+  savingMov.value = true
   try {
     await movimientosCajaApi.crear({
       cajaId: caja.value.cajaId,
@@ -553,7 +555,15 @@ async function crearMovimientoManual() {
     await refresh()
   } catch (e) {
     errorMsg.value = pickError(e, "Error registrando movimiento.")
+  } finally {
+    savingMov.value = false
   }
+}
+
+function cerrarMovModal() {
+  if (savingMov.value) return
+  movForm.value = { concepto: "GASTO", tipoManual: "EGRESO", monto: "", descripcion: "", metodoPagoId: null }
+  showMovModal.value = false
 }
 
 watch(selectedTurno, async (v) => {
@@ -793,7 +803,7 @@ onMounted(async () => {
               <RouterLink
                 class="btn btn-sm btn-outline-light"
                 :class="{ disabled: !caja?.cajaId }"
-                to="/caja/movimientos"
+                to="/caja/movimientos-historico"
               >
                 Ver historial completo
               </RouterLink>
@@ -839,14 +849,14 @@ onMounted(async () => {
     </div>
 
     <!-- ✅ FIX: Modal movimiento manual con campo Método de Pago -->
-    <div v-if="showMovModal" class="modal-backdrop" @click.self="showMovModal = false">
+    <div v-if="showMovModal" class="modal-backdrop" @click.self="cerrarMovModal">
       <div class="modal-card">
         <div class="d-flex justify-content-between align-items-center mb-3">
           <div>
             <div class="section-title">Nuevo movimiento manual</div>
             <div class="helper-text">Registrá un ajuste operativo de caja</div>
           </div>
-          <button class="btn btn-sm btn-outline-light" @click="showMovModal = false">Cerrar</button>
+          <button class="btn btn-sm btn-outline-light" @click="cerrarMovModal" :disabled="savingMov">Cerrar</button>
         </div>
 
         <div class="row g-3">
