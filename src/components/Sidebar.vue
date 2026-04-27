@@ -1,13 +1,13 @@
 <template>
   <aside class="sidebar">
     <div class="brand">
-      <div class="logo">ELITE-CarShop</div>
-
+      <div class="brand-logo-wrap">
+        <img class="brand-logo" :src="tenant.logo" :alt="tenant.nombre" />
+      </div>
       <div class="meta">
+        <div class="tenant-name">{{ tenant.nombreCorto }}</div>
         <div class="role">{{ roleLabel }}</div>
-        <div class="shift" v-if="shiftLabel">
-          Turno: {{ shiftLabel }}
-        </div>
+        <div class="shift" v-if="shiftLabel">Turno: {{ shiftLabel }}</div>
       </div>
     </div>
 
@@ -35,7 +35,7 @@
     </nav>
 
     <div class="footer">
-      <div class="small">3byte · GestionaTuNegocio</div>
+      <div class="powered">{{ tenant.developer.texto }}</div>
     </div>
   </aside>
 </template>
@@ -48,172 +48,175 @@ import * as icons from "lucide-vue-next"
 import { buildMenuFromPermissions } from "../ui/menu"
 import { getSession } from "../auth/session"
 import { getTurnoOperativo, turnoLabel } from "../ui/turnoOperativo"
+import { tenant } from "../tenant.config"
 
 const route = useRoute()
 
-const session = computed(() => getSession() ?? null)
+const session    = computed(() => getSession() ?? null)
 const permissions = computed(() => session.value?.permissions || [])
-
 const turnoActual = ref(getTurnoOperativo())
 
 const roleLabel = computed(() => {
   const raw = String(session.value?.role || "EMPLEADO").toUpperCase()
-  if (raw === "ADMIN") return "ADMIN"
-  if (raw === "CAJERO") return "CAJERO"
+  if (raw === "ADMIN")   return "ADMIN"
+  if (raw === "CAJERO")  return "CAJERO"
   return "EMPLEADO"
 })
 
-const shiftLabel = computed(() => {
-  return turnoLabel(turnoActual.value)
-})
-
-const menu = computed(() => buildMenuFromPermissions(permissions.value))
+const shiftLabel = computed(() => turnoLabel(turnoActual.value))
+const menu       = computed(() => buildMenuFromPermissions(permissions.value))
 
 function isActive(item) {
-  const name = route.name ? String(route.name) : ""
+  const name   = route.name ? String(route.name) : ""
   const target = item?.to?.name ? String(item.to.name) : ""
-
   if (!target) return false
   if (name === target) return true
-  if (target.startsWith("caja.") && name.startsWith("caja.")) return true
-  if (target.startsWith("ventas.") && name.startsWith("ventas.")) return true
-  if (target.startsWith("compras.") && name.startsWith("compras.")) return true
-  if (target.startsWith("clientes.") && name.startsWith("clientes.")) return true
-  if (target.startsWith("productos.") && name.startsWith("productos.")) return true
-  if (target.startsWith("reportes.") && name.startsWith("reportes.")) return true
-
-  return false
+  const prefixes = ["caja.", "ventas.", "compras.", "clientes.", "productos.", "reportes."]
+  return prefixes.some(p => target.startsWith(p) && name.startsWith(p))
 }
 
 function onTurnoChanged(event) {
   turnoActual.value = event?.detail?.turno || getTurnoOperativo()
 }
 
-onMounted(() => {
-  window.addEventListener("turno:changed", onTurnoChanged)
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener("turno:changed", onTurnoChanged)
-})
+onMounted(()        => window.addEventListener("turno:changed", onTurnoChanged))
+onBeforeUnmount(()  => window.removeEventListener("turno:changed", onTurnoChanged))
 </script>
 
 <style scoped>
 .sidebar {
   width: 260px;
   height: 100%;
-  background: linear-gradient(180deg, #0b0b10 0%, #090b12 100%);
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: v-bind("tenant.colors.sidebarBg");
+  border-right: 1px solid v-bind("tenant.colors.accentBorder");
   display: flex;
   flex-direction: column;
 }
 
 .brand {
-  padding: 18px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 16px;
+  border-bottom: 1px solid v-bind("tenant.colors.accentBorder");
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-.logo {
-  font-weight: 900;
-  letter-spacing: 0.4px;
-  font-size: 1.8rem;
-  color: #caa6ff;
-  line-height: 1;
+.brand-logo-wrap {
+  flex-shrink: 0;
+  width: 50px;
+  height: 50px;
+  border-radius: v-bind("tenant.logoRadius");
+  overflow: hidden;
+  border: 2px solid v-bind("tenant.colors.accent");
+  box-shadow: 0 0 14px v-bind("tenant.colors.accentSoft");
+}
+
+.brand-logo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .meta {
-  margin-top: 10px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
+}
+
+.tenant-name {
+  font-size: 1rem;
+  font-weight: 900;
+  color: v-bind("tenant.colors.accent");
+  letter-spacing: 0.04em;
+  line-height: 1.2;
 }
 
 .role {
-  font-size: 12px;
-  font-weight: 800;
-  color: #fff;
-  letter-spacing: 0.04em;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .shift {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.74);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
 }
 
 .menu {
   padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   overflow-y: auto;
+  flex: 1;
 }
 
 .section {
   margin-top: 10px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
   padding: 0 4px;
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.56);
+  color: v-bind("tenant.colors.accentMuted");
 }
 
 .link {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 46px;
+  min-height: 44px;
   padding: 10px 12px;
-  border-radius: 14px;
+  border-radius: 12px;
   text-decoration: none;
-  color: rgba(255, 255, 255, 0.88);
+  color: rgba(255, 255, 255, 0.82);
   border: 1px solid transparent;
   transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
 }
 
 .link:hover {
-  background: rgba(202, 166, 255, 0.10);
-  border-color: rgba(202, 166, 255, 0.12);
+  background: v-bind("tenant.colors.accentSoft");
+  border-color: v-bind("tenant.colors.accentBorder");
   color: #fff;
 }
 
 .link.active {
-  background: rgba(202, 166, 255, 0.18);
-  border: 1px solid rgba(202, 166, 255, 0.26);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03);
+  background: v-bind("tenant.colors.accentSoft");
+  border-color: v-bind("tenant.colors.accentBorder");
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
 }
 
 .icon {
   width: 18px;
   height: 18px;
   flex-shrink: 0;
-  color: #9ca3af;
+  color: rgba(255, 255, 255, 0.35);
   transition: color 0.18s ease, transform 0.18s ease;
 }
 
-.link:hover .icon {
-  color: #d8c4ff;
-  transform: translateX(1px);
-}
-
+.link:hover .icon,
 .icon.active {
-  color: #caa6ff;
+  color: v-bind("tenant.colors.accent");
+  transform: translateX(1px);
 }
 
 .label {
   font-weight: 600;
+  font-size: 0.9rem;
   line-height: 1.2;
 }
 
 .footer {
-  margin-top: auto;
-  padding: 12px 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 12px 16px;
+  border-top: 1px solid v-bind("tenant.colors.accentBorder");
 }
 
-.small {
+.powered {
   font-size: 11px;
-  opacity: 0.6;
-  color: #fff;
+  color: v-bind("tenant.developer.color");
+  font-weight: 600;
+  letter-spacing: 0.04em;
 }
 </style>

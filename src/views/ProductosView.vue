@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue"
+import * as XLSX from "xlsx"
 import Pager from "../components/Pager.vue"
 import { productosApi, marcasApi, categoriasApi, resolveImagenUrl } from "../services/productosApi"
 import { getSession } from "../auth/session"
@@ -569,6 +570,62 @@ function aplicarAumento() {
   })
 }
 
+
+// ─── Exportar Excel ──────────────────────────────────────────────────────────
+
+function buildFilasExcel(productos) {
+  return productos.map(p => ({
+    "Nombre":           p.nombre,
+    "Codigo":           p.codigoProducto ?? "",
+    "Categoria":        p.categoriaId != null ? catName(p.categoriaId) : (p.categoria || ""),
+    "Marca":            p.marcaId != null ? marcaName(p.marcaId) : "",
+    "Stock minimo":     p.stockMinimo ?? "",
+    "Precio Costo":     p.precioCosto ?? "",
+    "Precio Venta":     p.precioVenta,
+    "Precio Mayorista": p.precioMayorista ?? "",
+    "Stock actual":     p.stockActual,
+  }))
+}
+
+const exportToast = ref("")
+function mostrarExportToast(msg) {
+  exportToast.value = msg
+  setTimeout(() => { exportToast.value = "" }, 2400)
+}
+
+async function exportarBajoStockExcel() {
+  loading.value = true
+  try {
+    const { data } = await productosApi.list({ page: 0, size: 9999, search: null })
+    const todos = unwrapPage(data).content.map(mapProducto)
+    const bajoStock = todos.filter(p => p.stockMinimo != null && p.stockActual <= p.stockMinimo)
+    if (!bajoStock.length) { infoMsg.value = "No hay productos con bajo stock para exportar."; return }
+    const ws = XLSX.utils.json_to_sheet(buildFilasExcel(bajoStock))
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, "Bajo Stock")
+    XLSX.writeFile(wb, `bajo_stock_${new Date().toISOString().slice(0, 10)}.xlsx`)
+    mostrarExportToast(`✓ Bajo stock — ${bajoStock.length} productos`)
+  } catch (e) {
+    errorMsg.value = e?.message || "Error exportando Excel."
+  } finally { loading.value = false }
+}
+
+async function exportarTodosExcel() {
+  loading.value = true
+  try {
+    const { data } = await productosApi.list({ page: 0, size: 9999, search: null })
+    const todos = unwrapPage(data).content.map(mapProducto)
+    if (!todos.length) { infoMsg.value = "No hay productos para exportar."; return }
+    const ws = XLSX.utils.json_to_sheet(buildFilasExcel(todos))
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, "Productos")
+    XLSX.writeFile(wb, `productos_${new Date().toISOString().slice(0, 10)}.xlsx`)
+    mostrarExportToast(`✓ Todos — ${todos.length} productos`)
+  } catch (e) {
+    errorMsg.value = e?.message || "Error exportando Excel."
+  } finally { loading.value = false }
+}
+
 onMounted(async () => {
   await fetchCatalogos()
   await fetchAll()
@@ -766,7 +823,41 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- Ferrramientas de exportación -->
+    <div class="card bg-panel border-0 shadow-sm mb-3">
+      <div class="card-body export-toolbar">
+        <div class="export-toolbar__left">
+          <span class="section-title" style="font-size:0.95rem">Exportar productos</span>
+          <span class="helper-text">Descargá el catálogo completo o solo los productos con bajo stock.</span>
+        </div>
+        <div class="export-toolbar__right">
+          <Transition name="toast-fade">
+            <span v-if="exportToast" class="export-inline-toast">{{ exportToast }}</span>
+          </Transition>
+          <button
+            class="btn-export-tool"
+            title="Exportar solo productos con bajo stock"
+            @click="exportarBajoStockExcel"
+            :disabled="loading"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            <span>Bajo stock</span>
+          </button>
+          <button
+            class="btn-export-tool btn-export-tool--accent"
+            title="Exportar todos los productos"
+            @click="exportarTodosExcel"
+            :disabled="loading"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>Exportar todos</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Filtros -->
+
     <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
         <div class="section-header mb-3">
@@ -1207,4 +1298,84 @@ onMounted(async () => {
 .toast-leave-active { transition: all 0.22s ease-in; }
 .toast-enter-from   { opacity: 0; transform: translateX(60px); }
 .toast-leave-to     { opacity: 0; transform: translateX(60px); }
+
+/* ── Export toolbar ───────────────────────────────────── */
+.export-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+
+.export-toolbar__left {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.export-toolbar__right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.btn-export-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border-radius: 9px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.05);
+  color: rgba(255,255,255,.72);
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.btn-export-tool:hover:not(:disabled) {
+  background: rgba(255,255,255,.1);
+  border-color: rgba(255,255,255,.26);
+  color: #fff;
+}
+
+.btn-export-tool:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
+.btn-export-tool--accent {
+  border-color: rgba(var(--app-accent-rgb), 0.38);
+  background: rgba(var(--app-accent-rgb), 0.10);
+  color: var(--app-accent);
+}
+
+.btn-export-tool--accent:hover:not(:disabled) {
+  background: rgba(var(--app-accent-rgb), 0.20);
+  border-color: rgba(var(--app-accent-rgb), 0.55);
+  color: #fff;
+}
+
+.export-inline-toast {
+  font-size: 0.78rem;
+  color: rgba(255,255,255,.55);
+  white-space: nowrap;
+}
+
+.toast-fade-enter-active, .toast-fade-leave-active { transition: opacity 0.2s; }
+.toast-fade-enter-from, .toast-fade-leave-to { opacity: 0; }
+
+@media (max-width: 500px) {
+  .export-toolbar { flex-direction: column; align-items: flex-start; }
+  .export-toolbar__right { width: 100%; }
+  .btn-export-tool { flex: 1; justify-content: center; }
+}
 </style>

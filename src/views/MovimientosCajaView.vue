@@ -1013,4 +1013,34 @@ onMounted(() => {
   .top-summary-right { width: 100%; }
   .mini-stat { width: 100%; text-align: left; }
 }
+.filters-bar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.filters-grid {
+  display: grid;
+  grid-template-columns: 180px 220px 1fr;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .filters-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .filters-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filters-bar .btn {
+    width: 100%;
+  }
+}
 </style>
