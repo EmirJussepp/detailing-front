@@ -1,14 +1,21 @@
 import { http } from "./http"
 
-// [FOTO] URL base del backend para construir URLs de imágenes.
-// Las imágenes se sirven desde el backend (puerto 8082), NO desde Vite (5173).
-// Si el proyecto usa VITE_API_URL en producción, se respeta automáticamente.
-const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:8082").replace(/\/api$/, "")
+// FIX Bug #3: construir la URL base de imágenes sin fallback a localhost.
+// En producción VITE_API_URL debe estar seteado (ej: https://tu-backend.com).
+// Si no está seteado, usamos una ruta relativa "/" para que el navegador
+// resuelva desde el mismo dominio — funciona cuando front y back están
+// en el mismo dominio o detrás de un reverse proxy (nginx, Railway, etc.).
+const _rawApiUrl = import.meta.env.VITE_API_URL || ""
+const API_BASE = _rawApiUrl
+  ? _rawApiUrl.replace(/\/api$/, "").replace(/\/$/, "")
+  : ""  // cadena vacía → URLs relativas ("/uploads/...") → mismo dominio
 
 /**
- * Convierte una ruta relativa de imagen en URL absoluta apuntando al backend.
- * Ejemplo: "/uploads/productos/5.jpg" → "http://localhost:8082/uploads/productos/5.jpg"
- * Si ya es una URL absoluta (http/https) o un blob:// de preview local, la devuelve tal cual.
+ * Convierte una ruta relativa de imagen en URL apuntando al backend.
+ * - Si VITE_API_URL está seteado: devuelve URL absoluta al backend.
+ * - Si no está seteado: devuelve ruta relativa ("/uploads/...") para que
+ *   el navegador la resuelva desde el mismo dominio.
+ * - Si ya es blob:// o http(s)://, la devuelve sin cambios.
  */
 export function resolveImagenUrl(url) {
   if (!url) return null
