@@ -70,6 +70,14 @@ const routes = [
         meta: { requiresAuth: true, perm: "pagos:ver" },
       },
 
+      // ── Tienda Nube ─────────────────────────────────────────
+      {
+        path: "tiendanube",
+        name: "tiendanube",
+        component: () => import("../views/TiendaNubeView.vue"),
+        meta: { requiresAuth: true, perm: "ventas:ver" },
+      },
+
       {
         path: "compras",
         name: "compras",
@@ -96,7 +104,6 @@ const routes = [
         meta: { requiresAuth: true, perm: "productos:ver" },
       },
 
-      // ✅ NUEVO: ruta para movimientos de stock
       {
         path: "productos/movimientos-stock",
         name: "productos.movimientos-stock",

@@ -1,8 +1,5 @@
 import { getSession } from "../auth/session"
 
-// =========================
-// Permissions helpers
-// =========================
 export function getPermissions() {
   return getSession()?.permissions || []
 }
@@ -29,9 +26,6 @@ export function canPerm(item, perms = getPermissions()) {
   return true
 }
 
-// =========================
-// Menu by permissions (RBAC)
-// =========================
 export function buildMenuFromPermissions(perms = getPermissions()) {
   const items = [
     { label: "Dashboard", to: { name: "dashboard" }, icon: "LayoutDashboard" },
@@ -42,12 +36,19 @@ export function buildMenuFromPermissions(perms = getPermissions()) {
     { label: "Movimientos Caja", to: { name: "caja.movimientos" }, icon: "ArrowLeftRight", perm: "movimientos_caja:ver" },
     { label: "Cuenta Corriente", to: { name: "caja.cuenta" }, icon: "BookOpen", perm: "pagos:ver" },
 
+    { section: "Tienda Nube" },
+    {
+      label: "Panel Online",
+      to: { name: "tiendanube" },
+      icon: "ShoppingBag",
+      permAny: ["admin:all", "ventas:ver"],
+    },
+
     { section: "Clientes" },
     { label: "Clientes", to: { name: "clientes" }, icon: "Users", perm: "clientes:ver" },
 
     { section: "Inventario" },
     { label: "Productos", to: { name: "productos" }, icon: "Package", perm: "productos:ver" },
-    // ✅ NUEVO: acceso a movimientos de stock desde el menú
     {
       label: "Movimientos Stock",
       to: { name: "productos.movimientos-stock" },
@@ -82,7 +83,6 @@ export function buildMenuFromPermissions(perms = getPermissions()) {
   const cleaned = []
   for (let i = 0; i < visible.length; i++) {
     const item = visible[i]
-
     if (item.section) {
       const next = visible[i + 1]
       if (next && !next.section) cleaned.push(item)
@@ -94,9 +94,6 @@ export function buildMenuFromPermissions(perms = getPermissions()) {
   return cleaned
 }
 
-// =========================
-// Legacy (optional): keep your old role logic
-// =========================
 export function getRole() {
   return getSession()?.role || "CASHIER"
 }
@@ -104,38 +101,4 @@ export function getRole() {
 export function canAccess(item, role = getRole()) {
   if (!item?.roles || item.roles.length === 0) return true
   return item.roles.includes(role)
-}
-
-export function buildMenu(role = getRole()) {
-  const items = [
-    { label: "Dashboard", to: { name: "dashboard" }, icon: "LayoutDashboard", roles: ["ADMIN", "CASHIER"] },
-
-    { section: "Operación", roles: ["ADMIN", "CASHIER"] },
-    { label: "Caja", to: { name: "caja.dashboard" }, icon: "Wallet", roles: ["ADMIN", "CASHIER"] },
-    { label: "Ventas", to: { name: "caja.ventas" }, icon: "ShoppingCart", roles: ["ADMIN", "CASHIER"] },
-    { label: "Movimientos Caja", to: { name: "caja.movimientos" }, icon: "ArrowLeftRight", roles: ["ADMIN", "CASHIER"] },
-
-    { section: "Clientes", roles: ["ADMIN", "CASHIER"] },
-    { label: "Clientes", to: { name: "clientes" }, icon: "Users", roles: ["ADMIN", "CASHIER"] },
-    { label: "Cuenta Corriente", to: { name: "caja.cuenta" }, icon: "BookOpen", roles: ["ADMIN", "CASHIER"] },
-
-    { section: "Inventario", roles: ["ADMIN", "CASHIER"] },
-    { label: "Productos", to: { name: "productos" }, icon: "Package", roles: ["ADMIN", "CASHIER"] },
-    // ✅ NUEVO: movimientos de stock en el menú legacy también
-    { label: "Movimientos Stock", to: { name: "productos.movimientos-stock" }, icon: "ArrowUpDown", roles: ["ADMIN"] },
-
-    { section: "Compras", roles: ["ADMIN"] },
-    { label: "Compras", to: { name: "compras" }, icon: "ShoppingBag", roles: ["ADMIN"] },
-    { label: "Proveedores", to: { name: "compras.proveedores" }, icon: "Truck", roles: ["ADMIN"] },
-
-    { section: "Reportes", roles: ["ADMIN"] },
-    { label: "Histórico Caja", to: { name: "caja.movimientos-historico" }, icon: "Receipt", roles: ["ADMIN"] },
-
-    { section: "Configuración", roles: ["ADMIN"] },
-    { label: "Panel Config", to: { name: "configuracion" }, icon: "Settings", roles: ["ADMIN"] },
-    { label: "Localidades", to: { name: "config-localidades" }, icon: "MapPinned", roles: ["ADMIN"] },
-    { label: "Métodos de pago (Config)", to: { name: "config-metodos-pago" }, icon: "CreditCard", roles: ["ADMIN"] },
-  ]
-
-  return items.filter((it) => canAccess(it, role))
 }

@@ -1386,6 +1386,7 @@ onBeforeUnmount(() => {
                 <th>Fecha</th>
                 <th style="width: 160px" class="text-end">Total</th>
                 <th style="width: 120px">Estado</th>
+                <th style="width: 100px">Origen</th>
                 <th style="width: 130px" class="text-end">Acción</th>
               </tr>
             </thead>
@@ -1402,6 +1403,10 @@ onBeforeUnmount(() => {
                   }">
                     {{ v.estado }}
                   </span>
+                </td>
+                <td>
+                  <span v-if="v.turno === 'ONLINE'" class="badge badge-tn-online">🛒 TN</span>
+                  <span v-else class="badge badge-soft-secondary">Local</span>
                 </td>
                 <td class="text-end">
                   <button class="btn btn-sm btn-outline-danger" :disabled="devolviendoVenta || !canSell"
@@ -1554,5 +1559,15 @@ onBeforeUnmount(() => {
   padding: 24px;
   box-shadow: 0 20px 70px rgba(0, 0, 0, 0.55);
   color: #fff;
+}
+
+.badge-tn-online {
+  background: rgba(201, 162, 39, 0.15);
+  border: 1px solid rgba(201, 162, 39, 0.35);
+  color: #c9a227;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 999px;
 }
 </style>
