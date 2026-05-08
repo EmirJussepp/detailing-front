@@ -154,23 +154,29 @@
    ========================================================= */
 
 /* btn-accent: transparente con borde dorado suave */
-.btn-accent {
+.btn.btn-accent {
   background: rgba(var(--app-accent-rgb), 0.14);
   border: 1px solid rgba(var(--app-accent-rgb), 0.30);
   color: var(--app-accent);
   font-weight: 600;
   box-shadow: none;
   transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+  --bs-btn-bg: transparent;
+  --bs-btn-border-color: rgba(var(--app-accent-rgb), 0.30);
+  --bs-btn-color: var(--app-accent);
 }
 
-.btn-accent:hover {
+.btn.btn-accent:hover {
   background: rgba(var(--app-accent-rgb), 0.24);
   border-color: rgba(var(--app-accent-rgb), 0.55);
   color: #fff;
   box-shadow: none;
+  --bs-btn-hover-bg: rgba(var(--app-accent-rgb), 0.24);
+  --bs-btn-hover-border-color: rgba(var(--app-accent-rgb), 0.55);
+  --bs-btn-hover-color: #fff;
 }
 
-.btn-accent:disabled {
+.btn.btn-accent:disabled {
   opacity: 0.35;
   box-shadow: none;
 }
@@ -325,6 +331,21 @@
   justify-content: center;
   padding: 16px;
   z-index: 2000;
+}
+
+/*
+ * Bootstrap JS inyecta .modal-backdrop como hijo DIRECTO de <body>.
+ * Nuestra regla global lo sube a z-index 2000 (> modal z-index 1055),
+ * lo que tapa el modal y bloquea los clics.
+ * Este override específico (body > .modal-backdrop) lo baja al valor
+ * estándar de Bootstrap (1040) sin afectar los modales Vue custom,
+ * que usan .modal-backdrop dentro de #app, no como hijo directo de body.
+ */
+body > .modal-backdrop {
+  z-index: 1040 !important;
+  display: block !important;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.50);
 }
 
 .modal-card {

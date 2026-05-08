@@ -34,6 +34,15 @@
       </template>
     </nav>
 
+    <!-- Aviso de vencimiento de pago (aparece 4 días antes del 10) -->
+    <div v-if="vencimiento" class="venc-banner" :class="vencimiento.urgencia">
+      <component :is="icons.AlertCircle" class="venc-icon" :size="15" :stroke-width="2.5" />
+      <div class="venc-text">
+        <span class="venc-title">{{ vencimiento.titulo }}</span>
+        <span class="venc-sub">{{ vencimiento.sub }}</span>
+      </div>
+    </div>
+
     <div class="footer">
       <div class="powered">{{ tenant.developer.texto }}</div>
     </div>
@@ -65,6 +74,46 @@ const roleLabel = computed(() => {
 
 const shiftLabel = computed(() => turnoLabel(turnoActual.value))
 const menu       = computed(() => buildMenuFromPermissions(permissions.value))
+
+// ── Aviso de vencimiento ──────────────────────────────────────────────────────
+// Muestra un banner en el sidebar los 4 días previos al día 10 de cada mes.
+const vencimiento = computed(() => {
+  const hoy  = new Date()
+  const dia  = hoy.getDate()
+  const DIA_PAGO = 10
+  const DIAS_AVISO = 4
+
+  const diasRestantes = DIA_PAGO - dia
+
+  if (diasRestantes < 0 || diasRestantes > DIAS_AVISO) return null
+
+  if (diasRestantes === 0) {
+    return {
+      titulo:   "⚠️ Vence hoy el pago",
+      sub:      "Regularizá tu suscripción.",
+      urgencia: "venc-rojo",
+    }
+  }
+  if (diasRestantes === 1) {
+    return {
+      titulo:   "⚠️ Vence mañana",
+      sub:      "Renovación el día 10.",
+      urgencia: "venc-rojo",
+    }
+  }
+  if (diasRestantes === 2) {
+    return {
+      titulo:   `Vence en ${diasRestantes} días`,
+      sub:      "Renovación el día 10.",
+      urgencia: "venc-naranja",
+    }
+  }
+  return {
+    titulo:   `Vence en ${diasRestantes} días`,
+    sub:      "Renovación el día 10.",
+    urgencia: "venc-amarillo",
+  }
+})
 
 function isActive(item) {
   const name   = route.name ? String(route.name) : ""
@@ -207,6 +256,69 @@ onBeforeUnmount(()  => window.removeEventListener("turno:changed", onTurnoChange
   font-size: 0.9rem;
   line-height: 1.2;
 }
+
+/* ── Banner de vencimiento ─────────────────────────── */
+.venc-banner {
+  margin: 0 10px 10px;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid;
+}
+
+.venc-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.venc-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.venc-title {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.venc-sub {
+  font-size: 11px;
+  opacity: 0.75;
+  line-height: 1.3;
+}
+
+/* Niveles de urgencia */
+.venc-amarillo {
+  background: rgba(234, 179, 8, 0.12);
+  border-color: rgba(234, 179, 8, 0.35);
+  color: #f0c040;
+}
+.venc-amarillo .venc-icon { color: #f0c040; }
+
+.venc-naranja {
+  background: rgba(249, 115, 22, 0.14);
+  border-color: rgba(249, 115, 22, 0.40);
+  color: #fb923c;
+}
+.venc-naranja .venc-icon { color: #fb923c; }
+
+.venc-rojo {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.45);
+  color: #f87171;
+  animation: venc-pulse 2s ease-in-out infinite;
+}
+.venc-rojo .venc-icon { color: #f87171; }
+
+@keyframes venc-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.7; }
+}
+/* ─────────────────────────────────────────────────── */
 
 .footer {
   padding: 12px 16px;

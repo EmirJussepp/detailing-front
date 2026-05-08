@@ -57,10 +57,16 @@ async function cargarDatos() {
       ventas.value = unwrapArray(data)
       totalVentas.value = data?.totalElements ?? ventas.value.length
       totalImporte.value = ventas.value.reduce((acc, v) => acc + Number(v.total ?? v.monto ?? 0), 0)
+    } else {
+      errorMsg.value = ventasRes.reason?.response?.data?.error
+        ?? ventasRes.reason?.message
+        ?? "No se pudieron cargar las ventas online."
     }
 
     if (cajaRes.status === "fulfilled") {
       cajaOnline.value = cajaRes.value?.data ?? null
+    } else {
+      cajaOnline.value = null
     }
   } catch (e) {
     errorMsg.value = e?.response?.data?.error ?? e?.message ?? "Error al cargar datos."
@@ -101,7 +107,7 @@ onMounted(cargarDatos)
       </div>
       <div class="page-header__actions">
         <button
-          class="btn btn-primary"
+          class="btn btn-primary btn-accent"
           :disabled="syncing"
           @click="syncProductos"
         >

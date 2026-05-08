@@ -617,7 +617,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from "vue"
+import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue"
 import AppCombobox from "../components/AppCombobox.vue"
 import { comprasApi } from "../services/comprasApi"
 import { pagosProveedorApi } from "../services/pagosProveedorApi"
@@ -647,7 +647,7 @@ const success = ref("")
 const q = ref("")
 const sortBy = ref("fechaDesc")
 
-const page = ref(0)
+const page = ref(1)
 const size = ref(10)
 const totalElements = ref(0)
 const totalPages = ref(1)
@@ -781,6 +781,20 @@ function estadoBadgeClass(estado) {
 function toastSuccess(msg) {
   success.value = msg
   setTimeout(() => (success.value = ""), 2200)
+}
+
+function hideModal(id) {
+  const el = document.getElementById(id)
+  if (!el) return
+  el.classList.remove("show")
+  el.style.display = "none"
+  el.setAttribute("aria-hidden", "true")
+  el.removeAttribute("aria-modal")
+  el.removeAttribute("role")
+  document.querySelectorAll(".modal-backdrop").forEach(b => b.remove())
+  document.body.classList.remove("modal-open")
+  document.body.style.removeProperty("overflow")
+  document.body.style.removeProperty("padding-right")
 }
 
 function productoName(id) {
@@ -947,6 +961,7 @@ async function crearProducto() {
 
     await productosApi.create(payload)
     toastSuccess("Producto creado correctamente.")
+    hideModal("nuevoProductoModal")
     prepareNewProducto()
 
     const prodRes = await productosApi.list({ page: 0, size: 9999 }).catch(() => ({ data: [] }))
@@ -1006,7 +1021,8 @@ async function crearCompra() {
     })
 
     toastSuccess("Compra creada correctamente.")
-    page.value = 0
+    hideModal("compraModal")
+    page.value = 1
     await refreshCompras()
   } catch (e) {
     error.value = e?.response?.data?.error || e?.message || "Error creando compra"
@@ -1115,6 +1131,20 @@ watch(page, () => {
 
 onMounted(() => {
   refreshAll()
+})
+
+onBeforeUnmount(() => {
+  document.querySelectorAll(".modal.show").forEach(el => {
+    el.classList.remove("show")
+    el.style.display = "none"
+    el.setAttribute("aria-hidden", "true")
+    el.removeAttribute("aria-modal")
+    el.removeAttribute("role")
+  })
+  document.querySelectorAll(".modal-backdrop").forEach(el => el.remove())
+  document.body.classList.remove("modal-open")
+  document.body.style.removeProperty("overflow")
+  document.body.style.removeProperty("padding-right")
 })
 </script>
 

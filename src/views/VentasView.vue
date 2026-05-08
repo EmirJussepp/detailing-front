@@ -670,6 +670,7 @@ async function buscarVentasCliente() {
         total: Number(v.total ?? 0),
         estado: String(v.estado ?? "PENDIENTE").toUpperCase(),
         fecha: v.fecha ?? null,
+        turno: v.turno ?? null,
       }))
       .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
 

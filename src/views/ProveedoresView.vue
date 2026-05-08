@@ -582,9 +582,17 @@ function toastSuccess(msg) {
 }
 
 function hideModal(id) {
-  const modalEl = document.getElementById(id)
-  if (!modalEl || !window.bootstrap?.Modal) return
-  window.bootstrap.Modal.getInstance(modalEl)?.hide()
+  const el = document.getElementById(id)
+  if (!el) return
+  el.classList.remove("show")
+  el.style.display = "none"
+  el.setAttribute("aria-hidden", "true")
+  el.removeAttribute("aria-modal")
+  el.removeAttribute("role")
+  document.querySelectorAll(".modal-backdrop").forEach(b => b.remove())
+  document.body.classList.remove("modal-open")
+  document.body.style.removeProperty("overflow")
+  document.body.style.removeProperty("padding-right")
 }
 
 function mapProveedorApiToVM(raw) {
@@ -906,7 +914,20 @@ watch(pagoCompraId, async (newId) => {
 })
 
 onMounted(() => refresh())
-onBeforeUnmount(() => { if (_t) clearTimeout(_t) })
+onBeforeUnmount(() => {
+  if (_t) clearTimeout(_t)
+  document.querySelectorAll(".modal.show").forEach(el => {
+    el.classList.remove("show")
+    el.style.display = "none"
+    el.setAttribute("aria-hidden", "true")
+    el.removeAttribute("aria-modal")
+    el.removeAttribute("role")
+  })
+  document.querySelectorAll(".modal-backdrop").forEach(el => el.remove())
+  document.body.classList.remove("modal-open")
+  document.body.style.removeProperty("overflow")
+  document.body.style.removeProperty("padding-right")
+})
 </script>
 
 <style scoped>
