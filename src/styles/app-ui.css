@@ -209,6 +209,24 @@
   font-size: 1.05rem;
 }
 
+.kpi-card--efectivo {
+  border-color: rgba(34, 197, 94, 0.25);
+  background: rgba(34, 197, 94, 0.05);
+}
+
+.kpi-efectivo-icon {
+  font-size: 2rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.kpi-efectivo-hint {
+  color: rgba(255, 255, 255, 0.40);
+  font-size: 0.75rem;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
 /* =========================================================
    Estados vacíos
    ========================================================= */

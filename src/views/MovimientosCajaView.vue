@@ -409,6 +409,27 @@ const kpiEgresosPorMetodo = computed(() => {
 
 const kpiNeto = computed(() => kpiIngresos.value - kpiEgresos.value)
 
+// "Efectivo en caja" = monto inicial + ingresos en efectivo - egresos en efectivo
+// Identifica efectivo por nombre del método (contiene "efectivo" o "contado", case-insensitive)
+function esEfectivo(metodoPagoId) {
+  const nombre = metodoNombreById(metodoPagoId).toLowerCase()
+  return nombre.includes("efectivo") || nombre.includes("contado") || nombre.includes("cash")
+}
+
+const kpiEfectivoEnCaja = computed(() => {
+  const montoInicial = Number(caja.value?.montoInicial ?? 0)
+
+  const ingresosEfectivo = movimientos.value
+    .filter((m) => m.tipo === "INGRESO" && esEfectivo(m.metodoPagoId))
+    .reduce((a, m) => a + Number(m.monto ?? 0), 0)
+
+  const egresosEfectivo = movimientos.value
+    .filter((m) => m.tipo === "EGRESO" && esEfectivo(m.metodoPagoId))
+    .reduce((a, m) => a + Number(m.monto ?? 0), 0)
+
+  return montoInicial + ingresosEfectivo - egresosEfectivo
+})
+
 // =========================
 // Fetch principal
 // =========================
@@ -698,6 +719,23 @@ onMounted(() => {
     <div class="kpi-card">
       <div class="kpi-label">Saldo</div>
       <div class="kpi-value">$ {{ formatMoney(resumen.saldo) }}</div>
+    </div>
+  </div>
+</div>
+
+<!-- Efectivo en caja -->
+<div class="row g-3 mb-3" v-if="caja">
+  <div class="col-12">
+    <div class="kpi-card kpi-card--efectivo d-flex align-items-center gap-3">
+      <div class="kpi-efectivo-icon">💵</div>
+      <div>
+        <div class="kpi-label">Efectivo en caja</div>
+        <div class="kpi-value">$ {{ formatMoney(kpiEfectivoEnCaja) }}</div>
+        <div class="kpi-efectivo-hint">
+          Monto inicial + ingresos en efectivo − egresos en efectivo.
+          Es lo que debería haber físicamente en el cajón.
+        </div>
+      </div>
     </div>
   </div>
 </div>
