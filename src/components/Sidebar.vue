@@ -11,6 +11,15 @@
       </div>
     </div>
 
+    <!-- Aviso de vencimiento de pago (aparece 4 días antes del 10) -->
+    <div v-if="vencimiento" class="venc-banner" :class="vencimiento.urgencia">
+      <component :is="icons.AlertCircle" class="venc-icon" :size="15" :stroke-width="2.5" />
+      <div class="venc-text">
+        <span class="venc-title">{{ vencimiento.titulo }}</span>
+        <span class="venc-sub">{{ vencimiento.sub }}</span>
+      </div>
+    </div>
+
     <nav class="menu">
       <template v-for="(item, idx) in menu" :key="idx">
         <div v-if="item.section" class="section">{{ item.section }}</div>
@@ -33,15 +42,6 @@
         </router-link>
       </template>
     </nav>
-
-    <!-- Aviso de vencimiento de pago (aparece 4 días antes del 10) -->
-    <div v-if="vencimiento" class="venc-banner" :class="vencimiento.urgencia">
-      <component :is="icons.AlertCircle" class="venc-icon" :size="15" :stroke-width="2.5" />
-      <div class="venc-text">
-        <span class="venc-title">{{ vencimiento.titulo }}</span>
-        <span class="venc-sub">{{ vencimiento.sub }}</span>
-      </div>
-    </div>
 
     <div class="footer">
       <div class="powered">{{ tenant.developer.texto }}</div>
@@ -80,7 +80,7 @@ const menu       = computed(() => buildMenuFromPermissions(permissions.value))
 const vencimiento = computed(() => {
   const hoy  = new Date()
   const dia  = hoy.getDate()
-  const DIA_PAGO = 10
+  const DIA_PAGO = 12
   const DIAS_AVISO = 4
 
   const diasRestantes = DIA_PAGO - dia
@@ -97,20 +97,20 @@ const vencimiento = computed(() => {
   if (diasRestantes === 1) {
     return {
       titulo:   "⚠️ Vence mañana",
-      sub:      "Renovación el día 10.",
+      sub:      "Renovación el día 12.",
       urgencia: "venc-rojo",
     }
   }
   if (diasRestantes === 2) {
     return {
       titulo:   `Vence en ${diasRestantes} días`,
-      sub:      "Renovación el día 10.",
+      sub:      "Renovación el día 12.",
       urgencia: "venc-naranja",
     }
   }
   return {
     titulo:   `Vence en ${diasRestantes} días`,
-    sub:      "Renovación el día 10.",
+    sub:      "Renovación el día 12.",
     urgencia: "venc-amarillo",
   }
 })
@@ -259,7 +259,7 @@ onBeforeUnmount(()  => window.removeEventListener("turno:changed", onTurnoChange
 
 /* ── Banner de vencimiento ─────────────────────────── */
 .venc-banner {
-  margin: 0 10px 10px;
+  margin: 10px 10px 0;
   border-radius: 10px;
   padding: 10px 12px;
   display: flex;
