@@ -706,11 +706,38 @@ function normalizePago(p) {
 const showPagoModal = ref(false)
 const pagoVentaId = ref(null)
 const pagoTotalVenta = ref(0)
-const pagoMonto = ref("")
-const pagoMetodoPagoId = ref("")
-const pagoReferencia = ref("")
+const pagoLineas = ref([])
 const pagoLoading = ref(false)
 const pagosDeVenta = ref([])
+const lastPagoMetodoTxt = ref("")
+
+function nuevaLinea() {
+  return {
+    id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    metodoPagoId: metodosPago.value?.[0]?.id ? String(metodosPago.value[0].id) : "",
+    monto: "",
+    referencia: ""
+  }
+}
+
+function addPagoLinea() {
+  if (pagoLineas.value.length >= 3) return
+  pagoLineas.value = [...pagoLineas.value, nuevaLinea()]
+}
+
+function removePagoLinea(lineaId) {
+  if (pagoLineas.value.length <= 1) return
+  pagoLineas.value = pagoLineas.value.filter((l) => l.id !== lineaId)
+}
+
+const totalLineas = computed(() =>
+  round2(
+    pagoLineas.value.reduce((sum, l) => {
+      const m = round2(parseArNumber(l.monto))
+      return sum + (Number.isFinite(m) && m > 0 ? m : 0)
+    }, 0)
+  )
+)
 
 async function loadPagosVenta(ventaId) {
   try {
@@ -742,9 +769,7 @@ const estadoPagoVenta = computed(() => {
 async function openPagoModal(ventaId, total = 0) {
   pagoVentaId.value = Number(ventaId)
   pagoTotalVenta.value = Number(total ?? 0)
-  pagoMonto.value = ""
-  pagoReferencia.value = ""
-  pagoMetodoPagoId.value = metodosPago.value?.[0]?.id ? String(metodosPago.value[0].id) : ""
+  pagoLineas.value = [nuevaLinea()]
   showPagoModal.value = true
 
   await loadPagosVenta(ventaId)
@@ -753,7 +778,7 @@ async function openPagoModal(ventaId, total = 0) {
 function closePagoModal() {
   const vid = pagoVentaId.value
   const total = pagoTotalVenta.value
-  const metodo = metodoNombreById(Number(pagoMetodoPagoId.value))
+  const metodo = lastPagoMetodoTxt.value || ""
   showPagoModal.value = false
   if (vid) {
     nextTick(() => abrirComprobante(vid, total, metodo))
@@ -764,13 +789,19 @@ function closePagoModal() {
 
 function setPagarRestante() {
   const restante = round2(restanteVenta.value || pagoTotalVenta.value || 0)
-  pagoMonto.value =
-    restante > 0
-      ? restante.toLocaleString("es-AR", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })
-      : ""
+  if (restante <= 0 || pagoLineas.value.length === 0) return
+  // Pone el restante en la primera línea, limpia las demás
+  pagoLineas.value = pagoLineas.value.map((l, i) =>
+    i === 0
+      ? {
+          ...l,
+          monto: restante.toLocaleString("es-AR", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          }),
+        }
+      : { ...l, monto: "" }
+  )
 }
 
 async function registrarPago() {
@@ -785,51 +816,60 @@ async function registrarPago() {
     if (!pagoVentaId.value) throw new Error("Venta inválida.")
     if (estadoPagoVenta.value === "PAGADA") throw new Error("Esta venta ya está PAGADA.")
 
-    const mp = Number(pagoMetodoPagoId.value)
-    if (!Number.isFinite(mp) || mp <= 0) throw new Error("Seleccioná un método de pago.")
+    // Validar todas las líneas
+    const lineasValidas = pagoLineas.value.map((l, i) => {
+      const mp = Number(l.metodoPagoId)
+      if (!Number.isFinite(mp) || mp <= 0)
+        throw new Error(`Línea ${i + 1}: seleccioná un método de pago.`)
+      const monto = round2(parseArNumber(l.monto))
+      if (!Number.isFinite(monto) || monto <= 0)
+        throw new Error(`Línea ${i + 1}: ingresá un monto válido.`)
+      return { mp, monto, referencia: l.referencia?.trim() || null }
+    })
 
-    const monto = round2(parseArNumber(pagoMonto.value))
+    const totalNuevo = round2(lineasValidas.reduce((s, l) => s + l.monto, 0))
     const restante = round2(restanteVenta.value)
 
-    if (!Number.isFinite(monto) || monto <= 0) {
-      throw new Error("Monto inválido.")
+    if (totalNuevo > restante + 0.01) {
+      throw new Error(
+        `El total ingresado ($ ${formatMoney2(totalNuevo)}) supera el restante ($ ${formatMoney2(restante)}).`
+      )
     }
 
-    if (monto > restante) {
-      throw new Error(`El monto supera el restante ($ ${formatMoney2(restante)}).`)
+    // Registrar cada pago secuencialmente
+    for (const l of lineasValidas) {
+      await pagosApi.create({
+        ventaId: Number(pagoVentaId.value),
+        cajaId: Number(cajaAbierta.value.cajaId),
+        metodoPagoId: l.mp,
+        monto: l.monto,
+        referencia: l.referencia,
+      })
     }
-
-    const payload = {
-      ventaId: Number(pagoVentaId.value),
-      cajaId: Number(cajaAbierta.value.cajaId),
-      metodoPagoId: mp,
-      monto,
-      referencia: pagoReferencia.value?.trim() || null,
-    }
-
-    await pagosApi.create(payload)
 
     await loadPagosVenta(pagoVentaId.value)
     await refreshCaja()
-
     window.dispatchEvent(new Event("cuentaCorriente:changed"))
 
+    const metodosTxt = lineasValidas
+      .map((l) => `$ ${formatMoney2(l.monto)} — ${metodoNombreById(l.mp)}`)
+      .join(" + ")
+
+    lastPagoMetodoTxt.value = lineasValidas.map((l) => metodoNombreById(l.mp)).join(" + ")
+
     if (estadoPagoVenta.value === "PAGADA") {
-      setOk(
-        `Venta #${pagoVentaId.value} pagada correctamente ✅ · $ ${formatMoney2(monto)} — ${metodoNombreById(mp)}`
-      )
+      setOk(`Venta #${pagoVentaId.value} pagada correctamente ✅ · ${metodosTxt}`)
     } else {
-      setOk(
-        `Pago registrado en venta #${pagoVentaId.value} ✅ · $ ${formatMoney2(monto)} — ${metodoNombreById(mp)}`
-      )
+      setOk(`Pago registrado en venta #${pagoVentaId.value} ✅ · ${metodosTxt}`)
     }
 
     if (lastVenta.value?.ventaId === Number(pagoVentaId.value)) {
       lastVenta.value.estado = estadoPagoVenta.value
-      lastVenta.value.metodoTxt = metodoNombreById(mp)
+      lastVenta.value.metodoTxt = lastPagoMetodoTxt.value
     }
 
-    pagoMonto.value = restanteVenta.value > 0 ? round2(restanteVenta.value).toFixed(2) : ""
+    // Resetear líneas para permitir otro pago parcial
+    pagoLineas.value = [nuevaLinea()]
   } catch (e) {
     setErr(pickErr(e, "Error registrando pago."))
   } finally {
@@ -1252,35 +1292,56 @@ onBeforeUnmount(() => {
           <button class="btn btn-sm btn-outline-light" @click="closePagoModal">Cerrar</button>
         </div>
 
-        <div class="row g-2">
-          <div class="col-12 col-md-6">
-            <label class="form-label field-label">Monto</label>
-            <div class="d-flex gap-2">
-              <input v-model="pagoMonto" class="form-control app-input" placeholder="Ej: 20000" />
-              <button class="btn btn-outline-light" @click="setPagarRestante"
-                :disabled="pagoLoading || estadoPagoVenta === 'PAGADA'">
-                Restante
-              </button>
+        <!-- Líneas de pago (pago mixto) -->
+        <div class="pago-lineas mb-2">
+          <div v-for="(linea, idx) in pagoLineas" :key="linea.id" class="pago-linea-row mb-2">
+            <div class="row g-2 align-items-end">
+              <div class="col-12 col-md-5">
+                <label v-if="idx === 0" class="form-label field-label">Método de pago</label>
+                <select v-model="linea.metodoPagoId" class="form-select app-input"
+                  :disabled="estadoPagoVenta === 'PAGADA'">
+                  <option disabled value="">Método…</option>
+                  <option v-if="!metodosPago.length" disabled value="">Sin métodos cargados</option>
+                  <option v-for="m in metodosPago" :key="m.id" :value="String(m.id)">{{ m.nombre }}</option>
+                </select>
+              </div>
+              <div class="col col-md-5">
+                <label v-if="idx === 0" class="form-label field-label">Monto</label>
+                <input v-model="linea.monto" class="form-control app-input"
+                  placeholder="Ej: 20000" inputmode="decimal"
+                  :disabled="estadoPagoVenta === 'PAGADA'" />
+              </div>
+              <div class="col-auto">
+                <button v-if="pagoLineas.length > 1" class="btn btn-sm btn-outline-danger"
+                  @click="removePagoLinea(linea.id)" :disabled="pagoLoading" title="Quitar línea">
+                  ✕
+                </button>
+              </div>
             </div>
-          </div>
-
-          <div class="col-12 col-md-6">
-            <label class="form-label field-label">Método de pago</label>
-            <select v-model="pagoMetodoPagoId" class="form-select app-input" :disabled="estadoPagoVenta === 'PAGADA'">
-              <option disabled value="">Seleccionar método…</option>
-              <option v-if="!metodosPago.length" disabled value="">No hay métodos cargados</option>
-              <option v-for="m in metodosPago" :key="m.id" :value="String(m.id)">{{ m.nombre }}</option>
-            </select>
-          </div>
-
-          <div class="col-12">
-            <label class="form-label field-label">Referencia (opcional)</label>
-            <input v-model="pagoReferencia" class="form-control app-input" placeholder="Ej: comprobante / alias"
-              :disabled="estadoPagoVenta === 'PAGADA'" />
           </div>
         </div>
 
-        <div class="d-flex justify-content-end mt-3">
+        <!-- Controles: agregar método + total de líneas + restante -->
+        <div class="d-flex align-items-center justify-content-between gap-2 mb-3">
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-light" @click="addPagoLinea"
+              :disabled="pagoLoading || estadoPagoVenta === 'PAGADA' || pagoLineas.length >= 3">
+              + Método
+            </button>
+            <button class="btn btn-sm btn-outline-light" @click="setPagarRestante"
+              :disabled="pagoLoading || estadoPagoVenta === 'PAGADA'">
+              Restante
+            </button>
+          </div>
+          <div class="helper-text text-end" v-if="totalLineas > 0">
+            <span>Ingresado: <b>$ {{ formatMoney2(totalLineas) }}</b></span>
+            <span v-if="round2(restanteVenta - totalLineas) > 0.009">
+              &nbsp;· Quedaría: <b class="text-warning">$ {{ formatMoney2(round2(restanteVenta - totalLineas)) }}</b>
+            </span>
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-end">
           <div class="d-flex gap-2">
             <button class="btn btn-outline-light" @click="closePagoModal" :disabled="pagoLoading">
               Dejar fiado
@@ -1570,5 +1631,20 @@ onBeforeUnmount(() => {
   font-weight: 700;
   padding: 3px 8px;
   border-radius: 999px;
+}
+
+.pago-lineas {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.pago-linea-row {
+  border-radius: 10px;
+  transition: background 0.15s;
+}
+
+.pago-linea-row:not(:last-child) {
+  padding-bottom: 4px;
 }
 </style>
