@@ -523,6 +523,48 @@ function cerrarCaja() {
   })
 }
 
+// ── Retiro Admin ─────────────────────────────────────────────────────────────
+const showRetiroAdmin  = ref(false)
+const savingRetiro     = ref(false)
+const retiroAdminError = ref("")
+const retiroForm       = ref({ monto: "", descripcion: "", metodoPagoId: null })
+
+function cerrarRetiroAdmin() {
+  if (savingRetiro.value) return
+  retiroForm.value = { monto: "", descripcion: "", metodoPagoId: null }
+  retiroAdminError.value = ""
+  showRetiroAdmin.value = false
+}
+
+async function confirmarRetiroAdmin() {
+  retiroAdminError.value = ""
+  const monto = toMoneyNumber(retiroForm.value.monto)
+  if (!Number.isFinite(monto) || monto <= 0) {
+    retiroAdminError.value = "Ingresá un monto válido mayor a 0."
+    return
+  }
+  if (!retiroForm.value.metodoPagoId) {
+    retiroAdminError.value = "Seleccioná un método de pago."
+    return
+  }
+  savingRetiro.value = true
+  try {
+    await cajaApi.retiroAdmin({
+      monto,
+      descripcion: retiroForm.value.descripcion?.trim() || null,
+      metodoPagoId: Number(retiroForm.value.metodoPagoId),
+    })
+    okMsg.value = `Retiro de $${monto.toLocaleString("es-AR")} registrado correctamente.`
+    cerrarRetiroAdmin()
+    await refresh()
+  } catch (e) {
+    retiroAdminError.value = pickError(e, "Error registrando el retiro.")
+  } finally {
+    savingRetiro.value = false
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ✅ FIX: crearMovimientoManual ahora valida y envía metodoPagoId
 async function crearMovimientoManual() {
   clearMsgs()
@@ -599,6 +641,14 @@ onMounted(async () => {
         </button>
         <RouterLink class="btn btn-outline-light" to="/movimientos-caja">Movimientos</RouterLink>
         <RouterLink class="btn btn-outline-light" to="/compras">Compras</RouterLink>
+        <!-- Retiro admin: visible solo para ADMIN, sin necesidad de caja abierta -->
+        <button
+          v-if="isAdmin"
+          class="btn btn-outline-warning"
+          @click="showRetiroAdmin = true"
+        >
+          💸 Retiro
+        </button>
         <RouterLink class="btn btn-primary btn-accent" to="/ventas">Ventas</RouterLink>
       </div>
     </section>
@@ -845,6 +895,49 @@ onMounted(async () => {
             </tbody>
           </table>
         </div>
+      </div>
+    </div>
+
+    <!-- Modal Retiro Admin — sin necesidad de caja abierta -->
+    <div v-if="showRetiroAdmin" class="modal-backdrop" @click.self="cerrarRetiroAdmin">
+      <div class="modal-card">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <div class="section-title">💸 Retiro administrativo</div>
+            <div class="helper-text">Se registra en la última caja. No requiere caja abierta.</div>
+          </div>
+          <button class="btn btn-sm btn-outline-light" @click="cerrarRetiroAdmin" :disabled="savingRetiro">Cerrar</button>
+        </div>
+
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label field-label">Método de pago <span class="text-danger">*</span></label>
+            <select v-model="retiroForm.metodoPagoId" class="form-select app-input">
+              <option :value="null">— Seleccioná un método —</option>
+              <option v-for="mp in metodosPago" :key="mp.id" :value="mp.id">{{ mp.nombre }}</option>
+            </select>
+          </div>
+
+          <div class="col-12">
+            <label class="form-label field-label">Monto <span class="text-danger">*</span></label>
+            <input v-model="retiroForm.monto" class="form-control app-input" inputmode="numeric" placeholder="0" />
+          </div>
+
+          <div class="col-12">
+            <label class="form-label field-label">Descripción</label>
+            <input v-model="retiroForm.descripcion" class="form-control app-input" placeholder="Ej: Retiro nocturno 27/05" />
+          </div>
+        </div>
+
+        <div v-if="retiroAdminError" class="alert alert-danger py-2 mt-3 mb-0">{{ retiroAdminError }}</div>
+
+        <button
+          class="btn btn-warning w-100 mt-4 fw-bold"
+          @click="confirmarRetiroAdmin"
+          :disabled="savingRetiro"
+        >
+          {{ savingRetiro ? "Registrando..." : "Confirmar retiro" }}
+        </button>
       </div>
     </div>
 

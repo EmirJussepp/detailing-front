@@ -21,5 +21,9 @@ export const cajaApi = {
     return http.get("/cajas/reporte-cierre", {
       params: { turno }
     })
+  },
+
+  retiroAdmin(payload) {
+    return http.post("/cajas/retiro-admin", payload)
   }
 }
