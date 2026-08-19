@@ -98,6 +98,86 @@ const clienteIdSel = ref("")
 const deuda  = ref(null)
 const estado = ref([])
 
+// ── Panel de deudores ────────────────────────────────────────────
+const deudores         = ref([])
+const deudoresLoading  = ref(false)
+const deudoresFiltro   = ref("")
+const deudoresExpandido = ref(true)
+
+async function fetchDeudores() {
+  deudoresLoading.value = true
+  try {
+    const { data } = await cuentaCorrienteApi.deudores()
+    const arr = Array.isArray(data) ? data : (data?.content ?? [])
+    // Solo clientes con deuda real > 0, enrichidos con apellido del listado local
+    deudores.value = arr
+      .filter((d) => Number(d.deuda ?? 0) > 0.01)
+      .map((d) => {
+        const cLocal = clientes.value.find((c) => Number(c.id) === Number(d.clienteId))
+        const apellido = cLocal?.apellido ?? ""
+        const nombreCompleto = apellido
+          ? `${d.nombre} ${apellido}`.trim()
+          : d.nombre ?? "Sin nombre"
+        return { ...d, apellido, nombreCompleto }
+      })
+      .sort((a, b) => Number(b.deuda) - Number(a.deuda))
+  } catch {
+    deudores.value = []
+  } finally {
+    deudoresLoading.value = false
+  }
+}
+
+const deudoresFiltrados = computed(() => {
+  const txt = deudoresFiltro.value.trim().toLowerCase()
+  if (!txt) return deudores.value
+  return deudores.value.filter((d) =>
+    `${d.nombreCompleto} ${d.dni ?? ""}`.toLowerCase().includes(txt)
+  )
+})
+
+const totalDeudaGlobal = computed(() =>
+  deudores.value.reduce((a, d) => a + Number(d.deuda ?? 0), 0)
+)
+
+function exportDeudoresCSV() {
+  const filas = deudoresFiltrados.value
+  if (!filas.length) return
+  const encabezado = ["Nombre", "DNI", "Deuda pendiente", "Ventas pendientes", "Ultima venta"]
+  const lineas = [
+    encabezado.join(";"),
+    ...filas.map((d) => [
+      `"${d.nombreCompleto}"`,
+      `"${d.dni ?? ""}"`,
+      String(Number(d.deuda ?? 0).toFixed(2)).replace(".", ","),
+      String(d.cantidadVentasPendientes ?? ""),
+      d.ultimaVenta ? `"${formatDateTime(d.ultimaVenta)}"` : "",
+    ].join(";")),
+  ]
+  const blob = new Blob([lineas.join("\n")], { type: "text/csv;charset=utf-8;" })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement("a")
+  a.href     = url
+  a.download = `deudores_${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function irACliente(d) {
+  const cLocal = clientes.value.find((c) => Number(c.id) === Number(d.clienteId))
+  if (cLocal) {
+    selectCliente(cLocal)
+  } else {
+    clienteIdSel.value = String(d.clienteId)
+    searchInput.value  = d.nombreCompleto
+  }
+  // scroll suave al buscador
+  setTimeout(() => {
+    document.querySelector(".cc-search")?.scrollIntoView({ behavior: "smooth", block: "center" })
+  }, 100)
+}
+// ─────────────────────────────────────────────────────────────────
+
 const page          = ref(0)
 const size          = ref(10)
 const totalElements = ref(0)
@@ -286,6 +366,8 @@ async function confirmarPago() {
 
     await refreshCurrentCuenta()
     await refreshCaja()
+    // Refrescar panel global de deudores para que refleje el pago inmediatamente
+    fetchDeudores()
 
     showAlert(
       "success",
@@ -481,9 +563,12 @@ async function fetchCuenta(clienteId) {
   infoMsg.value  = cajaCheck.value.ok ? "" : getCajaInfoMessage()
 
   try {
+    // Cargamos TODOS los movimientos de una vez (size=9999) para que los KPIs
+    // de Debe/Haber/Saldo y el export CSV sean siempre exactos, sin importar
+    // cuántos movimientos tenga el cliente.
     const [rDeuda, rEstado] = await Promise.all([
       cuentaCorrienteApi.deuda(clienteId),
-      cuentaCorrienteApi.estadoCuenta(clienteId, { page: page.value, size: size.value }),
+      cuentaCorrienteApi.estadoCuenta(clienteId, { page: 0, size: 9999 }),
     ])
 
     if (currentReq !== requestSeq.value) return
@@ -492,13 +577,10 @@ async function fetchCuenta(clienteId) {
     const paged = unwrapPage(rEstado?.data)
 
     estado.value        = paged.content
-    page.value          = clampPage(paged.page)
-    size.value          = Number(paged.size || 10)
-    totalElements.value = Math.max(0, Number(paged.totalElements || 0))
-    totalPages.value    = Math.max(1, Number(paged.totalPages || 1))
-
-    if (page.value > totalPages.value - 1) page.value = Math.max(0, totalPages.value - 1)
-    expanded.value = new Set()
+    page.value          = 0
+    totalElements.value = Math.max(0, Number(paged.totalElements || paged.content.length || 0))
+    totalPages.value    = 1
+    expanded.value      = new Set()
 
     if (!paged.content.length) {
       infoMsg.value = "Este cliente todavía no tiene movimientos en cuenta corriente."
@@ -590,37 +672,174 @@ function onPageChange(newPage) {
 
 function onSizeChange() {}
 
+function cell(v) {
+  return `"${String(v ?? "").replaceAll('"', '""')}"`
+}
+
+function formatMoneyExport(n) {
+  const num = Number(n ?? 0)
+  if (!num) return ""
+  return `$ ${num.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+function origenLabel(o) {
+  if (o === "VENTA")        return "Venta"
+  if (o === "PAGO")         return "Pago"
+  if (o === "NOTA_CREDITO") return "Nota de crédito"
+  return o ?? ""
+}
+
 function exportCSV() {
   try {
-    const rows = estadoFiltrado.value.map((r) => ({
-      fecha:      r.fecha      ?? "",
-      origen:     r.origen     ?? "",
-      referencia: r.referencia ?? "",
-      debe:       r.debe       ?? 0,
-      haber:      r.haber      ?? 0,
-      pendiente:  r.pendiente  ?? 0,
-      saldo:      r.saldo      ?? "",
-    }))
-    const header   = ["fecha", "origen", "referencia", "debe", "haber", "pendiente", "saldo"]
-    const csvLines = [
-      header.join(";"),
-      ...rows.map((obj) =>
-        header.map((k) => `"${String(obj[k] ?? "").replaceAll('"', '""')}"`).join(";")
-      ),
-    ]
-    const blob = new Blob([csvLines.join("\n")], { type: "text/csv;charset=utf-8;" })
+    const c        = clienteSel.value
+    const nombre   = c ? `${c.nombre} ${c.apellido || ""}`.trim() : "Cliente"
+    const dni      = c?.dni ? `DNI ${c.dni}` : ""
+    const hoy      = new Date().toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" })
+    const filas    = estadoUI.value   // todos, sin filtro
+
+    const lineas = [
+      // ── Encabezado ──
+      [cell("Elite Car Shop"), "", "", "", "", "", "", ""].join(";"),
+      [cell("Estado de Cuenta"), "", "", "", "", "", "", ""].join(";"),
+      ["", "", "", "", "", "", "", ""].join(";"),
+      [cell("Cliente:"), cell(nombre), "", "", "", "", "", ""].join(";"),
+      dni ? [cell("DNI:"), cell(dni), "", "", "", "", "", ""].join(";") : null,
+      [cell("Fecha de emisión:"), cell(hoy), "", "", "", "", "", ""].join(";"),
+      ["", "", "", "", "", "", "", ""].join(";"),
+
+      // ── Columnas ──
+      ["Fecha", "Movimiento", "Referencia", "Productos", "Cargo", "Abono", "Pendiente", "Saldo"].map(cell).join(";"),
+
+      // ── Filas ──
+      ...filas.map((r) => {
+        const detalle = Array.isArray(r.items) && r.items.length
+          ? r.items.map((it) => {
+              const cant = it.cantidad > 0 ? `${it.cantidad}x ` : ""
+              return `${cant}${it.productoNombre ?? "Producto"}`
+            }).join(" · ")
+          : ""
+        return [
+          cell(r.fecha ? new Date(r.fecha).toLocaleDateString("es-AR") : ""),
+          cell(origenLabel(r.origen)),
+          cell(r.referencia ?? ""),
+          cell(detalle),
+          cell(formatMoneyExport(r.debe)),
+          cell(formatMoneyExport(r.haber)),
+          cell(r.origen === "VENTA" && r.pendiente > 0 ? formatMoneyExport(r.pendiente) : ""),
+          cell(formatMoneyExport(r.saldo)),
+        ].join(";")
+      }),
+
+      // ── Totales ──
+      ["", "", "", "", "", "", "", ""].join(";"),
+      [cell("Total cargado:"), cell(formatMoneyExport(totDebe.value)), "", "", "", "", "", ""].join(";"),
+      [cell("Total abonado:"), cell(formatMoneyExport(totHaber.value)), "", "", "", "", "", ""].join(";"),
+      [cell("Saldo pendiente:"), cell(formatMoneyExport(deudaTotalActual.value)), "", "", "", "", "", ""].join(";"),
+    ].filter((l) => l !== null)
+
+    const bom  = "﻿"   // BOM para que Excel abra con tildes correctamente
+    const blob = new Blob([bom + lineas.join("\n")], { type: "text/csv;charset=utf-8;" })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement("a")
     a.href     = url
-    a.download = `cuenta_corriente_cliente_${clienteIdSel.value || "NA"}.csv`
+    a.download = `estado_cuenta_${(nombre).replace(/\s+/g, "_")}_${hoy.replace(/\//g, "-")}.csv`
     a.click()
     URL.revokeObjectURL(url)
   } catch {
-    showAlert("danger", "Error al exportar", "No se pudo generar el archivo CSV.")
+    showAlert("danger", "Error al exportar", "No se pudo generar el estado de cuenta.")
   }
 }
 
+function imprimirCuenta() {
+  const c      = clienteSel.value
+  const nombre = c ? `${c.nombre} ${c.apellido || ""}`.trim() : "Cliente"
+  const dni    = c?.dni ? `DNI: ${c.dni}` : ""
+  const hoy    = new Date().toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" })
+  const filas  = estadoUI.value
+
+  const filasTR = filas.map((r) => {
+    const productos = Array.isArray(r.items) && r.items.length
+      ? r.items.map((it) => {
+          const cant  = it.cantidad > 0 ? `${it.cantidad}x` : ""
+          const precio = it.precioUnitario ? ` — $ ${formatMoney(it.precioUnitario)} c/u` : ""
+          return `<span class="item-chip">${cant} ${it.productoNombre ?? "Producto"}${precio}</span>`
+        }).join("")
+      : ""
+    return `
+    <tr>
+      <td>${r.fecha ? new Date(r.fecha).toLocaleDateString("es-AR") : ""}</td>
+      <td>${origenLabel(r.origen)}</td>
+      <td>
+        <div class="ref">${r.referencia ?? ""}</div>
+        ${productos ? `<div class="items">${productos}</div>` : ""}
+      </td>
+      <td class="num">${r.debe > 0 ? "$ " + formatMoney(r.debe) : ""}</td>
+      <td class="num">${r.haber > 0 ? "$ " + formatMoney(r.haber) : ""}</td>
+      <td class="num pend">${r.origen === "VENTA" && r.pendiente > 0 ? "$ " + formatMoney(r.pendiente) : ""}</td>
+      <td class="num">${"$ " + formatMoney(r.saldo ?? 0)}</td>
+    </tr>`
+  }).join("")
+
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+  <title>Estado de Cuenta - ${nombre}</title>
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 12px; color: #111; margin: 32px; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    .sub { color: #555; font-size: 12px; margin-bottom: 20px; }
+    .info { margin-bottom: 20px; }
+    .info span { display: inline-block; margin-right: 32px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th { background: #1a1a2e; color: #fff; padding: 7px 10px; text-align: left; font-size: 11px; }
+    td { padding: 6px 10px; border-bottom: 1px solid #e5e5e5; font-size: 11px; }
+    tr:nth-child(even) td { background: #f9f9f9; }
+    .num { text-align: right; }
+    .pend { color: #c0392b; font-weight: bold; }
+    .totales { margin-top: 24px; border-top: 2px solid #111; padding-top: 12px; }
+    .totales table { width: 280px; margin-left: auto; }
+    .totales td { border: none; padding: 4px 8px; }
+    .totales .label { font-weight: bold; }
+    .totales .pend { font-size: 14px; }
+    .ref { font-weight: 600; }
+    .items { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
+    .item-chip { background: #f0f0f0; border-radius: 4px; padding: 2px 7px; font-size: 10px; color: #333; white-space: nowrap; }
+    .footer { margin-top: 40px; color: #999; font-size: 10px; border-top: 1px solid #ddd; padding-top: 8px; }
+    @media print { body { margin: 16px; } }
+  </style></head><body>
+  <h1>Elite Car Shop</h1>
+  <div class="sub">Estado de Cuenta</div>
+  <div class="info">
+    <span><b>Cliente:</b> ${nombre}</span>
+    ${dni ? `<span><b>DNI:</b> ${c.dni}</span>` : ""}
+    <span><b>Emitido:</b> ${hoy}</span>
+  </div>
+  <table>
+    <thead><tr>
+      <th>Fecha</th><th>Movimiento</th><th>Referencia</th>
+      <th class="num">Cargo</th><th class="num">Abono</th>
+      <th class="num">Pendiente</th><th class="num">Saldo</th>
+    </tr></thead>
+    <tbody>${filasTR}</tbody>
+  </table>
+  <div class="totales">
+    <table>
+      <tr><td class="label">Total cargado:</td><td class="num">$ ${formatMoney(totDebe.value)}</td></tr>
+      <tr><td class="label">Total abonado:</td><td class="num">$ ${formatMoney(totHaber.value)}</td></tr>
+      <tr><td class="label pend">Saldo pendiente:</td><td class="num pend">$ ${formatMoney(deudaTotalActual.value)}</td></tr>
+    </table>
+  </div>
+  <div class="footer">Documento generado el ${hoy} · Elite Car Shop</div>
+  <script>window.onload = function(){ window.print(); }<\/script>
+  </body></html>`
+
+  const w = window.open("", "_blank")
+  if (w) { w.document.write(html); w.document.close() }
+  else showAlert("warning", "Ventana bloqueada", "Permitir ventanas emergentes para imprimir.")
+}
+
 async function refreshCurrentCuenta() {
+  // Siempre refrescar el panel global de deudores
+  fetchDeudores()
+  // Refrescar la cuenta del cliente seleccionado si hay uno
   if (!clienteIdSel.value) return
   await fetchCuenta(Number(clienteIdSel.value))
 }
@@ -633,6 +852,8 @@ onMounted(async () => {
   await Promise.all([fetchClientes(), refreshCaja(), fetchMetodosPago()])
   setClienteFromQuery()
   bootstrapped.value = true
+  // Cargar panel de deudores después de tener los clientes para poder enriquecer con apellido
+  fetchDeudores()
   if (clienteIdSel.value) {
     await fetchCuenta(Number(clienteIdSel.value))
   } else {
@@ -686,9 +907,6 @@ watch(clienteIdSel, async (v, oldV) => {
         <button class="btn btn-outline-light" @click="clearCliente" :disabled="loading && !clienteIdSel">
           Limpiar
         </button>
-        <button class="btn btn-outline-light" @click="exportCSV" :disabled="!estadoFiltrado.length">
-          Exportar CSV
-        </button>
       </div>
     </section>
 
@@ -703,6 +921,118 @@ watch(clienteIdSel, async (v, oldV) => {
     <div v-if="errorMsg" class="alert alert-danger py-2 mb-3">{{ errorMsg }}</div>
     <div v-if="okMsg"    class="alert alert-success py-2 mb-3">{{ okMsg }}</div>
     <div v-if="infoMsg"  class="alert alert-secondary py-2 mb-3">{{ infoMsg }}</div>
+
+    <!-- ── Panel global de deudores ─────────────────────────────── -->
+    <div class="card bg-panel border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <div class="section-header mb-0" style="cursor:pointer" @click="deudoresExpandido = !deudoresExpandido">
+          <div>
+            <h2 class="section-title mb-0">
+              Clientes con saldo pendiente
+              <span v-if="!deudoresLoading" class="badge badge-soft-danger ms-2">{{ deudores.length }}</span>
+            </h2>
+            <div class="helper-text mt-1" v-if="!deudoresLoading">
+              Total adeudado: <strong class="text-danger">$ {{ formatMoney(totalDeudaGlobal) }}</strong>
+              · Hacé clic en un cliente para ver y cobrar su cuenta.
+            </div>
+          </div>
+          <div class="d-flex gap-2 align-items-center">
+            <button
+              class="btn btn-sm btn-outline-light"
+              @click.stop="exportDeudoresCSV"
+              :disabled="!deudoresFiltrados.length"
+              title="Exportar lista de deudores a Excel/CSV"
+            >
+              Exportar deudores
+            </button>
+            <button
+              class="btn btn-sm btn-outline-light"
+              @click.stop="fetchDeudores"
+              :disabled="deudoresLoading"
+            >
+              {{ deudoresLoading ? "Cargando..." : "Actualizar" }}
+            </button>
+            <span class="helper-text ms-1">{{ deudoresExpandido ? "▲" : "▼" }}</span>
+          </div>
+        </div>
+
+        <div v-if="deudoresExpandido" class="mt-3">
+          <!-- Buscador rápido dentro del panel -->
+          <div class="mb-3">
+            <input
+              v-model="deudoresFiltro"
+              class="form-control app-input"
+              placeholder="Filtrar por nombre o DNI..."
+              style="max-width:340px"
+            />
+          </div>
+
+          <div v-if="deudoresLoading" class="helper-text py-3">Cargando deudores...</div>
+
+          <div v-else-if="!deudoresFiltrados.length" class="empty-block">
+            <div class="empty-title">
+              {{ deudores.length ? "Sin resultados para ese filtro" : "No hay clientes con deuda pendiente" }}
+            </div>
+          </div>
+
+          <div v-else class="table-responsive">
+            <table class="table table-dark table-hover align-middle app-table mb-0">
+              <thead>
+                <tr>
+                  <th>Cliente</th>
+                  <th>DNI</th>
+                  <th class="text-end">Deuda pendiente</th>
+                  <th class="text-center">Ventas pendientes</th>
+                  <th>Última venta</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="d in deudoresFiltrados"
+                  :key="d.clienteId"
+                  :class="{ 'cc-fila-activa': String(d.clienteId) === String(clienteIdSel) }"
+                >
+                  <td class="fw-semibold">{{ d.nombreCompleto }}</td>
+                  <td class="text-secondary">{{ d.dni ?? "—" }}</td>
+                  <td class="text-end td-num fw-bold text-danger">$ {{ formatMoney(d.deuda) }}</td>
+                  <td class="text-center">
+                    <span class="badge badge-soft-warning">{{ d.cantidadVentasPendientes ?? "—" }}</span>
+                  </td>
+                  <td class="text-secondary" style="font-size:0.85rem">
+                    {{ d.ultimaVenta ? formatDateTime(d.ultimaVenta) : "—" }}
+                  </td>
+                  <td class="text-end">
+                    <button class="btn btn-sm btn-outline-light" @click="irACliente(d)">
+                      Ver cuenta
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- ────────────────────────────────────────────────────────── -->
+
+    <!-- Barra de cliente activo -->
+    <div v-if="clienteSel" class="cc-cliente-activo mb-3">
+      <div class="cc-cliente-activo-info">
+        <div class="cc-cliente-activo-nombre">{{ clienteTitulo }}</div>
+        <div class="cc-cliente-activo-sub">
+          {{ clienteSel.dni ? `DNI: ${clienteSel.dni}` : 'Sin DNI registrado' }}
+          · {{ ventasConSaldoPendiente }} venta(s) con saldo pendiente
+        </div>
+      </div>
+      <div class="cc-cliente-activo-deuda">
+        <div class="cc-cliente-activo-deuda-label">Saldo pendiente</div>
+        <div class="cc-cliente-activo-deuda-valor">$ {{ formatMoney(deudaTotalActual) }}</div>
+      </div>
+      <button class="btn btn-sm btn-outline-light" @click="clearCliente">
+        Cambiar cliente
+      </button>
+    </div>
 
     <div class="card bg-panel border-0 shadow-sm mb-3 cc-search">
       <div class="card-body">
@@ -786,20 +1116,20 @@ watch(clienteIdSel, async (v, oldV) => {
 
       <div class="row g-3 mb-3">
         <div class="col-6 col-md-3">
-          <div class="kpi-card">
+          <div class="kpi-card kpi-card--danger">
             <div class="kpi-label">Debe</div>
-            <div class="kpi-value text-danger">$ {{ formatMoney(totDebe) }}</div>
+            <div class="kpi-value" style="color:#e87070">$ {{ formatMoney(totDebe) }}</div>
           </div>
         </div>
         <div class="col-6 col-md-3">
-          <div class="kpi-card">
+          <div class="kpi-card kpi-card--success">
             <div class="kpi-label">Haber</div>
-            <div class="kpi-value text-success">$ {{ formatMoney(totHaber) }}</div>
+            <div class="kpi-value" style="color:#5cb88a">$ {{ formatMoney(totHaber) }}</div>
           </div>
         </div>
         <div class="col-6 col-md-3">
           <div class="kpi-card">
-            <div class="kpi-label">Saldo acumulado visible</div>
+            <div class="kpi-label">Saldo acumulado</div>
             <div class="kpi-value">$ {{ formatMoney(saldoFinal) }}</div>
           </div>
         </div>
@@ -846,8 +1176,18 @@ watch(clienteIdSel, async (v, oldV) => {
       <div class="card bg-panel border-0 shadow-sm">
         <div class="card-body">
           <div class="section-header mb-3">
-            <h2 class="section-title mb-0">Historial</h2>
-            <div class="helper-text">Movimientos paginados del cliente seleccionado.</div>
+            <div>
+              <h2 class="section-title mb-0">Historial de cuenta</h2>
+              <div class="helper-text">Todos los movimientos del cliente seleccionado.</div>
+            </div>
+            <div class="d-flex gap-2" v-if="estadoUI.length">
+              <button class="btn btn-sm btn-outline-light" @click="exportCSV">
+                Exportar Excel
+              </button>
+              <button class="btn btn-sm btn-outline-light" @click="imprimirCuenta">
+                Imprimir / PDF
+              </button>
+            </div>
           </div>
 
           <div v-if="loading" class="empty-block">
@@ -885,19 +1225,19 @@ watch(clienteIdSel, async (v, oldV) => {
                     <td>
                       <div class="fw-semibold text-white">{{ r.referencia || "—" }}</div>
                     </td>
-                    <td class="text-end" :class="r.debe  > 0 ? 'text-danger fw-bold'  : 'text-secondary'">
+                    <td class="text-end td-num" :class="r.debe  > 0 ? 'text-danger fw-bold'  : 'text-secondary'">
                       {{ r.debe  > 0 ? "$ " + formatMoney(r.debe)  : "—" }}
                     </td>
-                    <td class="text-end" :class="r.haber > 0 ? 'text-success fw-bold' : 'text-secondary'">
+                    <td class="text-end td-num" :class="r.haber > 0 ? 'text-success fw-bold' : 'text-secondary'">
                       {{ r.haber > 0 ? "$ " + formatMoney(r.haber) : "—" }}
                     </td>
-                    <td class="text-end">
+                    <td class="text-end td-num">
                       <span v-if="r.origen === 'VENTA' && r.pendiente > 0" class="pending-pill">
                         $ {{ formatMoney(r.pendiente) }}
                       </span>
                       <span v-else class="text-secondary">—</span>
                     </td>
-                    <td class="text-end fw-bold">$ {{ formatMoney(r.saldo ?? 0) }}</td>
+                    <td class="text-end td-num fw-bold">$ {{ formatMoney(r.saldo ?? 0) }}</td>
                     <td class="text-end">
                       <button
                         v-if="r.origen === 'VENTA'"
@@ -947,8 +1287,8 @@ watch(clienteIdSel, async (v, oldV) => {
                               <tr v-for="(it, i) in r.items" :key="i">
                                 <td><div class="text-white fw-semibold">{{ it.productoNombre || "Producto" }}</div></td>
                                 <td class="text-end text-white fw-semibold">{{ it.cantidad ?? "—" }}</td>
-                                <td class="text-end text-secondary">{{ it.precioUnitario != null ? "$ " + formatMoney(it.precioUnitario) : "—" }}</td>
-                                <td class="text-end text-white fw-semibold">{{ it.subtotal != null ? "$ " + formatMoney(it.subtotal) : "—" }}</td>
+                                <td class="text-end td-num" style="color:rgba(255,255,255,0.55)">{{ it.precioUnitario != null ? "$ " + formatMoney(it.precioUnitario) : "—" }}</td>
+                                <td class="text-end td-num fw-semibold">{{ it.subtotal != null ? "$ " + formatMoney(it.subtotal) : "—" }}</td>
                               </tr>
                             </tbody>
                           </table>
@@ -962,23 +1302,18 @@ watch(clienteIdSel, async (v, oldV) => {
           </div>
 
           <div class="cc-footer">
-            <div class="helper-text">Total registros: <b>{{ totalElements }}</b></div>
-            <Pager
-              class="mt-3"
-              :page="page"
-              :size="size"
-              :total-elements="totalElements"
-              :total-pages="totalPages"
-              :loading="loading"
-              @update:page="onPageChange"
-              @update:size="onSizeChange"
-            />
+            <div class="helper-text">
+              <b>{{ estadoFiltrado.length }}</b> registro(s) mostrado(s)
+              <template v-if="estadoFiltrado.length !== estadoUI.length">
+                de <b>{{ estadoUI.length }}</b> en total
+              </template>
+            </div>
           </div>
         </div>
       </div>
     </template>
 
-    <div v-if="showPagoModal" class="modal-backdrop cc-modal-backdrop" @click.self="!loading && (showPagoModal = false)">
+    <div v-if="showPagoModal" class="modal-backdrop cc-modal-backdrop" @click.self="!pagoLoading && cerrarPagoModal()">
       <div class="cc-modal">
         <div class="cc-modal__header">
           <div>
@@ -1064,37 +1399,12 @@ watch(clienteIdSel, async (v, oldV) => {
 <style scoped>
 .cc-page { min-height: 100%; }
 
-.page-hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-
-.eyebrow {
-  color: var(--app-accent);
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.page-title { font-size: 2rem; font-weight: 800; color: #fff; }
-.page-subtitle { color: rgba(255, 255, 255, 0.68); }
-
-.hero-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-}
+.page-title { font-size: 1.75rem; font-weight: 800; color: #fff; line-height: 1.15; }
 
 .bg-panel {
-  background: linear-gradient(180deg, rgba(18, 14, 10, 0.98) 0%, rgba(12, 9, 6, 0.96) 100%);
-  border: 1px solid rgba(180, 140, 60, 0.10);
-  border-radius: 18px;
+  background: rgba(16, 13, 8, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 6px;
 }
 
 .field-label  { color: rgba(255, 255, 255, 0.72); font-size: 0.88rem; font-weight: 600; }
@@ -1105,15 +1415,15 @@ watch(clienteIdSel, async (v, oldV) => {
 .app-input {
   background: rgba(255, 255, 255, 0.04);
   color: #fff;
-  border: 1px solid rgba(180, 140, 60, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   min-height: 44px;
 }
 
 .app-input:focus {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.05);
   color: #fff;
-  border-color: rgba(var(--app-accent-rgb), 0.55);
-  box-shadow: 0 0 0 0.18rem rgba(var(--app-accent-rgb), 0.16);
+  border-color: rgba(var(--app-accent-rgb), 0.40);
+  box-shadow: 0 0 0 0.16rem rgba(var(--app-accent-rgb), 0.10);
 }
 
 /* ── Tarjeta de deuda principal ── */
@@ -1123,12 +1433,11 @@ watch(clienteIdSel, async (v, oldV) => {
   gap: 16px;
   flex-wrap: wrap;
   padding: 20px;
-  border-radius: 22px;
-  background:
-    radial-gradient(circle at top left, rgba(var(--app-accent-rgb), 0.20), transparent 35%),
-    linear-gradient(180deg, rgba(17, 12, 4, 0.98), rgba(11, 8, 2, 0.98));
-  border: 1px solid rgba(var(--app-accent-rgb), 0.22);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+  border-radius: 6px;
+  background: rgba(18, 14, 8, 0.97);
+  border: 1px solid rgba(var(--app-accent-rgb), 0.18);
+  border-left: 3px solid rgba(var(--app-accent-rgb), 0.45);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.22);
 }
 
 .debt-focus-copy  { flex: 1 1 320px; }
@@ -1151,29 +1460,108 @@ watch(clienteIdSel, async (v, oldV) => {
 
 .debt-mini {
   background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(180, 140, 60, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: 4px;
 }
 .debt-mini span   { display: block; color: rgba(255, 255, 255, 0.62); font-size: 0.8rem; margin-bottom: 4px; }
 .debt-mini strong { color: #fff; font-size: 1rem; }
 
 /* ── KPIs ── */
 .kpi-card {
-  border: 1px solid rgba(180, 140, 60, 0.10);
-  border-radius: 16px;
-  padding: 14px;
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 2px solid rgba(255, 255, 255, 0.10);
+  border-radius: 6px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.02);
   height: 100%;
 }
 
-.kpi-card--accent {
-  border-color: rgba(var(--app-accent-rgb), 0.28);
-  background: rgba(var(--app-accent-rgb), 0.08);
+.kpi-card--danger {
+  border-top-color: rgba(239, 68, 68, 0.55);
+  background: rgba(239, 68, 68, 0.03);
 }
 
-.kpi-label { color: rgba(255, 255, 255, 0.62); font-size: 0.82rem; margin-bottom: 6px; }
+.kpi-card--success {
+  border-top-color: rgba(39, 209, 127, 0.55);
+  background: rgba(39, 209, 127, 0.03);
+}
+
+.kpi-card--accent {
+  border-top-color: rgba(201, 162, 39, 0.55);
+  background: rgba(201, 162, 39, 0.03);
+}
+
+.kpi-label {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
 .kpi-value { color: #fff; font-weight: 800; font-size: 1.05rem; }
+
+/* ── Fila activa en panel de deudores ── */
+.cc-fila-activa td {
+  background: rgba(201, 162, 39, 0.10) !important;
+}
+.cc-fila-activa td:first-child {
+  border-left: 3px solid rgba(201, 162, 39, 0.65);
+}
+
+/* ── Barra de cliente activo ── */
+.cc-cliente-activo {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 14px 18px;
+  border-radius: 6px;
+  border-left: 3px solid rgba(201, 162, 39, 0.50);
+  background: rgba(201, 162, 39, 0.06);
+  border-top: 1px solid rgba(201, 162, 39, 0.16);
+  border-right: 1px solid rgba(201, 162, 39, 0.16);
+  border-bottom: 1px solid rgba(201, 162, 39, 0.16);
+  flex-wrap: wrap;
+}
+
+.cc-cliente-activo-info {
+  flex: 1;
+  min-width: 200px;
+}
+
+.cc-cliente-activo-nombre {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.2;
+}
+
+.cc-cliente-activo-sub {
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.55);
+  margin-top: 3px;
+}
+
+.cc-cliente-activo-deuda {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.cc-cliente-activo-deuda-label {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.50);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+
+.cc-cliente-activo-deuda-valor {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #e05252;
+  line-height: 1;
+}
 
 /* ── Sugerencias ── */
 .suggest-box {
@@ -1183,8 +1571,9 @@ watch(clienteIdSel, async (v, oldV) => {
   max-height: 260px;
   overflow: auto;
   background: #111827;
-  border: 1px solid rgba(180, 140, 60, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
 }
 
 .suggestion-item {
@@ -1213,12 +1602,12 @@ watch(clienteIdSel, async (v, oldV) => {
   align-items: center;
   justify-content: center;
   min-width: 96px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(245, 158, 11, 0.18);
-  border: 1px solid rgba(245, 158, 11, 0.28);
+  padding: 5px 10px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.25);
   color: #fcd34d;
-  font-weight: 800;
+  font-weight: 700;
   font-size: 0.82rem;
 }
 
@@ -1227,10 +1616,10 @@ watch(clienteIdSel, async (v, oldV) => {
 .mini-pill {
   display: inline-flex;
   align-items: center;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(245, 158, 11, 0.16);
-  border: 1px solid rgba(245, 158, 11, 0.25);
+  padding: 4px 9px;
+  border-radius: 3px;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.22);
   color: #fcd34d;
   font-size: 0.8rem;
   font-weight: 700;
@@ -1242,10 +1631,24 @@ watch(clienteIdSel, async (v, oldV) => {
   color: rgba(255, 255, 255, 0.78);
 }
 
-.app-table thead th { color: rgba(255, 255, 255, 0.72); font-weight: 600; border-bottom-color: rgba(255, 255, 255, 0.08); }
-.app-table tbody td { border-bottom-color: rgba(255, 255, 255, 0.06); }
+.app-table thead th {
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+.app-table tbody td {
+  border-bottom-color: rgba(255, 255, 255, 0.04);
+  padding-top: 8px;
+  padding-bottom: 8px;
+  font-size: 0.9rem;
+}
 .table td, .table th { vertical-align: middle; }
-.table-dark.table-hover tbody tr:hover td { background: rgba(255, 255, 255, 0.03); }
+.table-dark.table-hover tbody tr:hover td { background: rgba(255, 255, 255, 0.025); }
 .btn-expand { min-width: 88px; }
 .empty-block { padding: 14px 0; }
 .empty-title { color: #fff; font-weight: 700; margin-bottom: 4px; }
@@ -1262,10 +1665,9 @@ watch(clienteIdSel, async (v, oldV) => {
   justify-content: space-between;
   align-items: flex-start;
   gap: 14px;
-  padding: 14px 16px;
-  border-radius: 16px;
+  padding: 12px 16px;
+  border-radius: 4px;
   border: 1px solid;
-  backdrop-filter: blur(10px);
 }
 .app-alert__title { font-weight: 800; color: #fff; margin-bottom: 2px; }
 .app-alert__text  { color: rgba(255, 255, 255, 0.78); font-size: 0.92rem; }
@@ -1290,9 +1692,9 @@ watch(clienteIdSel, async (v, oldV) => {
 .cc-modal {
   width: 100%;
   max-width: 580px;
-  background: linear-gradient(180deg, #120e06 0%, #0b0904 100%);
-  border: 1px solid rgba(180, 140, 60, 0.16);
-  border-radius: 22px;
+  background: #120e06;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
   overflow: hidden;
 }
@@ -1306,14 +1708,14 @@ watch(clienteIdSel, async (v, oldV) => {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  border-bottom: 1px solid rgba(180, 140, 60, 0.10);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .cc-modal__footer {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  border-top: 1px solid rgba(180, 140, 60, 0.10);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .cc-modal__close { border: 0; background: transparent; color: #fff; font-size: 24px; line-height: 1; opacity: 0.8; }
@@ -1321,9 +1723,9 @@ watch(clienteIdSel, async (v, oldV) => {
 .pay-resume-card {
   margin-top: 16px;
   padding: 14px 16px;
-  border-radius: 16px;
+  border-radius: 4px;
   background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(180, 140, 60, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .pay-resume-row {
@@ -1338,7 +1740,7 @@ watch(clienteIdSel, async (v, oldV) => {
 
 .quick-pay-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
-.pay-chip { display: inline-flex; align-items: center; padding: 6px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; }
+.pay-chip { display: inline-flex; align-items: center; padding: 5px 9px; border-radius: 3px; font-size: 0.78rem; font-weight: 700; }
 .pay-chip--success { background: rgba(34,  197, 94, 0.18); color: #86efac; border: 1px solid rgba(34,  197, 94, 0.30); }
 .pay-chip--warning { background: rgba(245, 158, 11, 0.18); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.30); }
 

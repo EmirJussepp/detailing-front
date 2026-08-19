@@ -20,6 +20,10 @@ export const ventasApi = {
   devolver(id, payload = {}) {
     return http.post(`/ventas/${id}/devolver`, payload)
   },
+
+  devolverParcial(id, payload) {
+    return http.post(`/ventas/${id}/devolver-parcial`, payload)
+  },
   enviarComprobante(ventaId, payload) {
   return http.post(`/ventas/${ventaId}/comprobante`, payload)
 },

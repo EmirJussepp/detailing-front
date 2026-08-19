@@ -16,18 +16,13 @@ http.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`
   }
 
-  console.log("➡️", config.method?.toUpperCase(), `${config.baseURL}${config.url}`, config.data ?? "")
   return config
 })
 
 http.interceptors.response.use(
-  (res) => {
-    console.log("✅", res.config.url, res.status, res.data)
-    return res
-  },
+  (res) => res,
   (err) => {
     const status = err?.response?.status
-    console.error("❌", err.config?.url, status, err.response?.data || err.message)
 
     if (status === 401) {
       try { clearSession() } catch {}

@@ -1,11 +1,14 @@
 <script setup>
 import { onMounted, ref, computed, watch } from "vue"
 import { useRouter } from "vue-router"
+import * as XLSX from "xlsx"
 
 import Pager from "../components/Pager.vue"
 import { clientesApi } from "../services/clientesApi"
 import { tipoClientesApi } from "../services/tipoClienteService"
 import { localidadApi } from "../services/localidadService"
+import { cuentaCorrienteApi } from "../services/cuentaCorrienteService"
+import { ventasApi } from "../services/ventasApi"
 
 const router = useRouter()
 
@@ -276,6 +279,82 @@ async function saveEdit() {
     saving.value = false
   }
 }
+const exportando = ref(false)
+
+async function exportarExcel() {
+  if (exportando.value) return
+  exportando.value = true
+  errorMsg.value = ""
+  try {
+    // 1. Clientes + deudas en paralelo
+    const [clientesRes, deudasRes] = await Promise.all([
+      clientesApi.list({ page: 0, size: 9999, search: null }),
+      cuentaCorrienteApi.deudores().catch(() => ({ data: [] })),
+    ])
+
+    const todos = unwrapPage(clientesRes.data).content.map(mapCliente).filter(c => c.activo !== false)
+
+    const deudasArr = Array.isArray(deudasRes.data) ? deudasRes.data : (deudasRes.data?.content ?? [])
+    const saldoMap = new Map()
+    for (const d of deudasArr) {
+      saldoMap.set(Number(d.clienteId), Number(d.deuda ?? 0))
+    }
+
+    // 2. Ventas por cliente en paralelo para obtener total gastado y última visita
+    const ventasResultados = await Promise.all(
+      todos.map(c =>
+        ventasApi.list({ clienteId: c.id, page: 0, size: 9999 })
+          .then(r => ({ clienteId: c.id, ventas: Array.isArray(r.data) ? r.data : (r.data?.content ?? []) }))
+          .catch(() => ({ clienteId: c.id, ventas: [] }))
+      )
+    )
+
+    const statsMap = new Map()
+    for (const { clienteId, ventas } of ventasResultados) {
+      let totalGastado = 0
+      let ultimaFecha = null
+      for (const v of ventas) {
+        if (String(v.estado ?? "").toUpperCase() === "ANULADA") continue
+        totalGastado += Number(v.total ?? 0)
+        const f = v.fecha ?? null
+        if (f && (!ultimaFecha || f > ultimaFecha)) ultimaFecha = f
+      }
+      statsMap.set(Number(clienteId), { totalGastado, ultimaFecha })
+    }
+
+    // 3. Armar filas Excel
+    const filas = todos.map(c => {
+      const stats = statsMap.get(Number(c.id)) ?? { totalGastado: 0, ultimaFecha: null }
+      return {
+        "Nombre":           c.nombre,
+        "Apellido":         c.apellido ?? "",
+        "DNI":              c.dni ?? "",
+        "Teléfono":         c.telefono ?? "",
+        "Email":            c.email ?? "",
+        "Tipo":             tipoById.value.get(String(c.tipoClienteId))?.name ?? "",
+        "Localidad":        locById.value.get(String(c.localidadId))?.nombre ?? "",
+        "Saldo CC ($)":     saldoMap.get(Number(c.id)) ?? 0,
+        "Total Gastado ($)": stats.totalGastado,
+        "Última Visita":    stats.ultimaFecha ? String(stats.ultimaFecha).slice(0, 10) : "",
+      }
+    })
+
+    const ws = XLSX.utils.json_to_sheet(filas)
+    ws["!cols"] = [
+      { wch: 20 }, { wch: 20 }, { wch: 14 }, { wch: 16 }, { wch: 26 },
+      { wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 16 }, { wch: 14 },
+    ]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, "Clientes")
+    const fecha = new Date().toISOString().slice(0, 10)
+    XLSX.writeFile(wb, `clientes_${fecha}.xlsx`)
+  } catch (e) {
+    errorMsg.value = "Error al exportar clientes."
+  } finally {
+    exportando.value = false
+  }
+}
+
 let t = null
 watch(search, () => {
   clearTimeout(t)
@@ -312,6 +391,10 @@ onMounted(async () => {
       <div class="hero-actions">
         <button class="btn btn-outline-light" @click="fetchAll" :disabled="loading">
           {{ loading ? "Actualizando..." : "Actualizar" }}
+        </button>
+
+        <button class="btn btn-outline-light" @click="exportarExcel" :disabled="exportando">
+          {{ exportando ? "Exportando..." : "Exportar Excel" }}
         </button>
 
         <button class="btn btn-primary btn-accent" @click="create" :disabled="saving">

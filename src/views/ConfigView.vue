@@ -29,47 +29,44 @@ const admin = computed(() => Boolean(getSession() && isAdmin()))
     <div v-if="admin" class="config-grid">
 
       <!-- METODOS PAGO -->
-      <RouterLink
-        to="/config/metodos-pago"
-        class="config-card"
-      >
-        <div class="config-icon">💳</div>
-
+      <RouterLink to="/config/metodos-pago" class="config-card">
+        <div class="config-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="5" width="20" height="14" rx="2"/>
+            <line x1="2" y1="10" x2="22" y2="10"/>
+          </svg>
+        </div>
         <div>
           <div class="config-title">Métodos de pago</div>
-          <div class="config-desc">
-            Administrar efectivo, transferencias y otros medios.
-          </div>
+          <div class="config-desc">Administrar efectivo, transferencias y otros medios.</div>
         </div>
       </RouterLink>
 
       <!-- LOCALIDADES -->
-      <RouterLink
-        to="/config/localidades"
-        class="config-card"
-      >
-        <div class="config-icon">📍</div>
-
+      <RouterLink to="/config/localidades" class="config-card">
+        <div class="config-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+            <circle cx="12" cy="9" r="2.5"/>
+          </svg>
+        </div>
         <div>
           <div class="config-title">Localidades</div>
-          <div class="config-desc">
-            Crear y administrar localidades del sistema.
-          </div>
+          <div class="config-desc">Crear y administrar localidades del sistema.</div>
         </div>
       </RouterLink>
 
       <!-- USUARIOS -->
-      <RouterLink
-        to="/config/usuarios"
-        class="config-card"
-      >
-        <div class="config-icon">👤</div>
-
+      <RouterLink to="/config/usuarios" class="config-card">
+        <div class="config-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+        </div>
         <div>
           <div class="config-title">Usuarios</div>
-          <div class="config-desc">
-            Crear, editar y gestionar accesos.
-          </div>
+          <div class="config-desc">Crear, editar y gestionar accesos.</div>
         </div>
       </RouterLink>
 
@@ -101,7 +98,7 @@ const admin = computed(() => Boolean(getSession() && isAdmin()))
   align-items:center;
 
   background:rgba(18,22,32,.92);
-  border-radius:14px;
+  border-radius:2px;
 
   padding:18px;
 
@@ -119,9 +116,18 @@ const admin = computed(() => Boolean(getSession() && isAdmin()))
 /* ICON */
 
 .config-icon{
-  font-size:26px;
-  width:40px;
-  text-align:center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #c9a227;
+}
+
+.config-icon svg {
+  width: 22px;
+  height: 22px;
 }
 
 /* TEXT */

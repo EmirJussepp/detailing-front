@@ -89,14 +89,14 @@ const vencimiento = computed(() => {
 
   if (diasRestantes === 0) {
     return {
-      titulo:   "⚠️ Vence hoy el pago",
+      titulo:   "Vence hoy el pago",
       sub:      "Regularizá tu suscripción.",
       urgencia: "venc-rojo",
     }
   }
   if (diasRestantes === 1) {
     return {
-      titulo:   "⚠️ Vence mañana",
+      titulo:   "Vence mañana",
       sub:      "Renovación el día 12.",
       urgencia: "venc-rojo",
     }
@@ -152,12 +152,11 @@ onBeforeUnmount(()  => window.removeEventListener("turno:changed", onTurnoChange
 
 .brand-logo-wrap {
   flex-shrink: 0;
-  width: 50px;
-  height: 50px;
+  width: 42px;
+  height: 42px;
   border-radius: v-bind("tenant.logoRadius");
   overflow: hidden;
-  border: 2px solid v-bind("tenant.colors.accent");
-  box-shadow: 0 0 14px v-bind("tenant.colors.accentSoft");
+  border: 1px solid v-bind("tenant.colors.accentBorder");
 }
 
 .brand-logo {
@@ -181,16 +180,18 @@ onBeforeUnmount(()  => window.removeEventListener("turno:changed", onTurnoChange
 }
 
 .role {
-  font-size: 11px;
-  font-weight: 700;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
   color: rgba(255, 255, 255, 0.55);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
 .shift {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.40);
 }
 
 .menu {
@@ -206,8 +207,9 @@ onBeforeUnmount(()  => window.removeEventListener("turno:changed", onTurnoChange
   margin-top: 10px;
   margin-bottom: 2px;
   padding: 0 4px;
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.10em;
   text-transform: uppercase;
   color: v-bind("tenant.colors.accentMuted");
 }
@@ -216,39 +218,38 @@ onBeforeUnmount(()  => window.removeEventListener("turno:changed", onTurnoChange
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 44px;
-  padding: 10px 12px;
-  border-radius: 12px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 2px;
   text-decoration: none;
-  color: rgba(255, 255, 255, 0.82);
-  border: 1px solid transparent;
-  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+  color: rgba(255, 255, 255, 0.68);
+  border: none;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .link:hover {
-  background: v-bind("tenant.colors.accentSoft");
-  border-color: v-bind("tenant.colors.accentBorder");
-  color: #fff;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.92);
+  box-shadow: inset 3px 0 0 rgba(201, 162, 39, 0.40);
 }
 
 .link.active {
-  background: v-bind("tenant.colors.accentSoft");
-  border-color: v-bind("tenant.colors.accentBorder");
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  background: rgba(201, 162, 39, 0.08);
+  color: #fff;
+  box-shadow: inset 3px 0 0 #c9a227;
 }
 
 .icon {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
-  color: rgba(255, 255, 255, 0.35);
-  transition: color 0.18s ease, transform 0.18s ease;
+  color: rgba(255, 255, 255, 0.32);
+  transition: color 0.15s ease;
 }
 
 .link:hover .icon,
 .icon.active {
   color: v-bind("tenant.colors.accent");
-  transform: translateX(1px);
 }
 
 .label {
@@ -260,12 +261,13 @@ onBeforeUnmount(()  => window.removeEventListener("turno:changed", onTurnoChange
 /* ── Banner de vencimiento ─────────────────────────── */
 .venc-banner {
   margin: 10px 10px 0;
-  border-radius: 10px;
+  border-radius: 2px;
   padding: 10px 12px;
   display: flex;
   align-items: flex-start;
   gap: 8px;
   border: 1px solid;
+  border-left-width: 3px;
 }
 
 .venc-icon {
@@ -326,9 +328,10 @@ onBeforeUnmount(()  => window.removeEventListener("turno:changed", onTurnoChange
 }
 
 .powered {
-  font-size: 11px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
   color: v-bind("tenant.developer.color");
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  font-weight: 500;
+  letter-spacing: 0.05em;
 }
 </style>

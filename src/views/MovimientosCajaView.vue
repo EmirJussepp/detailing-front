@@ -229,8 +229,6 @@ async function hydrateVentaInfoFromVentaId(ventaId) {
 
   try {
     const { data } = await ventasApi.porId(vid)
-    // DEBUG TEMPORAL — borrar después de confirmar
-    console.log('[hydrate] venta', vid, JSON.stringify(data))
     const venta = data?.venta ?? data?.ventaActualizada ?? data ?? null
 
     const clienteId = pickClienteIdFromVenta(venta)
@@ -355,33 +353,30 @@ const movimientosFiltrados = computed(() =>
   })
 )
 
+// KPIs siempre sobre el total de la caja (NO filtrados) para que los números
+// sean exactos aunque la tabla esté filtrada por tipo o concepto.
 const kpiIngresos = computed(() =>
-  movimientosFiltrados.value
+  movimientos.value
     .filter((m) => m.tipo === "INGRESO")
     .reduce((a, m) => a + Number(m.monto ?? 0), 0)
 )
 
 const kpiEgresos = computed(() =>
-  movimientosFiltrados.value
+  movimientos.value
     .filter((m) => m.tipo === "EGRESO")
     .reduce((a, m) => a + Number(m.monto ?? 0), 0)
 )
-// Agregar después de kpiNeto
+
+const kpiNeto = computed(() => kpiIngresos.value - kpiEgresos.value)
+
 const kpiIngresosPorMetodo = computed(() => {
   const map = new Map()
-
-  for (const m of movimientosFiltrados.value) {
+  for (const m of movimientos.value) {
     if (m.tipo !== "INGRESO") continue
-
-    const midDirecto = safeId(m?.metodoPagoId)
-    const ventaId = pickVentaIdFromMovimiento(m)
-    const midVenta = ventaId ? safeId(ventaInfoCache.value[ventaId]?.metodoPagoId) : 0
-    const mid = midDirecto || midVenta
-
+    const mid = safeId(m?.metodoPagoId)
     const nombre = mid ? metodoNombreById(mid) : "Sin método"
     map.set(nombre, (map.get(nombre) ?? 0) + Number(m.monto ?? 0))
   }
-
   return Array.from(map.entries())
     .map(([nombre, total]) => ({ nombre, total }))
     .sort((a, b) => b.total - a.total)
@@ -389,25 +384,16 @@ const kpiIngresosPorMetodo = computed(() => {
 
 const kpiEgresosPorMetodo = computed(() => {
   const map = new Map()
-
-  for (const m of movimientosFiltrados.value) {
+  for (const m of movimientos.value) {
     if (m.tipo !== "EGRESO") continue
-
-    const midDirecto = safeId(m?.metodoPagoId)
-    const ventaId = pickVentaIdFromMovimiento(m)
-    const midVenta = ventaId ? safeId(ventaInfoCache.value[ventaId]?.metodoPagoId) : 0
-    const mid = midDirecto || midVenta
-
+    const mid = safeId(m?.metodoPagoId)
     const nombre = mid ? metodoNombreById(mid) : "Sin método"
     map.set(nombre, (map.get(nombre) ?? 0) + Number(m.monto ?? 0))
   }
-
   return Array.from(map.entries())
     .map(([nombre, total]) => ({ nombre, total }))
     .sort((a, b) => b.total - a.total)
 })
-
-const kpiNeto = computed(() => kpiIngresos.value - kpiEgresos.value)
 
 // "Efectivo en caja" = monto inicial + ingresos en efectivo - egresos en efectivo
 // Identifica efectivo por nombre del método (contiene "efectivo" o "contado", case-insensitive)
@@ -416,19 +402,18 @@ function esEfectivo(metodoPagoId) {
   return nombre.includes("efectivo") || nombre.includes("contado") || nombre.includes("cash")
 }
 
-const kpiEfectivoEnCaja = computed(() => {
-  const montoInicial = Number(caja.value?.montoInicial ?? 0)
-
-  const ingresosEfectivo = movimientos.value
+const kpiEfectivoDesglose = computed(() => {
+  const inicial = Number(caja.value?.montoInicial ?? 0)
+  const cobrado = movimientos.value
     .filter((m) => m.tipo === "INGRESO" && esEfectivo(m.metodoPagoId))
     .reduce((a, m) => a + Number(m.monto ?? 0), 0)
-
-  const egresosEfectivo = movimientos.value
+  const retirado = movimientos.value
     .filter((m) => m.tipo === "EGRESO" && esEfectivo(m.metodoPagoId))
     .reduce((a, m) => a + Number(m.monto ?? 0), 0)
-
-  return montoInicial + ingresosEfectivo - egresosEfectivo
+  return { inicial, cobrado, retirado, total: inicial + cobrado - retirado }
 })
+
+const kpiEfectivoEnCaja = computed(() => kpiEfectivoDesglose.value.total)
 
 // =========================
 // Fetch principal
@@ -465,9 +450,11 @@ async function refreshCaja() {
         return
       }
 
+      // Cargamos TODOS los movimientos de la caja de una vez para que los KPIs
+      // (ingresos, egresos, efectivo) sean siempre exactos sin importar cuántos haya.
       const movResp = await movimientosCajaApi.porCajaId(caja.value.cajaId, {
-        page: page.value,
-        size: size.value,
+        page: 0,
+        size: 9999,
       })
 
       movimientos.value = Array.isArray(movResp.data?.content)
@@ -727,14 +714,26 @@ onMounted(() => {
 <div class="row g-3 mb-3" v-if="caja">
   <div class="col-12">
     <div class="kpi-card kpi-card--efectivo d-flex align-items-center gap-3">
-      <div class="kpi-efectivo-icon">💵</div>
-      <div>
-        <div class="kpi-label">Efectivo en caja</div>
+      <div class="flex-grow-1">
+        <div class="kpi-label">Efectivo en cajón</div>
         <div class="kpi-value">$ {{ formatMoney(kpiEfectivoEnCaja) }}</div>
-        <div class="kpi-efectivo-hint">
-          Monto inicial + ingresos en efectivo − egresos en efectivo.
-          Es lo que debería haber físicamente en el cajón.
+        <div class="kpi-efectivo-desglose">
+          <span class="desglose-item">
+            <span class="desglose-tag">Inicio</span>
+            $ {{ formatMoney(kpiEfectivoDesglose.inicial) }}
+          </span>
+          <span class="desglose-sep">+</span>
+          <span class="desglose-item">
+            <span class="desglose-tag">Cobrado</span>
+            $ {{ formatMoney(kpiEfectivoDesglose.cobrado) }}
+          </span>
+          <span v-if="kpiEfectivoDesglose.retirado > 0" class="desglose-sep">−</span>
+          <span v-if="kpiEfectivoDesglose.retirado > 0" class="desglose-item desglose-item--egreso">
+            <span class="desglose-tag">Retirado</span>
+            $ {{ formatMoney(kpiEfectivoDesglose.retirado) }}
+          </span>
         </div>
+        <div class="kpi-efectivo-hint">Lo que debería haber físicamente en el cajón ahora.</div>
       </div>
     </div>
   </div>
@@ -900,20 +899,11 @@ onMounted(() => {
 
         <div class="footer-summary">
           <div class="helper-text">
-            Total registros: <b>{{ totalElements }}</b>
+            <b>{{ movimientosFiltrados.length }}</b> movimiento(s) mostrado(s)
+            <template v-if="movimientosFiltrados.length !== movimientos.length">
+              de <b>{{ movimientos.length }}</b> en total
+            </template>
           </div>
-        </div>
-
-        <div class="mt-3" v-if="movimientos.length">
-          <Pager
-            :page="page"
-            :size="size"
-            :total-elements="totalElements"
-            :total-pages="totalPages"
-            :loading="loading"
-            @update:page="onPageChange"
-            @update:size="onSizeChange"
-          />
         </div>
       </div>
     </div>
@@ -952,7 +942,7 @@ onMounted(() => {
 .status-box {
   min-height: 44px;
   padding: 10px 14px;
-  border-radius: 14px;
+  border-radius: 4px;
   background: rgba(255,255,255,.03);
   border: 1px solid rgba(255,255,255,.08);
   display: flex;
@@ -992,7 +982,7 @@ onMounted(() => {
 .metodos-strip {
   background: rgba(255,255,255,.04);
   border: 1px solid rgba(255,255,255,.09);
-  border-radius: 14px;
+  border-radius: 4px;
   padding: 12px 16px;
   display: flex;
   align-items: center;
@@ -1019,10 +1009,10 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: rgba(255,255,255,.06);
-  border: 1px solid rgba(255,255,255,.11);
-  border-radius: 10px;
-  padding: 6px 14px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 3px;
+  padding: 5px 12px;
 }
 
 .metodo-chip-nombre {

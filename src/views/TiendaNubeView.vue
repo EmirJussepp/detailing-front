@@ -180,7 +180,7 @@ onMounted(cargarDatos)
                 </span>
                 <span v-else>—</span>
               </td>
-              <td class="text-right">$ {{ formatMoney(v.total ?? v.monto ?? 0) }}</td>
+              <td class="text-right td-num">$ {{ formatMoney(v.total ?? v.monto ?? 0) }}</td>
               <td>
                 <span class="badge badge-online">ONLINE</span>
               </td>
@@ -231,10 +231,11 @@ onMounted(cargarDatos)
   flex-wrap: wrap;
 }
 .eyebrow {
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   color: rgba(201, 162, 39, 0.7);
   margin-bottom: 4px;
 }
@@ -253,19 +254,19 @@ onMounted(cargarDatos)
 /* Alerts */
 .alert {
   padding: 12px 16px;
-  border-radius: 10px;
+  border-radius: 2px;
   font-size: 0.875rem;
   font-weight: 600;
 }
 .alert-success {
-  background: rgba(34,197,94,0.12);
-  border: 1px solid rgba(34,197,94,0.3);
-  color: #4ade80;
+  background: rgba(34,197,94,0.10);
+  border: 1px solid rgba(34,197,94,0.25);
+  color: #7ee2ab;
 }
 .alert-danger {
-  background: rgba(239,68,68,0.1);
-  border: 1px solid rgba(239,68,68,0.25);
-  color: #f87171;
+  background: rgba(239,68,68,0.10);
+  border: 1px solid rgba(239,68,68,0.22);
+  color: #ff8d98;
 }
 
 /* Stats */
@@ -275,43 +276,48 @@ onMounted(cargarDatos)
   gap: 16px;
 }
 .stat-card {
-  background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(201,162,39,0.2);
-  border-radius: 14px;
-  padding: 20px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-top: 2px solid rgba(255,255,255,0.12);
+  border-radius: 2px;
+  padding: 14px 16px;
 }
 .stat-card__label {
-  font-size: 11px;
-  font-weight: 700;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.70rem;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.07em;
   color: rgba(255,255,255,0.45);
   margin-bottom: 8px;
 }
 .stat-card__value {
-  font-size: 1.6rem;
-  font-weight: 900;
-  color: #c9a227;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: -0.01em;
   margin-bottom: 4px;
 }
 .stat-card__sub {
-  font-size: 11px;
-  color: rgba(255,255,255,0.3);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.35);
 }
 
 /* Panel */
 .panel {
-  background: rgba(255,255,255,0.03);
+  background: rgba(255,255,255,0.02);
   border: 1px solid rgba(255,255,255,0.07);
-  border-radius: 14px;
+  border-radius: 2px;
   overflow: hidden;
 }
 .panel__header {
-  padding: 16px 20px;
+  padding: 14px 18px;
   border-bottom: 1px solid rgba(255,255,255,0.07);
 }
 .panel__title {
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 700;
   color: #fff;
   margin: 0;
@@ -327,13 +333,14 @@ onMounted(cargarDatos)
   font-size: 0.875rem;
 }
 .table th {
-  padding: 10px 16px;
+  padding: 8px 16px;
   text-align: left;
-  font-size: 11px;
-  font-weight: 700;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.68rem;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: rgba(255,255,255,0.4);
+  color: rgba(255,255,255,0.40);
   border-bottom: 1px solid rgba(255,255,255,0.07);
 }
 .table td {
@@ -350,21 +357,22 @@ onMounted(cargarDatos)
 .badge {
   display: inline-flex;
   align-items: center;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 2px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.68rem;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 .badge-online {
-  background: rgba(201,162,39,0.15);
-  border: 1px solid rgba(201,162,39,0.35);
-  color: #c9a227;
+  background: rgba(201,162,39,0.12);
+  border: 1px solid rgba(201,162,39,0.30);
+  color: #e8c97a;
 }
 .badge-tn {
-  background: rgba(99,102,241,0.15);
-  border: 1px solid rgba(99,102,241,0.3);
+  background: rgba(99,102,241,0.12);
+  border: 1px solid rgba(99,102,241,0.26);
   color: #a5b4fc;
 }
 
@@ -395,17 +403,25 @@ onMounted(cargarDatos)
   align-items: center;
   gap: 8px;
   padding: 9px 18px;
-  border-radius: 10px;
-  font-size: 0.875rem;
+  border-radius: 2px;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 0.82rem;
   font-weight: 700;
+  letter-spacing: 0.02em;
   cursor: pointer;
-  border: none;
-  transition: all 0.18s;
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
 }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-primary {
-  background: #c9a227;
-  color: #000;
+  background: rgba(201,162,39,0.18);
+  border-color: rgba(201,162,39,0.65);
+  color: #e0c060;
+}
+.btn-primary:hover:not(:disabled) {
+  background: rgba(201,162,39,0.28);
+  border-color: #c9a227;
+  color: #fff;
 }
 .btn-primary:hover:not(:disabled) { background: #dbb840; }
 .btn-outline {

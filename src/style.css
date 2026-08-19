@@ -3,8 +3,11 @@ html, body, #app {
   padding: 0 !important;
   width: 100% !important;
   min-height: 100vh !important;
-  background: #06040b !important;
+  background: #0c0a06 !important;
   overflow-x: hidden;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Importantísimo: NO centrar el body */
@@ -15,6 +18,298 @@ body {
 /* Importantísimo: NUNCA limitar el #app */
 #app {
   max-width: none !important;
+}
+
+/* ============================================================
+   BOOTSTRAP RESET — aplanar todos los radios y gradientes
+   ============================================================ */
+
+/* Badges: eliminar pills, cuadrar todo */
+.badge,
+.badge.rounded-pill,
+span.rounded-pill,
+.text-bg-success,
+.text-bg-danger,
+.text-bg-warning,
+.text-bg-info,
+.text-bg-primary,
+.text-bg-secondary,
+.text-bg-dark,
+.text-bg-light {
+  border-radius: 2px !important;
+}
+
+/* Botones */
+.btn,
+.btn-sm,
+.btn-lg {
+  border-radius: 2px !important;
+  box-shadow: none !important;
+}
+
+.btn:focus,
+.btn:active,
+.btn:focus-visible {
+  box-shadow: none !important;
+}
+
+/* Inputs y selects */
+.form-control,
+.form-select,
+.input-group-text {
+  border-radius: 2px !important;
+}
+
+.input-group > .form-control:first-child,
+.input-group > .form-select:first-child,
+.input-group > .btn:first-child {
+  border-radius: 2px 0 0 2px !important;
+}
+
+.input-group > .form-control:last-child,
+.input-group > .form-select:last-child,
+.input-group > .btn:last-child {
+  border-radius: 0 2px 2px 0 !important;
+}
+
+/* Cards */
+.card {
+  border-radius: 2px !important;
+}
+
+.card-header:first-child {
+  border-radius: 1px 1px 0 0 !important;
+}
+
+.card-footer:last-child {
+  border-radius: 0 0 1px 1px !important;
+}
+
+/* Modales Bootstrap */
+.modal-content {
+  border-radius: 2px !important;
+}
+
+.modal-header {
+  border-radius: 1px 1px 0 0 !important;
+}
+
+/* Alerts */
+.alert {
+  border-radius: 2px !important;
+}
+
+/* Dropdowns */
+.dropdown-menu {
+  border-radius: 2px !important;
+}
+
+.dropdown-item {
+  border-radius: 0 !important;
+}
+
+/* Progress */
+.progress {
+  border-radius: 1px !important;
+  height: 6px;
+}
+
+.progress-bar {
+  border-radius: 1px !important;
+}
+
+/* Nav tabs y pills */
+.nav-tabs .nav-link,
+.nav-pills .nav-link {
+  border-radius: 2px !important;
+}
+
+/* List groups */
+.list-group-item:first-child {
+  border-radius: 2px 2px 0 0 !important;
+}
+
+.list-group-item:last-child {
+  border-radius: 0 0 2px 2px !important;
+}
+
+/* Tooltips y popovers */
+.tooltip-inner {
+  border-radius: 2px !important;
+}
+
+.popover {
+  border-radius: 2px !important;
+}
+
+/* Quitar gradientes de botones Bootstrap */
+.btn-success,
+.btn-danger,
+.btn-warning,
+.btn-info,
+.btn-primary {
+  background-image: none !important;
+}
+
+/* Tabla dark — quitar radius de celdas */
+.table-dark th:first-child {
+  border-radius: 0 !important;
+}
+
+.table-dark th:last-child {
+  border-radius: 0 !important;
+}
+
+/* ============================================================
+   BOOTSTRAP COLOR OVERRIDES — versiones mate
+   ============================================================ */
+
+/* text-bg-* → versiones suaves y mate */
+.text-bg-warning {
+  background-color: rgba(245, 158, 11, 0.14) !important;
+  color: #fcd34d !important;
+  border: 1px solid rgba(245, 158, 11, 0.28) !important;
+}
+
+.text-bg-success {
+  background-color: rgba(25, 135, 84, 0.14) !important;
+  color: #7ee2ab !important;
+  border: 1px solid rgba(25, 135, 84, 0.26) !important;
+}
+
+.text-bg-danger {
+  background-color: rgba(220, 53, 69, 0.14) !important;
+  color: #ff8d98 !important;
+  border: 1px solid rgba(220, 53, 69, 0.26) !important;
+}
+
+.text-bg-info {
+  background-color: rgba(13, 202, 240, 0.10) !important;
+  color: #67e8f9 !important;
+  border: 1px solid rgba(13, 202, 240, 0.22) !important;
+}
+
+.text-bg-primary {
+  background-color: rgba(201, 162, 39, 0.12) !important;
+  color: #e8c97a !important;
+  border: 1px solid rgba(201, 162, 39, 0.24) !important;
+}
+
+.text-bg-secondary {
+  background-color: rgba(107, 114, 128, 0.14) !important;
+  color: #d1d5db !important;
+  border: 1px solid rgba(107, 114, 128, 0.26) !important;
+}
+
+.text-bg-dark {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  color: rgba(255, 255, 255, 0.80) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
+
+/* text-success / text-danger — apagados, no vibrantes */
+.text-success { color: #5cb88a !important; }
+.text-danger  { color: #e87070 !important; }
+.text-warning { color: #d4a820 !important; }
+
+/* btn-success / btn-danger — sólidos mate, sin gradiente */
+.btn-success {
+  background: #1e7a4a !important;
+  border-color: #1e7a4a !important;
+  color: #fff !important;
+}
+.btn-success:hover {
+  background: #186040 !important;
+  border-color: #186040 !important;
+}
+
+.btn-danger {
+  background: #8b2030 !important;
+  border-color: #8b2030 !important;
+  color: #fff !important;
+}
+.btn-danger:hover {
+  background: #721a28 !important;
+  border-color: #721a28 !important;
+}
+
+.btn-warning {
+  background: #8a6200 !important;
+  border-color: #8a6200 !important;
+  color: #fff !important;
+}
+.btn-warning:hover {
+  background: #704f00 !important;
+  border-color: #704f00 !important;
+}
+
+/* outline-warning */
+.btn-outline-warning {
+  color: #d4a820 !important;
+  border-color: rgba(212, 168, 32, 0.40) !important;
+}
+.btn-outline-warning:hover {
+  background: rgba(212, 168, 32, 0.10) !important;
+  color: #e8c44a !important;
+}
+
+/* Alert colors — mate */
+.alert-success {
+  background: rgba(25, 135, 84, 0.10) !important;
+  border-color: rgba(25, 135, 84, 0.25) !important;
+  color: #7ee2ab !important;
+}
+
+.alert-danger {
+  background: rgba(220, 53, 69, 0.10) !important;
+  border-color: rgba(220, 53, 69, 0.25) !important;
+  color: #ff8d98 !important;
+}
+
+.alert-warning {
+  background: rgba(255, 193, 7, 0.08) !important;
+  border-color: rgba(255, 193, 7, 0.22) !important;
+  color: #fcd34d !important;
+}
+
+.alert-secondary {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.10) !important;
+  color: rgba(255, 255, 255, 0.68) !important;
+}
+
+/* HR — más sutil */
+hr {
+  border-color: rgba(255, 255, 255, 0.07) !important;
+  opacity: 1 !important;
+}
+
+/* Card body — más denso */
+.card-body {
+  padding: 14px 16px !important;
+}
+
+/* Outline-light — más sutil en dark */
+.btn-outline-light {
+  color: rgba(255, 255, 255, 0.75) !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+}
+
+.btn-outline-light:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: rgba(255, 255, 255, 0.95) !important;
+  border-color: rgba(255, 255, 255, 0.28) !important;
+}
+
+/* form-label — más compacto */
+.form-label {
+  margin-bottom: 5px !important;
+}
+
+/* Reducir gap en row g-3 dentro de cards */
+.card-body .row.g-3 {
+  --bs-gutter-y: 0.65rem;
+  --bs-gutter-x: 0.75rem;
 }
 
 

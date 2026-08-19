@@ -13,7 +13,7 @@ export const tenant = {
 
   // Logo (importado arriba)
   logo: logoElite,
-  logoRadius: "999px", // redondo para Elite, podría ser "12px" para otros
+  logoRadius: "6px",
 
   // Colores (usados en CSS variables dinámicas)
   colors: {
@@ -21,7 +21,7 @@ export const tenant = {
     accentHover:   "#dbb840",
     accentSoft:    "rgba(201, 162, 39, 0.14)",
     accentBorder:  "rgba(201, 162, 39, 0.28)",
-    accentMuted:   "rgba(201, 162, 39, 0.55)",
+    accentMuted:   "rgba(255, 255, 255, 0.28)",
     bgBase:        "#0d0a06",
     bgPanel:       "rgba(18, 14, 10, 0.98)",
     sidebarBg:     "linear-gradient(180deg, #0d0a06 0%, #0a0804 100%)",

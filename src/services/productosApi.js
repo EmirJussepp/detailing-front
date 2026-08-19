@@ -49,6 +49,14 @@ export const productosApi = {
     return http.delete(`/productos/eliminar/${id}`)
   },
 
+  inactivos() {
+    return http.get("/productos/inactivos")
+  },
+
+  reactivar(id) {
+    return http.post(`/productos/reactivar/${id}`)
+  },
+
   actualizarPreciosPorcentaje(command) {
     return http.put("/productos/actualizar-precios", command)
   },

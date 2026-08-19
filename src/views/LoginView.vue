@@ -174,12 +174,8 @@ async function onSubmit() {
   display: grid;
   place-items: center;
   overflow: hidden;
-  background:
-    radial-gradient(900px 520px at 15% 10%, rgba(201, 162, 39, 0.07), transparent 60%),
-    radial-gradient(900px 520px at 90% 85%, rgba(201, 162, 39, 0.05), transparent 62%),
-    linear-gradient(180deg, #0e0b06 0%, #0a0804 100%);
+  background: #0b0804;
   color: rgba(255, 255, 255, 0.92);
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 }
 
 .login-container {
@@ -191,12 +187,12 @@ async function onSubmit() {
 
 .login-card {
   width: 100%;
-  border-radius: 16px;
-  padding: 22px 20px;
-  background: rgba(15, 12, 6, 0.90);
-  border: 1px solid rgba(180, 140, 60, 0.16);
-  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(10px);
+  border-radius: 6px;
+  padding: 24px 22px;
+  background: #111009;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(201, 162, 39, 0.20);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.60);
 }
 
 .brand {
@@ -208,12 +204,11 @@ async function onSubmit() {
 
 .brand-logo-wrap {
   flex-shrink: 0;
-  width: 52px;
-  height: 52px;
-  border-radius: 999px;
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
   overflow: hidden;
-  border: 2px solid rgba(201, 162, 39, 0.50);
-  box-shadow: 0 0 16px rgba(201, 162, 39, 0.18);
+  border: 1px solid rgba(201, 162, 39, 0.28);
 }
 
 .brand-logo {
@@ -256,10 +251,12 @@ async function onSubmit() {
 
 .alert-dark {
   padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(255, 80, 110, 0.12);
+  border-radius: 4px;
+  background: rgba(255, 80, 110, 0.10);
   border: 1px solid rgba(255, 80, 110, 0.22);
+  border-left: 3px solid rgba(255, 80, 110, 0.60);
   color: rgba(255, 210, 220, 0.95);
+  font-size: 0.88rem;
   margin-bottom: 10px;
 }
 
@@ -277,12 +274,13 @@ async function onSubmit() {
 
 .field input {
   width: 100%;
-  height: 44px;
-  border-radius: 12px;
-  border: 1px solid rgba(180, 140, 60, 0.18);
+  height: 42px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
   background: rgba(255, 255, 255, 0.04);
   color: rgba(255, 255, 255, 0.92);
   padding: 0 12px;
+  font-family: inherit;
 }
 
 .field input::placeholder {
@@ -316,20 +314,23 @@ async function onSubmit() {
 }
 
 .btn-primary {
-  height: 44px;
-  border-radius: 12px;
-  border: 1px solid rgba(201, 162, 39, 0.40);
-  background: rgba(201, 162, 39, 0.14);
+  height: 42px;
+  border-radius: 6px;
+  border: 1px solid rgba(201, 162, 39, 0.50);
+  background: rgba(201, 162, 39, 0.16);
   color: rgba(255, 255, 255, 0.95);
-  font-weight: 800;
-  letter-spacing: 0.2px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  letter-spacing: 0.04em;
   cursor: pointer;
   margin-top: 6px;
-  transition: background 0.18s ease;
+  font-family: inherit;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .btn-primary:hover {
-  background: rgba(201, 162, 39, 0.24);
+  background: rgba(201, 162, 39, 0.28);
+  border-color: rgba(201, 162, 39, 0.70);
 }
 
 .btn-primary:disabled {
@@ -355,10 +356,11 @@ async function onSubmit() {
 
 .chip {
   display: inline-block;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(201, 162, 39, 0.18);
-  background: rgba(201, 162, 39, 0.06);
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.78rem;
   margin-right: 6px;
   margin-top: 6px;
 }

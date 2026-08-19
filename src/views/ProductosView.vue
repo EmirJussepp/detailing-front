@@ -41,7 +41,28 @@ function unwrapArray(data) {
 }
 
 function toNumber(v) {
-  const x = Number(String(v ?? "").replace(",", "."))
+  let s = String(v ?? "").trim()
+  if (!s) return NaN
+  // Formato argentino: punto = separador de miles, coma = decimal
+  // Ej: "1.500" → 1500 | "1.500,50" → 1500.50 | "1500,50" → 1500.50
+  if (s.includes(",")) {
+    // Hay coma: definitivamente formato argentino → quitar puntos, coma → punto
+    s = s.replace(/\./g, "").replace(",", ".")
+  } else {
+    const dots = (s.match(/\./g) || []).length
+    if (dots > 1) {
+      // Múltiples puntos ("1.500.000") → todos son separadores de miles
+      s = s.replace(/\./g, "")
+    } else if (dots === 1) {
+      const afterDot = s.split(".")[1]
+      if (afterDot.length === 3) {
+        // Un solo punto y 3 decimales → separador de miles ("1.500" → 1500)
+        s = s.replace(/\./g, "")
+      }
+      // Si tiene 1 ó 2 decimales → punto decimal ("1.5", "1.50") → dejar como está
+    }
+  }
+  const x = Number(s)
   return Number.isFinite(x) ? x : NaN
 }
 
@@ -145,7 +166,45 @@ function catName(id) {
   return c?.nombre ?? c?.name ?? "-"
 }
 
+const session = getSession()
+const isAdmin = computed(() => Array.isArray(session?.permissions) && session.permissions.includes("admin:all"))
+
 const userId = computed(() => Number(getSession()?.userId ?? 0) || null)
+
+// ── Dados de baja ────────────────────────────────────────────────────────────
+const activeTab = ref("activos")
+const inactivos = ref([])
+const loadingInactivos = ref(false)
+const reactivandoId = ref(null)
+
+async function fetchInactivos() {
+  loadingInactivos.value = true
+  try {
+    const { data } = await productosApi.inactivos()
+    inactivos.value = Array.isArray(data) ? data : []
+  } catch { inactivos.value = [] }
+  finally { loadingInactivos.value = false }
+}
+
+async function reactivarProducto(id) {
+  reactivandoId.value = id
+  try {
+    await productosApi.reactivar(id)
+    inactivos.value = inactivos.value.filter(p => p.productoId !== id)
+    await fetchAll()
+  } catch (e) {
+    alert("Error al reactivar el producto.")
+  } finally { reactivandoId.value = null }
+}
+
+function formatFechaBaja(f) {
+  if (!f) return "—"
+  try { return new Date(f).toLocaleDateString("es-AR") } catch { return f }
+}
+
+watch(activeTab, (tab) => {
+  if (tab === "inactivos" && inactivos.value.length === 0) fetchInactivos()
+})
 
 const nombre = ref("")
 const codigoProducto = ref("")
@@ -248,6 +307,7 @@ function quitarImagenEdit() {
 
 async function eliminarProducto(id) {
   if (!id) return
+  if (!isAdmin.value) return
   openConfirm({
     title: "Eliminar producto",
     message: "¿Seguro que querés eliminar este producto? Esta acción no se puede deshacer.",
@@ -399,6 +459,7 @@ watch(q, () => {
 })
 
 async function create() {
+  if (saving.value) return
   errorMsg.value = ""
   const uid = Number(getSession()?.userId ?? 0)
   if (!uid) { errorMsg.value = "No se detectó userId en sesión. Volvé a iniciar sesión."; return }
@@ -409,8 +470,9 @@ async function create() {
   const pm = precioMayorista.value?.trim() ? toNumber(precioMayorista.value) : null
 
   if (!Number.isFinite(pc) || pc < 0) { errorMsg.value = "Precio costo inválido."; return }
-  if (!Number.isFinite(pv) || pv < pc) { errorMsg.value = "Precio venta no puede ser menor al costo."; return }
-  if (pm !== null && (!Number.isFinite(pm) || pm < pc)) { errorMsg.value = "Mayorista no puede ser menor al costo."; return }
+  if (!Number.isFinite(pv) || pv <= 0) { errorMsg.value = "Precio venta es obligatorio y debe ser mayor a 0."; return }
+  if (pv < pc) { errorMsg.value = "Precio venta no puede ser menor al costo."; return }
+  if (pm !== null && (!Number.isFinite(pm) || pm < pc)) { errorMsg.value = "Precio mayorista no puede ser menor al costo."; return }
 
   const sMin = stockMinimo.value == null || stockMinimo.value === "" ? null : Number(stockMinimo.value)
   const sMax = stockMaximo.value == null || stockMaximo.value === "" ? null : Number(stockMaximo.value)
@@ -468,7 +530,7 @@ async function applyStockDelta(p, delta) {
 }
 
 async function saveEdit() {
-  if (!editing.value?.id) return
+  if (saving.value || !editing.value?.id) return
   errorMsg.value = ""
 
   if (!editForm.value.nombre.trim()) { errorMsg.value = "Nombre es obligatorio."; return }
@@ -647,7 +709,85 @@ onMounted(async () => {
       </div>
     </section>
 
+    <!-- Tabs: Activos / Dados de baja (solo admin) -->
+    <div v-if="isAdmin" class="prod-tabs mb-3">
+      <button class="prod-tab" :class="{ active: activeTab === 'activos' }" @click="activeTab = 'activos'">
+        Productos activos
+      </button>
+      <button class="prod-tab" :class="{ active: activeTab === 'inactivos' }" @click="activeTab = 'inactivos'">
+        Dados de baja
+        <span v-if="inactivos.length" class="prod-tab__badge">{{ inactivos.length }}</span>
+      </button>
+    </div>
+
+    <!-- Sección dados de baja -->
+    <template v-if="isAdmin && activeTab === 'inactivos'">
+      <div class="card bg-panel border-0 shadow-sm mb-3">
+        <div class="card-body">
+          <div class="section-header mb-3">
+            <h2 class="section-title mb-0">Productos dados de baja</h2>
+            <div class="helper-text">Solo visible para administradores. Podés reactivar cualquiera.</div>
+          </div>
+
+          <div v-if="loadingInactivos" class="helper-text py-3 text-center">Cargando...</div>
+          <div v-else-if="inactivos.length === 0" class="helper-text py-3 text-center">No hay productos dados de baja.</div>
+
+          <div v-else class="table-responsive">
+            <table class="table table-dark table-hover align-middle app-table mb-0">
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th>Categoría / Marca</th>
+                  <th class="text-end">Stock</th>
+                  <th class="text-end">P. Costo</th>
+                  <th class="text-end">P. Venta</th>
+                  <th class="text-end">P. Mayor.</th>
+                  <th class="text-end">Ventas hist.</th>
+                  <th class="text-end">Facturado hist.</th>
+                  <th class="text-center">Fecha baja</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="p in inactivos" :key="p.productoId">
+                  <td>
+                    <div class="fw-semibold">{{ p.nombre }}</div>
+                    <div class="helper-text" style="font-size:0.75rem">{{ p.codigoProducto ?? "Sin código" }}</div>
+                  </td>
+                  <td>
+                    <div>{{ p.categoria ?? "—" }}</div>
+                    <div class="helper-text" style="font-size:0.75rem">{{ p.marca ?? "—" }}</div>
+                  </td>
+                  <td class="text-end">
+                    <span :class="p.stockActual > 0 ? 'badge badge-soft-warning' : 'badge badge-soft-neutral'">
+                      {{ p.stockActual }}
+                    </span>
+                  </td>
+                  <td class="text-end td-num" style="color:rgba(255,255,255,0.55)">$ {{ formatMoney(p.precioCosto) }}</td>
+                  <td class="text-end td-num">$ {{ formatMoney(p.precioVenta) }}</td>
+                  <td class="text-end td-num" style="color:rgba(255,255,255,0.55)">{{ p.precioMayorista ? `$ ${formatMoney(p.precioMayorista)}` : "—" }}</td>
+                  <td class="text-end td-num" style="color:rgba(255,255,255,0.55)">{{ p.totalVentas }} vta{{ p.totalVentas !== 1 ? "s" : "" }} · {{ p.totalUnidades }} u.</td>
+                  <td class="text-end td-num fw-semibold">$ {{ formatMoney(p.totalFacturado) }}</td>
+                  <td class="text-center helper-text" style="font-size:0.8rem">{{ formatFechaBaja(p.fechaBaja) }}</td>
+                  <td class="text-end">
+                    <button
+                      class="btn btn-sm btn-outline-success"
+                      @click="reactivarProducto(p.productoId)"
+                      :disabled="reactivandoId === p.productoId"
+                    >
+                      {{ reactivandoId === p.productoId ? "..." : "Reactivar" }}
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </template>
+
     <!-- Aumento de precios -->
+    <template v-if="!isAdmin || activeTab === 'activos'">
     <div class="card bg-panel border-0 shadow-sm mb-3">
       <div class="card-body">
         <div class="section-header mb-3">
@@ -776,15 +916,15 @@ onMounted(async () => {
           </div>
           <div v-if="showCostoAlta" class="col-12 col-md-3">
             <label class="form-label field-label">Costo</label>
-            <input v-model="precioCosto" class="form-control app-input" />
+            <input v-model="precioCosto" class="form-control app-input" placeholder="Ej: 1500 o 1500,50" />
           </div>
           <div class="col-12 col-md-3">
-            <label class="form-label field-label">Venta</label>
-            <input v-model="precioVenta" class="form-control app-input" />
+            <label class="form-label field-label">Venta <span class="text-danger">*</span></label>
+            <input v-model="precioVenta" class="form-control app-input" placeholder="Ej: 2500 o 2500,50" />
           </div>
           <div class="col-12 col-md-3">
             <label class="form-label field-label">Mayorista</label>
-            <input v-model="precioMayorista" class="form-control app-input" />
+            <input v-model="precioMayorista" class="form-control app-input" placeholder="Ej: 2000 (opcional)" />
           </div>
 
           <!-- [FOTO] Foto opcional en alta -->
@@ -950,18 +1090,20 @@ onMounted(async () => {
                 </td>
                 <td class="text-secondary">{{ p.marcaId != null ? marcaName(p.marcaId) : "-" }}</td>
                 <td class="fw-bold" :class="{ 'stock-zero': p.stockActual === 0 }">
-                  {{ p.stockActual }}
-                  <span v-if="p.stockActual === 0" class="badge badge-soft-danger ms-2">Sin stock</span>
-                  <span v-else-if="p.stockMinimo != null && p.stockActual <= p.stockMinimo" class="badge badge-soft-warning ms-2">Bajo stock</span>
+                  <div class="stock-cell">
+                    <span>{{ p.stockActual }}</span>
+                    <span v-if="p.stockActual === 0" class="badge badge-soft-danger">Sin stock</span>
+                    <span v-else-if="p.stockMinimo != null && p.stockActual <= p.stockMinimo" class="badge badge-soft-warning">Bajo stock</span>
+                  </div>
                 </td>
-                <td class="text-end text-secondary">$ {{ formatMoney(p.precioVenta) }}</td>
-                <td class="text-end text-secondary">{{ p.precioMayorista != null ? "$ " + formatMoney(p.precioMayorista) : "-" }}</td>
+                <td class="text-end td-num">$ {{ formatMoney(p.precioVenta) }}</td>
+                <td class="text-end td-num" style="color:rgba(255,255,255,0.55)">{{ p.precioMayorista != null ? "$ " + formatMoney(p.precioMayorista) : "—" }}</td>
                 <td class="text-end">
                   <div class="btn-group flex-wrap">
                     <button class="btn btn-sm btn-outline-light" :disabled="saving" @click="applyStockDelta(p, -Math.abs(stockDelta || 0))">-{{ Math.abs(stockDelta || 0) }}</button>
                     <button class="btn btn-sm btn-outline-light" :disabled="saving" @click="applyStockDelta(p, +Math.abs(stockDelta || 0))">+{{ Math.abs(stockDelta || 0) }}</button>
                     <button class="btn btn-sm btn-outline-light" :disabled="saving" @click="openEdit(p)">Editar</button>
-                    <button class="btn btn-sm btn-outline-danger" :disabled="saving" @click="eliminarProducto(p.id)">Eliminar</button>
+                    <button v-if="isAdmin" class="btn btn-sm btn-outline-danger" :disabled="saving" @click="eliminarProducto(p.id)">Eliminar</button>
                   </div>
                 </td>
               </tr>
@@ -1037,15 +1179,15 @@ onMounted(async () => {
           </div>
           <div v-if="showCostoEdicion" class="col-12 col-md-6">
             <label class="form-label field-label">Costo</label>
-            <input v-model="editForm.precioCosto" class="form-control app-input" />
+            <input v-model="editForm.precioCosto" class="form-control app-input" placeholder="Ej: 1500 o 1500,50" />
           </div>
           <div class="col-12 col-md-6">
-            <label class="form-label field-label">Venta</label>
-            <input v-model="editForm.precioVenta" class="form-control app-input" />
+            <label class="form-label field-label">Venta <span class="text-danger">*</span></label>
+            <input v-model="editForm.precioVenta" class="form-control app-input" placeholder="Ej: 2500 o 2500,50" />
           </div>
           <div class="col-12 col-md-6">
             <label class="form-label field-label">Mayorista</label>
-            <input v-model="editForm.precioMayorista" class="form-control app-input" />
+            <input v-model="editForm.precioMayorista" class="form-control app-input" placeholder="Ej: 2000 (opcional)" />
           </div>
 
           <!-- [FOTO] Foto en edición -->
@@ -1124,7 +1266,7 @@ onMounted(async () => {
     </div>
 
     <!-- Modal: Confirmar acción -->
-    <div v-if="confirmState.open" class="modal-backdrop" @click.self="closeConfirm">
+    <div v-if="confirmState.open" class="modal-backdrop">
       <div class="confirm-card">
         <div class="confirm-icon" :class="`confirm-icon--${confirmState.variant}`">
           <span v-if="confirmState.variant === 'danger'">!</span>
@@ -1141,6 +1283,8 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+
+    </template><!-- /activos -->
 
     <!-- Toasts flotantes -->
     <Teleport to="body">
@@ -1163,6 +1307,48 @@ onMounted(async () => {
 <style scoped>
 .productos-page { min-height: 100%; }
 
+.stock-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.prod-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding-bottom: 0;
+}
+.prod-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: rgba(255,255,255,0.5);
+  padding: 8px 18px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: -1px;
+}
+.prod-tab:hover { color: rgba(255,255,255,0.85); }
+.prod-tab.active {
+  color: #fff;
+  border-bottom-color: #a78bfa;
+  font-weight: 600;
+}
+.prod-tab__badge {
+  background: rgba(167,139,250,0.20);
+  color: #a78bfa;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 3px;
+  padding: 1px 6px;
+}
+
 .confirm-card { margin: auto 0; }
 
 .modal-backdrop {
@@ -1181,9 +1367,9 @@ onMounted(async () => {
   width: min(720px, 100%);
   background: rgba(18, 22, 32, 0.98);
   border: 1px solid rgba(255, 255, 255, 0.10);
-  border-radius: 18px;
+  border-radius: 6px;
   padding: 24px;
-  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.50);
   color: #fff;
   margin: auto 0;
 }
@@ -1200,7 +1386,7 @@ onMounted(async () => {
   width: 44px;
   height: 44px;
   object-fit: cover;
-  border-radius: 8px;
+  border-radius: 4px;
   border: 1px solid rgba(255, 255, 255, 0.10);
   flex-shrink: 0;
   background: rgba(255, 255, 255, 0.04);
@@ -1209,7 +1395,7 @@ onMounted(async () => {
 .producto-thumb-ph {
   width: 44px;
   height: 44px;
-  border-radius: 8px;
+  border-radius: 4px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   align-items: center;
@@ -1236,7 +1422,7 @@ onMounted(async () => {
   width: 80px;
   height: 80px;
   object-fit: cover;
-  border-radius: 10px;
+  border-radius: 2px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   display: block;
 }
@@ -1244,7 +1430,7 @@ onMounted(async () => {
 .foto-placeholder {
   width: 80px;
   height: 80px;
-  border-radius: 10px;
+  border-radius: 2px;
   border: 1px dashed rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.03);
   display: flex;
@@ -1278,20 +1464,18 @@ onMounted(async () => {
   pointer-events: all;
   cursor: pointer;
   padding: 12px 16px;
-  border-radius: 10px;
+  border-radius: 4px;
   font-size: 0.875rem;
   font-weight: 500;
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   color: #fff;
 }
-.toast-item--success { background: rgba(22, 163, 74, 0.88); }
-.toast-item--danger  { background: rgba(220, 38, 38, 0.88); }
-.toast-item--info    { background: rgba(59, 130, 246, 0.88); }
+.toast-item--success { background: #16653a; }
+.toast-item--danger  { background: #8b1f2a; }
+.toast-item--info    { background: #1e4080; }
 .toast-icon { font-size: 1rem; line-height: 1.3; flex-shrink: 0; }
 
 .toast-enter-active { transition: all 0.28s cubic-bezier(.22, 1, .36, 1); }
@@ -1329,7 +1513,7 @@ onMounted(async () => {
   align-items: center;
   gap: 7px;
   padding: 7px 14px;
-  border-radius: 9px;
+  border-radius: 4px;
   border: 1px solid rgba(255,255,255,.14);
   background: rgba(255,255,255,.05);
   color: rgba(255,255,255,.72);

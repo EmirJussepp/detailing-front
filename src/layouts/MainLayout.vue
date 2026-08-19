@@ -50,7 +50,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey))
 <style scoped>
 .app {
   min-height: 100vh;
-  background: #0e1117;
+  background: #0c0a06;
   color: rgba(255, 255, 255, 0.9);
 }
 .app__header {
@@ -76,7 +76,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey))
   overflow: auto;
 }
 .content__inner {
-  padding: 24px;
+  padding: 20px 22px;
 }
 
 /* Mobile: hide desktop sidebar and use drawer */

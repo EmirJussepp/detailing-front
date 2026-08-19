@@ -270,6 +270,9 @@ const clienteSel = computed(() =>
 // ✅ computed para saber si el cliente seleccionado es mayorista
 const clienteEsMayorista = computed(() => clienteSel.value?.tipoClienteId === 2)
 
+const pagoAhora = ref(true)
+const aplicaPrecioMayorista = computed(() => clienteEsMayorista.value && pagoAhora.value)
+
 const selProductoId = ref("")
 const itemQty = ref("1")
 const codeInputRef = ref(null)
@@ -278,9 +281,8 @@ const selectedProducto = computed(() =>
   productos.value.find((p) => String(p.id) === String(selProductoId.value)) ?? null
 )
 
-// ✅ FIX 2: getPrecioSugerido usa precioMayorista si el cliente es tipo 2
 function getPrecioSugerido(p) {
-  if (clienteEsMayorista.value && p.precioMayorista != null && p.precioMayorista > 0) {
+  if (aplicaPrecioMayorista.value && p.precioMayorista != null && p.precioMayorista > 0) {
     return Number(p.precioMayorista)
   }
   return Number(p.precioVenta ?? 0)
@@ -397,6 +399,7 @@ function clearForm() {
   selProductoId.value = ""
   itemQty.value = "1"
   productSearch.value = ""
+  pagoAhora.value = true
   nextTick(() => codeInputRef.value?.focus?.())
 }
 
@@ -480,6 +483,7 @@ async function registrarVenta() {
       cajaId: Number(cajaAbierta.value.cajaId),
       userId: uid,
       clienteId: clienteSel.value?.id ? Number(clienteSel.value.id) : null,
+      pagoInmediato: pagoAhora.value,
       detallesVenta,
     }
 
@@ -580,7 +584,7 @@ function confirmarVenta() {
     ? `${clienteSel.value.nombre} ${clienteSel.value.apellido || ""}`.trim()
     : "Sin cliente"
 
-  const etiquetaMayorista = clienteEsMayorista.value ? " 🏷️ MAYORISTA" : ""
+  const etiquetaMayorista = clienteEsMayorista.value ? " MAYORISTA" : ""
 
   const lineas = items.value
     .map((it) => `• ${it.name} x${it.qty} — $ ${formatMoney(it.subtotal)}`)
@@ -595,6 +599,61 @@ function confirmarVenta() {
 }
 
 const devolviendoVenta = ref(false)
+
+// ── Devolución parcial ────────────────────────────────────────────────────
+const showDevParcial = ref(false)
+const devParcialVentaId = ref(null)
+const devParcialItems = ref([])   // [{ detalleId, nombre, cantidad, precioFinal, cantDevolver, seleccionado }]
+const devParcialLoading = ref(false)
+
+const devParcialMonto = computed(() =>
+  devParcialItems.value
+    .filter(i => i.seleccionado && i.cantDevolver > 0)
+    .reduce((acc, i) => acc + i.precioFinal * Number(i.cantDevolver), 0)
+)
+
+async function abrirDevParcial(venta) {
+  if (!cajaAbierta.value?.cajaId) return setErr("Necesitás una caja ABIERTA para registrar la devolución.")
+  // Si tiene 1 solo item, devolución total directamente
+  const items = venta.detalles ?? venta.items ?? []
+  if (items.length <= 1) {
+    devolverVenta(venta.ventaId ?? venta.id)
+    return
+  }
+  devParcialVentaId.value = venta.ventaId ?? venta.id
+  devParcialItems.value = items.map(d => ({
+    detalleId:    d.detalleId ?? d.id,
+    nombre:       d.productoNombre ?? d.nombre ?? `Producto #${d.productoId}`,
+    cantidad:     d.cantidad,
+    precioFinal:  d.precioFinal ?? d.precio_final ?? d.precioUnitario,
+    cantDevolver: d.cantidad,
+    seleccionado: true,
+  }))
+  showDevParcial.value = true
+}
+
+async function confirmarDevParcial() {
+  const itemsADevolver = devParcialItems.value.filter(i => i.seleccionado && Number(i.cantDevolver) > 0)
+  if (!itemsADevolver.length) return setErr("Seleccioná al menos un item para devolver.")
+  devParcialLoading.value = true
+  try {
+    await ventasApi.devolverParcial(devParcialVentaId.value, {
+      cajaId:  Number(cajaAbierta.value.cajaId),
+      userId:  Number(userIdInt.value),
+      motivo:  "Devolución parcial desde ventas",
+      items:   itemsADevolver.map(i => ({ detalleId: i.detalleId, cantidad: Number(i.cantDevolver) })),
+    })
+    setOk(`Devolución parcial registrada — reembolso $${formatMoney(devParcialMonto.value)}`)
+    showDevParcial.value = false
+    if (devClienteId.value) await buscarVentasCliente()
+    await refreshCaja()
+    window.dispatchEvent(new Event("cuentaCorriente:changed"))
+  } catch (e) {
+    setErr(pickErr(e, "Error en devolución parcial."))
+  } finally {
+    devParcialLoading.value = false
+  }
+}
 
 async function devolverVentaConfirmed(ventaId) {
   devolviendoVenta.value = true
@@ -766,20 +825,32 @@ const estadoPagoVenta = computed(() => {
   return "PAGADA"
 })
 
+// true cuando la venta es de mostrador (sin cliente) — en ese caso
+// no se puede cerrar el modal sin registrar al menos un pago.
+const pagoEsMostrador = ref(false)
+
 async function openPagoModal(ventaId, total = 0) {
-  pagoVentaId.value = Number(ventaId)
-  pagoTotalVenta.value = Number(total ?? 0)
-  pagoLineas.value = [nuevaLinea()]
-  showPagoModal.value = true
+  pagoVentaId.value     = Number(ventaId)
+  pagoTotalVenta.value  = Number(total ?? 0)
+  pagoLineas.value      = [nuevaLinea()]
+  // Si no hay cliente seleccionado es venta de mostrador: pago obligatorio
+  pagoEsMostrador.value = !clienteSel.value?.id
+  showPagoModal.value   = true
 
   await loadPagosVenta(ventaId)
 }
 
 function closePagoModal() {
-  const vid = pagoVentaId.value
+  // Venta de mostrador sin ningún pago registrado: bloquear cierre
+  if (pagoEsMostrador.value && totalPagadoVenta.value <= 0) {
+    setErr("Las ventas sin cliente deben tener al menos un pago registrado antes de cerrar.")
+    return
+  }
+  const vid   = pagoVentaId.value
   const total = pagoTotalVenta.value
   const metodo = lastPagoMetodoTxt.value || ""
-  showPagoModal.value = false
+  pagoEsMostrador.value = false
+  showPagoModal.value   = false
   if (vid) {
     nextTick(() => abrirComprobante(vid, total, metodo))
   } else {
@@ -922,7 +993,7 @@ async function enviarComprobante() {
 
 function onKeydown(e) {
   if (e?.key === "Escape") {
-    if (showPagoModal.value) closePagoModal()
+    if (showPagoModal.value) closePagoModal()   // closePagoModal ya valida si es mostrador
     if (confirmState.value.open) closeConfirm()
   }
 }
@@ -1140,15 +1211,25 @@ onBeforeUnmount(() => {
               <option value="">Sin cliente</option>
               <option v-for="c in clientes" :key="c.id" :value="String(c.id)">
                 {{ c.nombre }} {{ c.apellido || "" }} — DNI: {{ c.dni || "-" }}
-                {{ c.tipoClienteId === 2 ? "🏷️ MAYORISTA" : "" }}
+                {{ c.tipoClienteId === 2 ? "MAYORISTA" : "" }}
               </option>
             </select>
           </div>
         </div>
 
-        <!-- ✅ FIX: badge mayorista visible al seleccionar cliente -->
-        <div v-if="clienteEsMayorista" class="alert alert-warning py-2 mb-3">
-          🏷️ Cliente mayorista — se aplican precios mayoristas automáticamente.
+        <!-- Toggle pago al momento para clientes mayoristas -->
+        <div v-if="clienteEsMayorista" class="mayorista-pago-toggle mb-3">
+          <div class="mayorista-pago-toggle__info">
+            <span class="mayorista-pago-toggle__badge">Cliente mayorista</span>
+            <span class="mayorista-pago-toggle__desc">
+              {{ aplicaPrecioMayorista ? "Precio mayorista activado" : "Precio minorista — fía" }}
+            </span>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" v-model="pagoAhora" />
+            <span class="toggle-switch__track"></span>
+            <span class="toggle-switch__label">¿Paga ahora?</span>
+          </label>
         </div>
 
         <div class="helper-text mb-3">Registrá la venta y cobrá ahora o después.</div>
@@ -1172,7 +1253,7 @@ onBeforeUnmount(() => {
               <option v-for="p in productos" :key="p.id" :value="String(p.id)">
                 {{ p.nombre }} ({{ p.codigoProducto || "SIN CÓD" }})
                 — $ {{ formatMoney(getPrecioSugerido(p)) }}
-                {{ clienteEsMayorista && p.precioMayorista ? "(mayorista)" : "" }}
+                {{ aplicaPrecioMayorista && p.precioMayorista ? "(mayorista)" : "" }}
                 · Stock: {{ p.stockActual ?? "-" }}
               </option>
             </select>
@@ -1211,7 +1292,7 @@ onBeforeUnmount(() => {
                   <div class="helper-text" v-if="it.invalidReason">{{ it.invalidReason }}</div>
                 </td>
 
-                <td class="text-secondary">$ {{ formatMoney(it.basePrice) }}</td>
+                <td class="text-secondary td-num">$ {{ formatMoney(it.basePrice) }}</td>
 
                 <td>
                   <input class="form-control form-control-sm app-input" :value="it.porcentajeAjuste" inputmode="decimal"
@@ -1220,14 +1301,14 @@ onBeforeUnmount(() => {
                     :disabled="!canSell" />
                 </td>
 
-                <td class="text-secondary fw-semibold">$ {{ formatMoney(it.price) }}</td>
+                <td class="text-secondary td-num fw-semibold">$ {{ formatMoney(it.price) }}</td>
 
                 <td>
                   <input class="form-control form-control-sm app-input" :value="it.qty" inputmode="numeric"
                     @input="updateItemQty(it.id, $event.target.value)" :disabled="!canSell" />
                 </td>
 
-                <td class="fw-bold">$ {{ formatMoney(it.subtotal) }}</td>
+                <td class="td-num fw-bold">$ {{ formatMoney(it.subtotal) }}</td>
 
                 <td class="text-end">
                   <button class="btn btn-sm btn-outline-light" @click="removeItem(it.id)" :disabled="!canSell">
@@ -1266,7 +1347,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-if="showPagoModal" class="modal-backdrop-custom" @click.self="closePagoModal">
+    <div v-if="showPagoModal" class="modal-backdrop-custom" @click.self="pagoEsMostrador && totalPagadoVenta <= 0 ? null : closePagoModal()">
       <div class="modal-card">
         <div class="d-flex justify-content-between align-items-center mb-2">
           <div>
@@ -1289,7 +1370,12 @@ onBeforeUnmount(() => {
               · Restante: <b>$ {{ formatMoney2(restanteVenta) }}</b>
             </div>
           </div>
-          <button class="btn btn-sm btn-outline-light" @click="closePagoModal">Cerrar</button>
+          <button
+            class="btn btn-sm btn-outline-light"
+            @click="closePagoModal"
+            :disabled="pagoEsMostrador && totalPagadoVenta <= 0"
+            :title="pagoEsMostrador && totalPagadoVenta <= 0 ? 'Registrá al menos un pago antes de cerrar' : ''"
+          >Cerrar</button>
         </div>
 
         <!-- Líneas de pago (pago mixto) -->
@@ -1343,9 +1429,17 @@ onBeforeUnmount(() => {
 
         <div class="d-flex justify-content-end">
           <div class="d-flex gap-2">
-            <button class="btn btn-outline-light" @click="closePagoModal" :disabled="pagoLoading">
+            <button
+              v-if="!pagoEsMostrador"
+              class="btn btn-outline-light"
+              @click="closePagoModal"
+              :disabled="pagoLoading"
+            >
               Dejar fiado
             </button>
+            <span v-else-if="totalPagadoVenta <= 0" class="text-warning small">
+              Venta sin cliente — el pago es obligatorio
+            </span>
 
             <button class="btn btn-primary btn-accent" @click="registrarPago"
               :disabled="pagoLoading || !canSell || estadoPagoVenta === 'PAGADA'">
@@ -1372,7 +1466,7 @@ onBeforeUnmount(() => {
               <tbody>
                 <tr v-for="p in pagosDeVenta" :key="p.id">
                   <td class="text-secondary">{{ metodoNombreById(p.metodoPagoId) }}</td>
-                  <td class="text-end fw-bold">$ {{ formatMoney2(p.monto) }}</td>
+                  <td class="text-end td-num fw-bold">$ {{ formatMoney2(p.monto) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -1385,7 +1479,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-if="confirmState.open" class="modal-backdrop-custom" @click.self="closeConfirm">
+    <div v-if="confirmState.open" class="modal-backdrop-custom">
       <div class="confirm-card">
         <div class="confirm-icon" :class="`confirm-icon--${confirmState.variant}`">
           <span v-if="confirmState.variant === 'danger'">!</span>
@@ -1425,7 +1519,7 @@ onBeforeUnmount(() => {
               <option value="">Seleccionar cliente…</option>
               <option v-for="c in clientes" :key="c.id" :value="String(c.id)">
                 {{ c.nombre }} {{ c.apellido || "" }} — DNI: {{ c.dni || "-" }}
-                {{ c.tipoClienteId === 2 ? "🏷️ MAYORISTA" : "" }}
+                {{ c.tipoClienteId === 2 ? "MAYORISTA" : "" }}
               </option>
             </select>
           </div>
@@ -1456,7 +1550,7 @@ onBeforeUnmount(() => {
               <tr v-for="v in devVentas" :key="v.ventaId">
                 <td class="text-secondary">#{{ v.ventaId }}</td>
                 <td class="text-secondary">{{ formatDateShort(v.fecha) }}</td>
-                <td class="text-end fw-bold">$ {{ formatMoney(v.total) }}</td>
+                <td class="text-end td-num fw-bold">$ {{ formatMoney(v.total) }}</td>
                 <td>
                   <span class="badge" :class="{
                     'badge-soft-success': v.estado === 'PAGADA',
@@ -1467,12 +1561,12 @@ onBeforeUnmount(() => {
                   </span>
                 </td>
                 <td>
-                  <span v-if="v.turno === 'ONLINE'" class="badge badge-tn-online">🛒 TN</span>
+                  <span v-if="v.turno === 'ONLINE'" class="badge badge-tn-online">TN</span>
                   <span v-else class="badge badge-soft-secondary">Local</span>
                 </td>
                 <td class="text-end">
                   <button class="btn btn-sm btn-outline-danger" :disabled="devolviendoVenta || !canSell"
-                    @click="devolverVenta(v.ventaId)">
+                    @click="abrirDevParcial(v)">
                     Devolver
                   </button>
                 </td>
@@ -1546,12 +1640,120 @@ onBeforeUnmount(() => {
 </div>
     
   </div>
+
+  <!-- Modal devolución parcial -->
+  <div v-if="showDevParcial" class="modal-backdrop" @click.self="showDevParcial = false">
+    <div class="modal-card" style="max-width:520px">
+      <div class="modal-card-header">
+        <h3 class="modal-card-title">Devolver items — venta #{{ devParcialVentaId }}</h3>
+        <button class="btn-close-modal" @click="showDevParcial = false">✕</button>
+      </div>
+      <div class="modal-card-body">
+        <p class="helper-text mb-3">Seleccioná qué productos devolver y cuántas unidades.</p>
+        <div v-for="item in devParcialItems" :key="item.detalleId"
+             class="dev-item-row" :class="{ 'dev-item-row--active': item.seleccionado }">
+          <label class="dev-item-check">
+            <input type="checkbox" v-model="item.seleccionado" />
+          </label>
+          <div class="dev-item-info">
+            <div class="dev-item-nombre">{{ item.nombre }}</div>
+            <div class="helper-text" style="font-size:0.75rem">$ {{ formatMoney(item.precioFinal) }} × {{ item.cantidad }} u.</div>
+          </div>
+          <div class="dev-item-qty">
+            <input type="number" class="form-control app-input" style="width:68px;text-align:center"
+              v-model="item.cantDevolver" :min="1" :max="item.cantidad" :disabled="!item.seleccionado" />
+            <span class="helper-text" style="font-size:0.72rem;margin-top:2px">de {{ item.cantidad }}</span>
+          </div>
+          <div class="dev-item-subtotal">
+            {{ item.seleccionado ? `$ ${formatMoney(item.precioFinal * Number(item.cantDevolver))}` : '—' }}
+          </div>
+        </div>
+        <div class="dev-total-row">
+          <span class="field-label">Reembolso</span>
+          <span class="dev-total-monto">$ {{ formatMoney(devParcialMonto) }}</span>
+        </div>
+      </div>
+      <div class="modal-card-footer">
+        <button class="btn btn-outline-light" @click="showDevParcial = false" :disabled="devParcialLoading">Cancelar</button>
+        <button class="btn btn-danger" @click="confirmarDevParcial"
+          :disabled="devParcialLoading || devParcialMonto <= 0">
+          {{ devParcialLoading ? "Procesando..." : `Confirmar — $ ${formatMoney(devParcialMonto)}` }}
+        </button>
+      </div>
+    </div>
+  </div>
+
 </template>
 
 <style scoped>
+.mayorista-pago-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(255, 193, 7, 0.07);
+  border: 1px solid rgba(255, 193, 7, 0.22);
+  border-left: 3px solid rgba(255, 193, 7, 0.55);
+  border-radius: 4px;
+  padding: 10px 14px;
+}
+.mayorista-pago-toggle__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mayorista-pago-toggle__badge {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #ffe082;
+}
+.mayorista-pago-toggle__desc {
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.55);
+}
+.toggle-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+.toggle-switch input { display: none; }
+.toggle-switch__track {
+  width: 40px;
+  height: 22px;
+  border-radius: 11px;
+  background: rgba(255,255,255,0.15);
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.toggle-switch__track::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s;
+}
+.toggle-switch input:checked ~ .toggle-switch__track {
+  background: #4ade80;
+}
+.toggle-switch input:checked ~ .toggle-switch__track::after {
+  transform: translateX(18px);
+}
+.toggle-switch__label {
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.8);
+}
+
 .sale-summary {
   padding: 16px;
-  border-radius: 16px;
+  border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, .08);
   background: rgba(255, 255, 255, .03);
 }
@@ -1592,16 +1794,19 @@ onBeforeUnmount(() => {
 .status-warning {
   min-height: 44px;
   padding: 10px 14px;
-  border-radius: 14px;
-  background: rgba(255, 193, 7, 0.08);
-  border: 1px solid rgba(255, 193, 7, 0.18);
+  border-radius: 4px;
+  border-left: 3px solid rgba(255, 193, 7, 0.60);
+  background: rgba(255, 193, 7, 0.07);
+  border-top: 1px solid rgba(255, 193, 7, 0.18);
+  border-right: 1px solid rgba(255, 193, 7, 0.18);
+  border-bottom: 1px solid rgba(255, 193, 7, 0.18);
   color: #ffe8a3;
 }
 
 .status-ok {
   min-height: 44px;
   padding: 10px 14px;
-  border-radius: 14px;
+  border-radius: 4px;
   background: rgba(255, 255, 255, .03);
   border: 1px solid rgba(255, 255, 255, .08);
   display: flex;
@@ -1617,20 +1822,21 @@ onBeforeUnmount(() => {
   width: min(500px, 100%);
   background: rgba(18, 22, 32, 0.98);
   border: 1px solid rgba(255, 255, 255, 0.10);
-  border-radius: 18px;
+  border-radius: 2px;
   padding: 24px;
   box-shadow: 0 20px 70px rgba(0, 0, 0, 0.55);
   color: #fff;
 }
 
 .badge-tn-online {
-  background: rgba(201, 162, 39, 0.15);
-  border: 1px solid rgba(201, 162, 39, 0.35);
+  background: rgba(201, 162, 39, 0.12);
+  border: 1px solid rgba(201, 162, 39, 0.30);
   color: #c9a227;
   font-size: 11px;
   font-weight: 700;
-  padding: 3px 8px;
-  border-radius: 999px;
+  letter-spacing: 0.03em;
+  padding: 2px 7px;
+  border-radius: 3px;
 }
 
 .pago-lineas {
@@ -1640,11 +1846,37 @@ onBeforeUnmount(() => {
 }
 
 .pago-linea-row {
-  border-radius: 10px;
+  border-radius: 4px;
   transition: background 0.15s;
 }
 
 .pago-linea-row:not(:last-child) {
   padding-bottom: 4px;
 }
+
+.dev-item-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 0.5px solid rgba(255,255,255,0.07);
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.dev-item-row--active { opacity: 1; }
+.dev-item-check { flex-shrink: 0; }
+.dev-item-check input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+.dev-item-info { flex: 1; min-width: 0; }
+.dev-item-nombre { font-size: 0.88rem; font-weight: 500; color: var(--text-primary, #fff); }
+.dev-item-qty { display: flex; flex-direction: column; align-items: center; gap: 2px; flex-shrink: 0; }
+.dev-item-subtotal { font-size: 0.88rem; font-weight: 500; min-width: 90px; text-align: right; color: rgba(255,255,255,0.85); }
+.dev-total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,0.12);
+}
+.dev-total-monto { font-size: 1.15rem; font-weight: 600; color: #fff; }
 </style>

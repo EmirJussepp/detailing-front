@@ -120,11 +120,11 @@
                 </td>
 
                 <td class="text-end">
-                  <div class="fw-bold" :class="saldoClass(p)">
+                  <div class="fw-bold font-data" :class="saldoClass(p)">
                     $ {{ formatMoney(getSaldo(p).saldo) }}
                   </div>
-                  <div class="table-sub">Compras: $ {{ formatMoney(getSaldo(p).deudaCompras) }}</div>
-                  <div class="table-sub">Pagos: $ {{ formatMoney(getSaldo(p).pagosTotal) }}</div>
+                  <div class="table-sub font-data">Compras: $ {{ formatMoney(getSaldo(p).deudaCompras) }}</div>
+                  <div class="table-sub font-data">Pagos: $ {{ formatMoney(getSaldo(p).pagosTotal) }}</div>
                 </td>
 
                 <td class="text-center">
@@ -444,9 +444,9 @@
                 </thead>
                 <tbody>
                   <tr v-for="pg in pagosCompra" :key="pg.pagoProveedorId || pg.id">
-                    <td class="text-secondary">#{{ pg.pagoProveedorId || pg.id }}</td>
+                    <td class="td-code">#{{ pg.pagoProveedorId || pg.id }}</td>
                     <td class="text-secondary">{{ formatDate(pg.fecha) }}</td>
-                    <td class="text-end fw-semibold">$ {{ formatMoney(pg.monto) }}</td>
+                    <td class="text-end td-num fw-semibold">$ {{ formatMoney(pg.monto) }}</td>
                     <td class="text-secondary">{{ pg.referencia || "—" }}</td>
                   </tr>
                 </tbody>
@@ -572,8 +572,8 @@ function saldoClass(p) {
 }
 
 function docBadgeClass(p) {
-  if (p?.tipo === "EMPRESA") return "text-bg-dark border border-info"
-  return "text-bg-dark border border-secondary"
+  if (p?.tipo === "EMPRESA") return "text-bg-info"
+  return "text-bg-secondary"
 }
 
 function toastSuccess(msg) {

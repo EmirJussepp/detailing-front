@@ -28,7 +28,7 @@
 .bg-panel {
   background: rgba(18, 18, 22, 0.97);
   border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 18px;
+  border-radius: 6px;
 }
 
 .field-label {

@@ -115,7 +115,7 @@
                   {{ (c.fecha || "").slice(0, 10) || "—" }}
                 </td>
 
-                <td class="text-end fw-semibold">
+                <td class="text-end td-num fw-semibold">
                   {{ formatMoney(c.total) }}
                 </td>
 
@@ -263,9 +263,9 @@
                 <tbody>
                   <tr v-for="(d, idx) in form.detalles" :key="idx">
                     <td>{{ productoName(d.productoId) }}</td>
-                    <td>{{ d.cantidad }}</td>
-                    <td class="text-end">{{ formatMoney(d.precioUnitario) }}</td>
-                    <td class="text-end">{{ formatMoney(d.cantidad * d.precioUnitario) }}</td>
+                    <td class="td-num">{{ d.cantidad }}</td>
+                    <td class="text-end td-num">$ {{ formatMoney(d.precioUnitario) }}</td>
+                    <td class="text-end td-num fw-semibold">$ {{ formatMoney(d.cantidad * d.precioUnitario) }}</td>
                     <td class="text-end">
                       <button class="btn btn-sm btn-outline-danger" @click="removeItem(idx)">Quitar</button>
                     </td>
@@ -333,9 +333,9 @@
                   <tbody>
                     <tr v-for="d in detalle.detalles" :key="d.compraDetalleId || d.id">
                       <td>{{ productoName(d.productoId) }}</td>
-                      <td>{{ d.cantidad }}</td>
-                      <td class="text-end">{{ formatMoney(d.precioUnitario) }}</td>
-                      <td class="text-end">{{ formatMoney(d.cantidad * d.precioUnitario) }}</td>
+                      <td class="td-num">{{ d.cantidad }}</td>
+                      <td class="text-end td-num">$ {{ formatMoney(d.precioUnitario) }}</td>
+                      <td class="text-end td-num fw-semibold">$ {{ formatMoney(d.cantidad * d.precioUnitario) }}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -359,9 +359,9 @@
                   </thead>
                   <tbody>
                     <tr v-for="p in pagosDetalle" :key="p.pagoProveedorId || p.id">
-                      <td class="text-secondary">#{{ p.pagoProveedorId || p.id }}</td>
-                      <td class="text-secondary">{{ (p.fecha || "").slice(0, 10) || "—" }}</td>
-                      <td class="text-end fw-semibold">{{ formatMoney(p.monto) }}</td>
+                      <td class="td-code">#{{ p.pagoProveedorId || p.id }}</td>
+                      <td class="td-num" style="color:rgba(255,255,255,0.55)">{{ (p.fecha || "").slice(0, 10) || "—" }}</td>
+                      <td class="text-end td-num fw-semibold">$ {{ formatMoney(p.monto) }}</td>
                       <td class="text-secondary">{{ p.referencia || "—" }}</td>
                     </tr>
                   </tbody>

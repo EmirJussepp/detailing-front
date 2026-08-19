@@ -95,6 +95,10 @@ const infoMsg = ref("")
 const caja = ref(null)
 const saldoActual = ref(0)
 const movimientos = ref([])
+const cajaOtroTurnoAbierta = ref(null)
+const cerrandoOtroCaja = ref(false)
+
+const otroTurno = computed(() => selectedTurno.value === "MANIANA" ? "TARDE" : "MANIANA")
 const metodosPago = ref([])
 const metodosLoaded = ref(false)
 
@@ -453,6 +457,35 @@ async function refresh() {
   } finally {
     loading.value = false
   }
+
+  // Verificar si el otro turno tiene una caja abierta (para avisar al usuario)
+  try {
+    const { data: otraData } = await cajaApi.abierta({ turno: otroTurno.value })
+    cajaOtroTurnoAbierta.value = otraData?.cajaId ? otraData : null
+  } catch {
+    cajaOtroTurnoAbierta.value = null
+  }
+}
+
+async function cerrarOtraCaja() {
+  if (cerrandoOtroCaja.value || !cajaOtroTurnoAbierta.value?.cajaId) return
+  openConfirm({
+    title: `Cerrar turno ${turnoLabel(otroTurno.value)}`,
+    message: `¿Cerrás la caja del turno ${turnoLabel(otroTurno.value)}? Asegurate de que la empleada del turno anterior ya terminó.`,
+    variant: "warning",
+    onConfirm: async () => {
+      cerrandoOtroCaja.value = true
+      try {
+        await cajaApi.cerrar(cajaOtroTurnoAbierta.value.cajaId, {})
+        cajaOtroTurnoAbierta.value = null
+        okMsg.value = `Caja del turno ${turnoLabel(otroTurno.value)} cerrada correctamente.`
+      } catch (e) {
+        errorMsg.value = pickError(e, `Error cerrando caja del turno ${turnoLabel(otroTurno.value)}.`)
+      } finally {
+        cerrandoOtroCaja.value = false
+      }
+    }
+  })
 }
 
 async function abrirCajaConfirmed(monto) {
@@ -537,6 +570,7 @@ function cerrarRetiroAdmin() {
 }
 
 async function confirmarRetiroAdmin() {
+  if (savingRetiro.value) return   // guard doble click
   retiroAdminError.value = ""
   const monto = toMoneyNumber(retiroForm.value.monto)
   if (!Number.isFinite(monto) || monto <= 0) {
@@ -567,6 +601,7 @@ async function confirmarRetiroAdmin() {
 
 // ✅ FIX: crearMovimientoManual ahora valida y envía metodoPagoId
 async function crearMovimientoManual() {
+  if (savingMov.value) return   // guard doble click
   clearMsgs()
   if (!caja.value?.cajaId) { errorMsg.value = "Abrí una caja primero."; return }
 
@@ -644,20 +679,36 @@ onMounted(async () => {
         <!-- Retiro admin: visible solo para ADMIN, sin necesidad de caja abierta -->
         <button
           v-if="isAdmin"
-          class="btn btn-outline-warning"
+          class="btn btn-outline-light"
           @click="showRetiroAdmin = true"
         >
-          💸 Retiro
+          Retiro
         </button>
         <RouterLink class="btn btn-primary btn-accent" to="/ventas">Ventas</RouterLink>
       </div>
     </section>
 
+    <!-- Aviso: el otro turno tiene una caja sin cerrar -->
+    <div v-if="cajaOtroTurnoAbierta" class="alert-caja-pendiente mb-3 d-flex align-items-center justify-content-between gap-3 flex-wrap">
+      <div>
+        <strong>¡Espera!</strong> Quedó la caja del turno <strong>{{ turnoLabel(otroTurno) }}</strong> abierta.
+        Cerrala antes de abrir la de este turno.
+      </div>
+      <button
+        v-if="canCerrarCajaPerm"
+        class="btn btn-sm btn-warning flex-shrink-0"
+        @click="cerrarOtraCaja"
+        :disabled="cerrandoOtroCaja"
+      >
+        {{ cerrandoOtroCaja ? "Cerrando..." : `Cerrar turno ${turnoLabel(otroTurno)}` }}
+      </button>
+    </div>
+
     <div class="row g-3 mb-3">
       <div class="col-12">
         <div class="card bg-panel border-0 shadow-sm">
           <div class="card-body">
-            <div class="row g-3 align-items-end">
+            <div class="row g-3 align-items-center">
               <div class="col-12 col-md-4 col-lg-3">
                 <label class="form-label field-label">Turno operativo</label>
                 <select
@@ -732,10 +783,10 @@ onMounted(async () => {
             </template>
 
             <template v-else>
-              <div class="empty-block">
-                <div class="empty-title">No hay caja abierta</div>
-                <div class="helper-text">
-                  Abrí la caja del turno {{ turnoLabel(selectedTurno) }} para comenzar a operar.
+              <div class="empty-caja">
+                <div class="empty-caja__title">Sin caja abierta</div>
+                <div class="helper-text mt-1">
+                  Ingresá el monto inicial y abrí la caja del turno {{ turnoLabel(selectedTurno) }}.
                 </div>
               </div>
             </template>
@@ -753,26 +804,26 @@ onMounted(async () => {
 
             <div class="row g-2">
               <div class="col-6 col-md-3">
-                <div class="kpi-card">
+                <div class="kpi-card kpi-card--success">
                   <div class="kpi-label">Ingresos</div>
-                  <div class="kpi-value text-success">$ {{ formatMoney(kpiIngresos) }}</div>
+                  <div class="kpi-value" style="color:#5cb88a">$ {{ formatMoney(kpiIngresos) }}</div>
                 </div>
               </div>
               <div class="col-6 col-md-3">
-                <div class="kpi-card">
+                <div class="kpi-card kpi-card--danger">
                   <div class="kpi-label">Egresos</div>
-                  <div class="kpi-value text-danger">$ {{ formatMoney(kpiEgresos) }}</div>
+                  <div class="kpi-value" style="color:#e87070">$ {{ formatMoney(kpiEgresos) }}</div>
                 </div>
               </div>
               <div class="col-6 col-md-3">
-                <div class="kpi-card">
+                <div class="kpi-card kpi-card--accent">
                   <div class="kpi-label">Ventas</div>
                   <div class="kpi-value">$ {{ formatMoney(kpiVentas) }}</div>
                 </div>
               </div>
               <div class="col-6 col-md-3">
-                <div class="kpi-card">
-                  <div class="kpi-label">Pagos a proveedor</div>
+                <div class="kpi-card kpi-card--neutral">
+                  <div class="kpi-label">Pagos proveedor</div>
                   <div class="kpi-value">$ {{ formatMoney(kpiPagosProveedor) }}</div>
                 </div>
               </div>
@@ -780,7 +831,8 @@ onMounted(async () => {
 
             <hr class="border-secondary my-4" />
 
-            <div class="row g-3">
+            <div class="row g-4 align-items-start">
+              <!-- MONTO INICIAL -->
               <div class="col-12 col-md-6">
                 <template v-if="!caja?.cajaId">
                   <label class="form-label field-label">Monto inicial</label>
@@ -804,17 +856,18 @@ onMounted(async () => {
                 </template>
               </div>
 
-              <div class="col-12 col-md-6">
+              <!-- CIERRE Y ARQUEO -->
+              <div class="col-12 col-md-6 cierre-section">
                 <label class="form-label field-label">Cierre y arqueo</label>
 
-                <div class="info-row mb-2">
+                <div class="info-row">
                   <span class="helper-text">Esperado</span>
                   <strong>$ {{ formatMoney(saldoActual) }}</strong>
                 </div>
 
                 <input
                   v-model="montoContado"
-                  class="form-control app-input"
+                  class="form-control app-input mt-2"
                   placeholder="Contado final (opcional)"
                   inputmode="numeric"
                   :disabled="loading || !caja?.cajaId || !canCerrarCajaPerm"
@@ -834,7 +887,6 @@ onMounted(async () => {
                 <button class="btn btn-outline-light w-100 mt-3" @click="cerrarCaja" :disabled="!canCerrar">
                   Cerrar caja
                 </button>
-
                 <div class="helper-text mt-2">
                   Si el sistema registra el arqueo, el monto contado se usa para calcular la diferencia al cierre.
                 </div>
@@ -890,7 +942,7 @@ onMounted(async () => {
                   </span>
                 </td>
                 <td class="text-secondary">{{ movimientoResumen(m) }}</td>
-                <td class="text-end fw-bold">$ {{ formatMoney(m.monto) }}</td>
+                <td class="text-end td-num fw-bold">$ {{ formatMoney(m.monto) }}</td>
               </tr>
             </tbody>
           </table>
@@ -899,11 +951,11 @@ onMounted(async () => {
     </div>
 
     <!-- Modal Retiro Admin — sin necesidad de caja abierta -->
-    <div v-if="showRetiroAdmin" class="modal-backdrop" @click.self="cerrarRetiroAdmin">
+    <div v-if="showRetiroAdmin" class="modal-backdrop" @click.self="!savingRetiro && cerrarRetiroAdmin()">
       <div class="modal-card">
         <div class="d-flex justify-content-between align-items-center mb-3">
           <div>
-            <div class="section-title">💸 Retiro administrativo</div>
+            <div class="section-title">Retiro administrativo</div>
             <div class="helper-text">Se registra en la última caja. No requiere caja abierta.</div>
           </div>
           <button class="btn btn-sm btn-outline-light" @click="cerrarRetiroAdmin" :disabled="savingRetiro">Cerrar</button>
@@ -932,7 +984,7 @@ onMounted(async () => {
         <div v-if="retiroAdminError" class="alert alert-danger py-2 mt-3 mb-0">{{ retiroAdminError }}</div>
 
         <button
-          class="btn btn-warning w-100 mt-4 fw-bold"
+          class="btn btn-primary btn-accent w-100 mt-4 fw-bold"
           @click="confirmarRetiroAdmin"
           :disabled="savingRetiro"
         >
@@ -942,7 +994,7 @@ onMounted(async () => {
     </div>
 
     <!-- ✅ FIX: Modal movimiento manual con campo Método de Pago -->
-    <div v-if="showMovModal" class="modal-backdrop" @click.self="cerrarMovModal">
+    <div v-if="showMovModal" class="modal-backdrop" @click.self="!savingMov && cerrarMovModal()">
       <div class="modal-card">
         <div class="d-flex justify-content-between align-items-center mb-3">
           <div>
@@ -1009,7 +1061,7 @@ onMounted(async () => {
     </div>
 
     <!-- Confirm dialog -->
-    <div v-if="confirmState.open" class="modal-backdrop" @click.self="closeConfirm">
+    <div v-if="confirmState.open" class="modal-backdrop">
       <div class="confirm-card">
         <div class="confirm-icon" :class="`confirm-icon--${confirmState.variant}`">
           <span v-if="confirmState.variant === 'danger'">!</span>
@@ -1040,13 +1092,34 @@ onMounted(async () => {
 <style scoped>
 .caja-page { min-height: 100%; }
 
+/* Cierre y arqueo: label y valor pegados, sin space-between */
+.cierre-section .info-row {
+  display: flex !important;
+  justify-content: flex-start !important;
+  gap: 10px;
+}
+.cierre-section .info-row strong {
+  margin-left: 0;
+  text-align: left;
+}
+
+.alert-caja-pendiente {
+  background: rgba(255, 193, 7, 0.08);
+  border: 1px solid rgba(255, 193, 7, 0.25);
+  border-left: 3px solid rgba(255, 193, 7, 0.65);
+  border-radius: 4px;
+  padding: 12px 16px;
+  color: #ffe082;
+  font-size: 0.9rem;
+}
+
 .status-summary-card {
   min-height: 76px;
   display: flex;
   align-items: center;
   gap: 14px;
   padding: 12px 14px;
-  border-radius: 16px;
+  border-radius: 6px;
   background: rgba(255,255,255,.03);
   border: 1px solid rgba(255,255,255,.08);
 }
@@ -1088,10 +1161,20 @@ onMounted(async () => {
 
 .status-dot.active {
   background: #27d17f;
-  box-shadow: 0 0 0 6px rgba(39, 209, 127, .10);
 }
 
 .text-danger-soft {
   color: rgba(255, 100, 100, 0.85);
+}
+
+.empty-caja {
+  padding: 8px 0 4px;
+}
+
+.empty-caja__title {
+  color: rgba(255, 255, 255, 0.75);
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin-bottom: 4px;
 }
 </style>

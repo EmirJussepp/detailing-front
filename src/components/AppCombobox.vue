@@ -266,8 +266,8 @@ watch(open, (v) => {
   z-index: 200;
   background: #111827;
   border: 1px solid rgba(255,255,255,.12);
-  border-radius: 12px;
-  box-shadow: 0 12px 36px rgba(0,0,0,.45);
+  border-radius: 2px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.40);
   overflow: hidden;
 }
 
@@ -280,7 +280,7 @@ watch(open, (v) => {
   width: 100%;
   background: rgba(255,255,255,.06);
   border: 1px solid rgba(255,255,255,.12);
-  border-radius: 8px;
+  border-radius: 2px;
   color: #fff;
   padding: 7px 10px;
   font-size: 0.9rem;

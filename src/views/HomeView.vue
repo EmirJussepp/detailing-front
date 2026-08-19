@@ -9,7 +9,7 @@ const actions = ref([
     desc: "Abrir o cerrar turno, revisar saldo y controlar movimientos.",
     hint: "Operación del día",
     badge: "PRIORIDAD",
-    badgeClass: "text-bg-warning",
+    badgeClass: "badge-soft-warning",
   },
   {
     to: "/ventas",
@@ -17,7 +17,7 @@ const actions = ref([
     desc: "Registrar ventas, cobrar y descontar stock.",
     hint: "Tickets y cobros",
     badge: "ACTIVO",
-    badgeClass: "text-bg-success",
+    badgeClass: "badge-soft-success",
   },
   {
     to: "/productos",
@@ -25,7 +25,7 @@ const actions = ref([
     desc: "Administrar inventario, precios y stock mínimo.",
     hint: "Inventario",
     badge: "STOCK",
-    badgeClass: "text-bg-info",
+    badgeClass: "badge-soft-neutral",
   },
   {
     to: "/clientes",
@@ -33,7 +33,7 @@ const actions = ref([
     desc: "Alta de clientes, cuenta corriente e historial.",
     hint: "Relación comercial",
     badge: "CC",
-    badgeClass: "text-bg-secondary",
+    badgeClass: "badge-soft-neutral",
   },
 ])
 
@@ -120,19 +120,19 @@ const shortcuts = ref([
 .home-card {
   display: block;
   height: 100%;
-  background: rgba(18, 22, 32, 0.92);
-  border-radius: 18px;
+  background: rgba(18, 16, 10, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 6px;
   padding: 18px;
   text-decoration: none;
   color: inherit;
-  transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease;
-  box-shadow: 0 8px 24px rgba(0,0,0,.18);
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .home-card:hover {
-  transform: translateY(-3px);
-  filter: brightness(1.04);
-  box-shadow: 0 14px 30px rgba(0,0,0,.28);
+  border-color: rgba(201, 162, 39, 0.30);
+  background: rgba(20, 18, 10, 0.98);
 }
 
 .home-card-title {

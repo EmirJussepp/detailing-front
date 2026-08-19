@@ -217,7 +217,7 @@ onMounted(refreshAll)
             <tbody>
               <tr v-for="item in dashboard.facturacionMensual" :key="item.mes">
                 <td class="fw-semibold">{{ item.mes }}</td>
-                <td class="text-end fw-bold">$ {{ formatMoney(item.total) }}</td>
+                <td class="text-end td-num fw-bold">$ {{ formatMoney(item.total) }}</td>
               </tr>
             </tbody>
           </table>
@@ -250,7 +250,7 @@ onMounted(refreshAll)
             <tbody>
               <tr v-for="item in dashboard.facturacionPorMetodo" :key="item.metodo">
                 <td class="fw-semibold">{{ item.metodo }}</td>
-                <td class="text-end fw-bold">$ {{ formatMoney(item.total) }}</td>
+                <td class="text-end td-num fw-bold">$ {{ formatMoney(item.total) }}</td>
               </tr>
             </tbody>
           </table>
@@ -286,8 +286,8 @@ onMounted(refreshAll)
                 <td>
                   <div class="table-main">{{ p.nombre }}</div>
                 </td>
-                <td class="text-end">{{ p.totalCantidad }}</td>
-                <td class="text-end fw-bold">$ {{ formatMoney(p.totalFacturado) }}</td>
+                <td class="text-end td-num">{{ p.totalCantidad }}</td>
+                <td class="text-end td-num fw-bold">$ {{ formatMoney(p.totalFacturado) }}</td>
               </tr>
             </tbody>
           </table>

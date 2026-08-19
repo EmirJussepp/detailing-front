@@ -355,7 +355,7 @@ onMounted(fetchUsuarios)
     </template>
 
     <!-- Modal crear/editar -->
-    <div v-if="modalOpen" class="modal-backdrop-custom" @click.self="closeModal">
+    <div v-if="modalOpen" class="modal-backdrop-custom">
       <div class="modal-custom">
         <div class="section-header mb-3">
           <div>
@@ -409,7 +409,7 @@ onMounted(fetchUsuarios)
     </div>
 
     <!-- ✅ Modal de confirmación -->
-    <div v-if="confirmState.open" class="modal-backdrop-custom" @click.self="closeConfirm">
+    <div v-if="confirmState.open" class="modal-backdrop-custom">
       <div class="confirm-card">
         <div class="confirm-icon confirm-icon--danger">!</div>
         <div class="confirm-title">{{ confirmState.title }}</div>
@@ -436,7 +436,7 @@ onMounted(fetchUsuarios)
 }
 .modal-custom {
   width: 100%; max-width: 520px;
-  border-radius: 18px;
+  border-radius: 2px;
   background: rgba(18,22,32,.98);
   border: 1px solid rgba(255,255,255,.10);
   box-shadow: 0 18px 55px rgba(0,0,0,.45);

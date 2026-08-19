@@ -224,7 +224,7 @@ onMounted(fetchAll)
     </div>
 
     <!-- ✅ Modal de confirmación -->
-    <div v-if="confirmState.open" class="modal-backdrop-custom" @click.self="closeConfirm">
+    <div v-if="confirmState.open" class="modal-backdrop-custom">
       <div class="confirm-card">
         <div class="confirm-icon confirm-icon--danger">!</div>
         <div class="confirm-title">{{ confirmState.title }}</div>
@@ -253,7 +253,7 @@ onMounted(fetchAll)
   width: min(520px, 92vw);
   background: rgba(18,22,32,.98);
   border: 1px solid rgba(255,255,255,.10);
-  border-radius: 18px; padding: 18px;
+  border-radius: 2px; padding: 18px;
   box-shadow: 0 20px 70px rgba(0,0,0,.55);
   color: #fff;
 }

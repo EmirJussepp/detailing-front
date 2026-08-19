@@ -225,7 +225,7 @@ onMounted(fetchAll)
     </div>
 
     <!-- ✅ Modal de confirmación -->
-    <div v-if="confirmState.open" class="modal-backdrop-custom" @click.self="closeConfirm">
+    <div v-if="confirmState.open" class="modal-backdrop-custom">
       <div class="confirm-card">
         <div class="confirm-icon confirm-icon--danger">!</div>
         <div class="confirm-title">{{ confirmState.title }}</div>

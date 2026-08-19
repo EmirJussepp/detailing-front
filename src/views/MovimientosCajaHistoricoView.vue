@@ -760,7 +760,7 @@ onMounted(() => {
                   {{ m.metodoPagoId ? metodoNombreById(m.metodoPagoId) : "—" }}
                 </td>
 
-                <td class="text-end fw-bold">{{ signedMoney(m) }}</td>
+                <td class="text-end td-num fw-bold">{{ signedMoney(m) }}</td>
               </tr>
             </tbody>
           </table>

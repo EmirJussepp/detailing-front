@@ -129,7 +129,6 @@ watch(
     </div>
 
     <div class="topbar__right">
-      <span class="powered-tag">{{ tenant.developer.texto }}</span>
       <button class="btnlogout" @click="logout">Cerrar sesión</button>
     </div>
   </nav>
@@ -142,9 +141,8 @@ watch(
   align-items: center;
   justify-content: space-between;
   padding: 0 14px;
-  background: rgba(11, 9, 4, 0.97);
+  background: #0b0904;
   border-bottom: 1px solid rgba(180, 140, 60, 0.14);
-  backdrop-filter: blur(8px);
 }
 
 .topbar__left {
@@ -167,7 +165,7 @@ watch(
   font-weight: 900;
   letter-spacing: 0.2px;
   padding: 6px 8px;
-  border-radius: 10px;
+  border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -182,7 +180,7 @@ watch(
   color: rgba(255, 255, 255, 0.92);
   font-size: 18px;
   padding: 6px 10px;
-  border-radius: 10px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
@@ -197,9 +195,11 @@ watch(
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.04);
   color: rgba(255, 255, 255, 0.92);
-  padding: 6px 12px;
-  border-radius: 999px;
-  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   white-space: nowrap;
 }
 
@@ -211,11 +211,11 @@ watch(
 
 .pill--status {
   cursor: pointer;
-  transition: 0.18s ease;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .pill--status:hover {
-  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .pill--success {
@@ -242,17 +242,14 @@ watch(
 
 .status-dot.pill--success {
   background: #27d17f;
-  box-shadow: 0 0 0 4px rgba(39, 209, 127, 0.12);
 }
 
 .status-dot.pill--danger {
   background: #ff6b6b;
-  box-shadow: 0 0 0 4px rgba(255, 107, 107, 0.10);
 }
 
 .status-dot.pill--warn {
   background: #ffc107;
-  box-shadow: 0 0 0 4px rgba(255, 193, 7, 0.10);
 }
 
 .sep {
@@ -268,17 +265,21 @@ watch(
 }
 
 .btnlogout {
-  border: 1px solid rgba(201, 162, 39, 0.30);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   background: transparent;
-  color: rgba(255, 255, 255, 0.92);
-  padding: 8px 12px;
-  border-radius: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
   transition: 0.18s ease;
 }
 
 .btnlogout:hover {
-  background: rgba(201, 162, 39, 0.10);
+  border-color: rgba(201, 162, 39, 0.40);
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(201, 162, 39, 0.08);
 }
 
 .topbar__hamb {
