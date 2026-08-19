@@ -7,7 +7,7 @@ import { clientesApi } from "../services/clientesApi"
 import { cuentaCorrienteApi } from "../services/cuentaCorrienteService"
 import { pagosApi } from "../services/pagosApi"
 import { cajaApi } from "../services/cajaApi"
-import { metodosPagoApi } from "../services/metodopagoservice"
+import { metodosPagoApi } from "../services/metodopagoService"
 import { getTurnoOperativo } from "../ui/turnoOperativo"
 
 const FLOAT_EPSILON = 0.001

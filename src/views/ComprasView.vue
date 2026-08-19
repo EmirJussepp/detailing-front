@@ -647,7 +647,7 @@ const success = ref("")
 const q = ref("")
 const sortBy = ref("fechaDesc")
 
-const page = ref(1)
+const page = ref(0)
 const size = ref(10)
 const totalElements = ref(0)
 const totalPages = ref(1)
@@ -1008,7 +1008,7 @@ async function crearCompra() {
       return {
         productoId: d.productoId,
         cantidad: d.cantidad,
-        precioUnitario: Number(prod.precioCosto ?? d.precioUnitario ?? 0),
+        precioUnitario: Number(d.precioUnitario ?? prod.precioCosto ?? 0),
       }
     })
 
@@ -1088,7 +1088,7 @@ async function registrarPago() {
     if (!compraId) throw new Error("Compra inválida")
     if (monto <= 0) throw new Error("Monto inválido")
     if (!metodoPagoId) throw new Error("Elegí un método de pago")
-    if (saldoCompraSeleccionada.value > 0 && monto > saldoCompraSeleccionada.value) {
+    if (monto > saldoCompraSeleccionada.value) {
       throw new Error("El monto supera el saldo pendiente de la compra.")
     }
 

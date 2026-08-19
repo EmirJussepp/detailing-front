@@ -674,7 +674,7 @@ onMounted(async () => {
         <button class="btn btn-outline-light" @click="refresh" :disabled="loading || !canViewCaja">
           {{ loading ? "Actualizando..." : "Actualizar" }}
         </button>
-        <RouterLink class="btn btn-outline-light" to="/movimientos-caja">Movimientos</RouterLink>
+        <RouterLink class="btn btn-outline-light" to="/caja/movimientos">Movimientos</RouterLink>
         <RouterLink class="btn btn-outline-light" to="/compras">Compras</RouterLink>
         <!-- Retiro admin: visible solo para ADMIN, sin necesidad de caja abierta -->
         <button

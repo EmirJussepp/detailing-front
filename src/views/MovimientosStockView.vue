@@ -137,7 +137,7 @@ async function fetchAuditoria() {
     const m = new Map()
     for (const u of usrs) m.set(Number(u.userId ?? u.id ?? u.user_id), u.nombre ?? u.name ?? "—")
     usuariosMap.value = m
-  } catch { /* silencioso */ }
+  } catch { errorMsg.value = "No se pudo cargar la auditoría de ajustes." }
   finally { loadingAuditoria.value = false }
 }
 
