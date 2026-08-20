@@ -300,13 +300,21 @@ async function exportarExcel() {
       saldoMap.set(Number(d.clienteId), Number(d.deuda ?? 0))
     }
 
-    // 2. Ventas por cliente en paralelo para obtener total gastado y última visita
-    const ventasResultados = await Promise.all(
-      todos.map(c =>
-        ventasApi.list({ clienteId: c.id, page: 0, size: 9999 })
-          .then(r => ({ clienteId: c.id, ventas: Array.isArray(r.data) ? r.data : (r.data?.content ?? []) }))
-          .catch(() => ({ clienteId: c.id, ventas: [] }))
-      )
+    // 2. Ventas por cliente en batches para no saturar el backend
+    async function batchAll(arr, fn, batchSize = 10) {
+      const results = []
+      for (let i = 0; i < arr.length; i += batchSize) {
+        const chunk = arr.slice(i, i + batchSize)
+        results.push(...await Promise.all(chunk.map(fn)))
+      }
+      return results
+    }
+    const ventasResultados = await batchAll(
+      todos,
+      c => ventasApi.list({ clienteId: c.id, page: 0, size: 9999 })
+        .then(r => ({ clienteId: c.id, ventas: Array.isArray(r.data) ? r.data : (r.data?.content ?? []) }))
+        .catch(() => ({ clienteId: c.id, ventas: [] })),
+      10
     )
 
     const statsMap = new Map()

@@ -235,6 +235,14 @@ async function refreshProductos(searchTerm = null) {
   } catch {
     productos.value = []
   }
+  // Sincronizar stock en items ya en el carrito
+  if (items.value.length > 0) {
+    items.value = items.value.map(it => {
+      const p = productos.value.find(p => Number(p.id) === Number(it.productId))
+      if (p == null || p.stockActual == null) return it
+      return recalcItem({ ...it, stock: Number(p.stockActual) })
+    })
+  }
 }
 
 async function refreshClientes(searchTerm = null) {
@@ -614,21 +622,39 @@ const devParcialMonto = computed(() =>
 
 async function abrirDevParcial(venta) {
   if (!cajaAbierta.value?.cajaId) return setErr("Necesitás una caja ABIERTA para registrar la devolución.")
-  // Si tiene 1 solo item, devolución total directamente
-  const items = venta.detalles ?? venta.items ?? []
-  if (items.length <= 1) {
+
+  let detalles = venta.detalles ?? venta.items ?? []
+
+  // La lista de ventas no incluye detalles — los traemos por ID
+  if (detalles.length === 0) {
+    devParcialLoading.value = true
+    try {
+      const { data } = await ventasApi.porId(venta.ventaId ?? venta.id)
+      // El backend devuelve { venta: {...}, detallesVenta: [...] }
+      detalles = data?.detallesVenta ?? data?.detalles ?? data?.items ?? data?.lineas ?? []
+    } catch {
+      // si falla, hacemos devolución total
+    } finally {
+      devParcialLoading.value = false
+    }
+  }
+
+  if (detalles.length <= 1) {
     devolverVenta(venta.ventaId ?? venta.id)
     return
   }
   devParcialVentaId.value = venta.ventaId ?? venta.id
-  devParcialItems.value = items.map(d => ({
-    detalleId:    d.detalleId ?? d.id,
-    nombre:       d.productoNombre ?? d.nombre ?? `Producto #${d.productoId}`,
-    cantidad:     d.cantidad,
-    precioFinal:  d.precioFinal ?? d.precio_final ?? d.precioUnitario,
-    cantDevolver: d.cantidad,
-    seleccionado: true,
-  }))
+  devParcialItems.value = detalles.map(d => {
+    const prod = productos.value.find(p => Number(p.id) === Number(d.productoId))
+    return {
+      detalleId:    d.detalleId ?? d.id,
+      nombre:       d.productoNombre ?? d.nombre ?? prod?.nombre ?? `Producto #${d.productoId}`,
+      cantidad:     d.cantidad,
+      precioFinal:  d.precioFinal ?? d.precio_final ?? d.precioUnitario,
+      cantDevolver: d.cantidad,
+      seleccionado: true,
+    }
+  })
   showDevParcial.value = true
 }
 
