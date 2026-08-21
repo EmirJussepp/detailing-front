@@ -25,5 +25,9 @@ export const cajaApi = {
 
   retiroAdmin(payload) {
     return http.post("/cajas/retiro-admin", payload)
+  },
+
+  atrasadas() {
+    return http.get("/cajas/atrasadas")
   }
 }

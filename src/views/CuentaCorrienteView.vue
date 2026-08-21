@@ -576,6 +576,20 @@ async function fetchCuenta(clienteId) {
     deuda.value = rDeuda?.data ?? null
     const paged = unwrapPage(rEstado?.data)
 
+    // El backend no envía "pendiente" por fila. Lo calculamos acá:
+    // para cada VENTA, pendiente = debe - suma de todos los pagos que apuntan a ese ventaId.
+    const pagosMap = {}
+    paged.content.forEach(r => {
+      if (String(r.tipo ?? '').toUpperCase() === 'PAGO' && r.ventaId) {
+        pagosMap[r.ventaId] = (pagosMap[r.ventaId] ?? 0) + Number(r.haber ?? 0)
+      }
+    })
+    paged.content.forEach(r => {
+      if (String(r.tipo ?? '').toUpperCase() === 'VENTA' && r.ventaId) {
+        r.pendiente = Math.max(0, Number(r.debe ?? 0) - (pagosMap[r.ventaId] ?? 0))
+      }
+    })
+
     estado.value        = paged.content
     page.value          = 0
     totalElements.value = Math.max(0, Number(paged.totalElements || paged.content.length || 0))
@@ -652,6 +666,13 @@ const saldoFinal = computed(() => {
 })
 
 const deudaTotalActual = computed(() => {
+  // Si hay historial cargado, la suma de pendientes por venta es la fuente más exacta
+  // (evita el bug de inflación del endpoint /deuda cuando hay múltiples pagos por venta)
+  if (estadoUI.value.length) {
+    return estadoUI.value
+      .filter(r => r.origen === 'VENTA')
+      .reduce((sum, r) => sum + r.pendiente, 0)
+  }
   const apiDebt = Number(deuda.value?.deuda)
   if (Number.isFinite(apiDebt)) return Math.max(0, apiDebt)
   return Math.max(0, saldoFinal.value, totDebe.value - totHaber.value)

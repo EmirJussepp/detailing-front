@@ -60,6 +60,20 @@ function formatDateTime(v) {
   }
 }
 
+function formatDate(v) {
+  if (!v) return "—"
+  try {
+    return new Date(`${v}T12:00:00`).toLocaleDateString("es-AR", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    })
+  } catch {
+    return String(v)
+  }
+}
+
 function tipoPorConcepto(concepto) {
   if (concepto === "GASTO" || concepto === "RETIRO") return "EGRESO"
   if (concepto === "APORTE") return "INGRESO"
@@ -97,6 +111,9 @@ const saldoActual = ref(0)
 const movimientos = ref([])
 const cajaOtroTurnoAbierta = ref(null)
 const cerrandoOtroCaja = ref(false)
+
+const cajasAtrasadas = ref([])
+const cerrandoAtrasada = ref(null)
 
 const otroTurno = computed(() => selectedTurno.value === "MANIANA" ? "TARDE" : "MANIANA")
 const metodosPago = ref([])
@@ -396,7 +413,7 @@ async function loadMovimientos() {
     return
   }
 
-  const { data } = await movimientosCajaApi.porCajaId(caja.value.cajaId)
+  const { data } = await movimientosCajaApi.porCajaId(caja.value.cajaId, { size: 9999 })
   movimientos.value = Array.isArray(data)
     ? data
     : Array.isArray(data?.content)
@@ -483,6 +500,36 @@ async function cerrarOtraCaja() {
         errorMsg.value = pickError(e, `Error cerrando caja del turno ${turnoLabel(otroTurno.value)}.`)
       } finally {
         cerrandoOtroCaja.value = false
+      }
+    }
+  })
+}
+
+async function fetchCajasAtrasadas() {
+  try {
+    const { data } = await cajaApi.atrasadas()
+    cajasAtrasadas.value = Array.isArray(data) ? data : []
+  } catch {
+    cajasAtrasadas.value = []
+  }
+}
+
+async function cerrarCajaAtrasada(cajaAtrasada) {
+  if (cerrandoAtrasada.value === cajaAtrasada.cajaId) return
+  openConfirm({
+    title: `Cerrar caja ${turnoLabel(cajaAtrasada.turno)} del ${formatDate(cajaAtrasada.fecha)}`,
+    message: `¿Cerrás la caja que quedó abierta del turno ${turnoLabel(cajaAtrasada.turno)} del ${formatDate(cajaAtrasada.fecha)}?`,
+    variant: "warning",
+    onConfirm: async () => {
+      cerrandoAtrasada.value = cajaAtrasada.cajaId
+      try {
+        await cajaApi.cerrar(cajaAtrasada.cajaId, {})
+        cajasAtrasadas.value = cajasAtrasadas.value.filter(c => c.cajaId !== cajaAtrasada.cajaId)
+        okMsg.value = `Caja ${turnoLabel(cajaAtrasada.turno)} del ${formatDate(cajaAtrasada.fecha)} cerrada correctamente.`
+      } catch (e) {
+        errorMsg.value = pickError(e, "Error cerrando caja atrasada.")
+      } finally {
+        cerrandoAtrasada.value = null
       }
     }
   })
@@ -653,6 +700,7 @@ onMounted(async () => {
   if (canViewCaja.value) {
     await fetchMetodosPagoOnce()
     await refresh()
+    fetchCajasAtrasadas()
   } else {
     errorMsg.value = "No tenés permisos para acceder a Caja."
   }
@@ -701,6 +749,27 @@ onMounted(async () => {
         :disabled="cerrandoOtroCaja"
       >
         {{ cerrandoOtroCaja ? "Cerrando..." : `Cerrar turno ${turnoLabel(otroTurno)}` }}
+      </button>
+    </div>
+
+    <!-- Aviso: cajas de días anteriores sin cerrar -->
+    <div
+      v-for="cajaAtrasada in cajasAtrasadas"
+      :key="cajaAtrasada.cajaId"
+      class="alert-caja-pendiente mb-3 d-flex align-items-center justify-content-between gap-3 flex-wrap"
+    >
+      <div>
+        <strong>⚠️ Caja sin cerrar:</strong> quedó abierta la caja
+        <strong>{{ turnoLabel(cajaAtrasada.turno) }}</strong> del
+        <strong>{{ formatDate(cajaAtrasada.fecha) }}</strong>.
+      </div>
+      <button
+        v-if="canCerrarCajaPerm"
+        class="btn btn-sm btn-warning flex-shrink-0"
+        @click="cerrarCajaAtrasada(cajaAtrasada)"
+        :disabled="cerrandoAtrasada === cajaAtrasada.cajaId"
+      >
+        {{ cerrandoAtrasada === cajaAtrasada.cajaId ? "Cerrando..." : `Cerrar caja del ${formatDate(cajaAtrasada.fecha)}` }}
       </button>
     </div>
 
