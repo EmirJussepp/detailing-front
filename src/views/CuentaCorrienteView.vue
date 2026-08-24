@@ -567,7 +567,7 @@ async function fetchCuenta(clienteId) {
     // de Debe/Haber/Saldo y el export CSV sean siempre exactos, sin importar
     // cuántos movimientos tenga el cliente.
     const [rDeuda, rEstado] = await Promise.all([
-      cuentaCorrienteApi.deuda(clienteId),
+      cuentaCorrienteApi.deuda(clienteId).catch(() => ({ data: null })),
       cuentaCorrienteApi.estadoCuenta(clienteId, { page: 0, size: 9999 }),
     ])
 
